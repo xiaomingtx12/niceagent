@@ -1,3 +1,14 @@
+alembic==1.17.2
 Flask==3.1.2
+Flask_Migrate==4.1.0
+flask_sqlalchemy==3.1.1
+flask_wtf==1.2.2
 injector==0.23.0
+langchain==1.2.3
+langchain_community==0.4.1
+langchain_core==1.2.6
+pydantic==2.12.5
 python-dotenv==1.2.1
+PyYAML==6.0.3
+Requests==2.32.5
+WTForms==3.2.1

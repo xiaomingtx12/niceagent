@@ -5,17 +5,92 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
-      <change afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/exception/exception.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/app_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/response/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/response/http_code.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/response/response.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/entities/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/entities/openapi_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/entities/tool_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/providers/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/providers/api_provider_manager.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/builtin_category_manager.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/categories.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/image.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/other.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/search.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/tool.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/weather.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/category_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/provider_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/tool_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/builtin_provider_manager.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/_asset/icon.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/dalle3.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/dalle3.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/duckduckgo_search.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/duckduckgo_search.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/_asset/icon.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/gaode_weather.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/gaode_weather.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/google_serper.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/google_serper.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/current_time.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/current_time.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/wikipedia_search.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/wikipedia_search.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/extension/database_extension.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/extension/migrate_extension.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/api_tool_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/builtin_tool_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/lib/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/lib/helper.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/model/api_tool.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/api_tool_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/base_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/builtin_tool_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pkg/paginator/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pkg/paginator/paginator.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pkg/sqlalchemy/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/pkg/sqlalchemy/sqlalchemy.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test/internal/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/test/internal/handler/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/exception/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/exception/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app_schema.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
@@ -76,14 +151,17 @@
     &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;Shell Script.pipreqs.executor&quot;: &quot;Debug&quot;,
+    &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
+    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
+    &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/handler&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
   &quot;keyToStringList&quot;: {
@@ -93,11 +171,18 @@
   }
 }</component>
   <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\handler" />
+      <recent name="D:\spring_project\py\my-dify\internal\service" />
+      <recent name="D:\spring_project\py\my-dify\internal\schema" />
+      <recent name="D:\spring_project\py\my-dify\pkg" />
+      <recent name="D:\spring_project\py\my-dify\internal\lib" />
+    </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
     </key>
   </component>
-  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
+  <component name="RunManager" selected="Shell Script.db upgrade">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -113,29 +198,6 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="test" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="my-dify" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -162,6 +224,36 @@
       <option name="launchJavascriptDebuger" value="false" />
       <method v="2" />
     </configuration>
+    <configuration name="db migrate" type="ShConfigurationType">
+      <option name="SCRIPT_TEXT" value="flask --app app.http.app db migrate" />
+      <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+      <option name="SCRIPT_PATH" value="" />
+      <option name="SCRIPT_OPTIONS" value="" />
+      <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+      <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+      <option name="INTERPRETER_PATH" value="powershell.exe" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="EXECUTE_IN_TERMINAL" value="true" />
+      <option name="EXECUTE_SCRIPT_FILE" value="false" />
+      <envs />
+      <method v="2" />
+    </configuration>
+    <configuration name="db upgrade" type="ShConfigurationType">
+      <option name="SCRIPT_TEXT" value="flask --app app.http.app db upgrade" />
+      <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
+      <option name="SCRIPT_PATH" value="" />
+      <option name="SCRIPT_OPTIONS" value="" />
+      <option name="INDEPENDENT_SCRIPT_WORKING_DIRECTORY" value="true" />
+      <option name="SCRIPT_WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="INDEPENDENT_INTERPRETER_PATH" value="true" />
+      <option name="INTERPRETER_PATH" value="powershell.exe" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="EXECUTE_IN_TERMINAL" value="true" />
+      <option name="EXECUTE_SCRIPT_FILE" value="false" />
+      <envs />
+      <method v="2" />
+    </configuration>
     <configuration name="pipreqs" type="ShConfigurationType">
       <option name="SCRIPT_TEXT" value="pipreqs --encoding=utf-8 --ignore .venv --force" />
       <option name="INDEPENDENT_SCRIPT_PATH" value="true" />
@@ -180,12 +272,12 @@
     <list>
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.main" />
-      <item itemvalue="Python.test" />
+      <item itemvalue="Shell Script.db migrate" />
+      <item itemvalue="Shell Script.db upgrade" />
       <item itemvalue="Shell Script.pipreqs" />
     </list>
     <recent_temporary>
       <list>
-        <item itemvalue="Python.test" />
         <item itemvalue="Python.main" />
       </list>
     </recent_temporary>
@@ -208,7 +300,13 @@
       <updated>1766130060245</updated>
       <workItem from="1766654837934" duration="724000" />
       <workItem from="1766655613030" duration="7422000" />
-      <workItem from="1766740401526" duration="2717000" />
+      <workItem from="1766740401526" duration="9658000" />
+      <workItem from="1766826501534" duration="6369000" />
+      <workItem from="1767424100884" duration="241000" />
+      <workItem from="1767424369129" duration="2853000" />
+      <workItem from="1767429198761" duration="1224000" />
+      <workItem from="1767949195217" duration="472000" />
+      <workItem from="1767962109710" duration="13255000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -218,17 +316,37 @@
       <option name="project" value="LOCAL" />
       <updated>1766658475299</updated>
     </task>
-    <option name="localTasksCounter" value="2" />
+    <task id="LOCAL-00002" summary="新功能: 项目异常初始化">
+      <option name="closed" value="true" />
+      <created>1766747692236</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1766747692236</updated>
+    </task>
+    <option name="localTasksCounter" value="3" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
   </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
+  </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="新功能: 项目目录结构初始化" />
-    <option name="LAST_COMMIT_MESSAGE" value="新功能: 项目目录结构初始化" />
+    <MESSAGE value="新功能: 项目异常初始化" />
+    <option name="LAST_COMMIT_MESSAGE" value="新功能: 项目异常初始化" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1766659607156" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1767973107100" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>
