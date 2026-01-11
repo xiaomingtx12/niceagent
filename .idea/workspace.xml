@@ -4,98 +4,46 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
-      <change afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/entities/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/entities/openapi_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/entities/tool_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/providers/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/api_tools/providers/api_provider_manager.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/builtin_category_manager.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/categories.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/image.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/other.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/search.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/tool.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/categories/icons/weather.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/category_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/provider_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/tool_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/builtin_provider_manager.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/_asset/icon.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/dalle3.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/dalle3.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dalle/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/_asset/icon.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/duckduckgo_search.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/duckduckgo_search.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/_asset/icon.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/gaode_weather.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/gaode_weather.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/_asset/icon.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/google_serper.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/google_serper.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/google/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/_asset/icon.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/current_time.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/current_time.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/time/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/_asset/icon.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/wikipedia_search.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/wikipedia_search.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/extension/database_extension.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/extension/migrate_extension.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/api_tool_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/builtin_tool_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/lib/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/lib/helper.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/model/api_tool.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/api_tool_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/base_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/builtin_tool_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/paginator/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/paginator/paginator.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/sqlalchemy/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/sqlalchemy/sqlalchemy.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test/internal/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test/internal/handler/__init__.py" afterDir="false" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理">
+      <change afterPath="$PROJECT_DIR$/internal/core/file_extractor/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/file_extractor/file_extractor.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/dataset_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/jieba_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/upload_file_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/extension/celery_extension.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/extension/logging_extension.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/extension/redis_extension.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/dataset_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/model/dataset.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/model/upload_file.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/dataset_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/document_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/upload_file_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/cos_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/dataset_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/embeddings_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/jieba_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/upload_file_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/vector_database_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/schema.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -155,28 +103,29 @@
     &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
     &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/handler&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;terminal&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
   &quot;keyToStringList&quot;: {
     &quot;DatabaseDriversLRU&quot;: [
+      &quot;redis&quot;,
       &quot;postgresql&quot;
     ]
   }
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\core" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
+      <recent name="D:\spring_project\py\my-dify\internal\extension" />
       <recent name="D:\spring_project\py\my-dify\internal\service" />
       <recent name="D:\spring_project\py\my-dify\internal\schema" />
-      <recent name="D:\spring_project\py\my-dify\pkg" />
-      <recent name="D:\spring_project\py\my-dify\internal\lib" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -306,7 +255,17 @@
       <workItem from="1767424369129" duration="2853000" />
       <workItem from="1767429198761" duration="1224000" />
       <workItem from="1767949195217" duration="472000" />
-      <workItem from="1767962109710" duration="13255000" />
+      <workItem from="1767962109710" duration="13577000" />
+      <workItem from="1767977387819" duration="9000" />
+      <workItem from="1767977413229" duration="441000" />
+      <workItem from="1768030139380" duration="53000" />
+      <workItem from="1768030205472" duration="18000" />
+      <workItem from="1768030371576" duration="473000" />
+      <workItem from="1768030869796" duration="6949000" />
+      <workItem from="1768059328376" duration="238000" />
+      <workItem from="1768059575962" duration="1855000" />
+      <workItem from="1768061564095" duration="27000" />
+      <workItem from="1768128742800" duration="7004000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -324,7 +283,15 @@
       <option name="project" value="LOCAL" />
       <updated>1766747692236</updated>
     </task>
-    <option name="localTasksCounter" value="3" />
+    <task id="LOCAL-00003" summary="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理">
+      <option name="closed" value="true" />
+      <created>1767975868324</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1767975868324</updated>
+    </task>
+    <option name="localTasksCounter" value="4" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -344,9 +311,10 @@
   <component name="VcsManagerConfiguration">
     <MESSAGE value="新功能: 项目目录结构初始化" />
     <MESSAGE value="新功能: 项目异常初始化" />
-    <option name="LAST_COMMIT_MESSAGE" value="新功能: 项目异常初始化" />
+    <MESSAGE value="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1767973107100" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1768139925649" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
 </project>

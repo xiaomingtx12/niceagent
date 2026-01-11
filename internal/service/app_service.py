@@ -34,7 +34,7 @@ class AppService:
     def update_app(self, id: uuid.UUID) -> App:
         with self.db.auto_commit():
             app = self.get_app(id)
-            app.name = "慕课聊天机器人"
+            app.name = "聊天机器人"
         return app
 
     def delete_app(self, id: uuid.UUID) -> App:
