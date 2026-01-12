@@ -1,3 +1,4 @@
+import hashlib
 import os
 from dataclasses import dataclass
 
@@ -33,10 +34,16 @@ class EmbeddingsService:
         self._embeddings = DashScopeEmbeddings(
             model="text-embedding-v1", dashscope_api_key=os.getenv("DASHSCOPE_API_KEY")
         )
+
+        # 🔥 修复 SHA-1 警告：使用 BLAKE2b (更快、更安全)
+        def blake2b_key_encoder(text: str) -> str:
+            return hashlib.blake2b(text.encode(), digest_size=32).hexdigest()
+
         self._cache_backed_embeddings = CacheBackedEmbeddings.from_bytes_store(
             self._embeddings,
             self._store,
-            namespace="embeddings",
+            # namespace="embeddings",
+            key_encoder=blake2b_key_encoder,
         )
 
     @classmethod

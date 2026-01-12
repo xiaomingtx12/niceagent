@@ -4,42 +4,44 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理">
-      <change afterPath="$PROJECT_DIR$/internal/core/file_extractor/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/file_extractor/file_extractor.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/entity/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/entity/dataset_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/entity/jieba_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/entity/upload_file_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/extension/celery_extension.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/extension/logging_extension.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/extension/redis_extension.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/dataset_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/model/dataset.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/model/upload_file.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/dataset_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/document_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/upload_file_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/cos_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/dataset_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/embeddings_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/jieba_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/upload_file_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/vector_database_service.py" afterDir="false" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/internal/core/memory/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/memory/token_buffer_memory.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/retrievers/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/retrievers/full_text_retriever.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/retrievers/semantic_retriever.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/account_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/cache_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/conversation_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/document_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/segment_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/model/account.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/model/conversation.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/segment_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/document_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/indexing_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/keyword_table_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/process_rule_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/retrieval_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/segment_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/task/dataset_task.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/task/document_task.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/my-dify.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/my-dify.iml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/duckduckgo/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/wikipedia/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/entity/dataset_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/dataset_entity.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/dataset_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/dataset_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/lib/helper.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/lib/helper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/dataset_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/dataset_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/document_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/document_schema.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/dataset_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/dataset_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/embeddings_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/embeddings_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
@@ -103,12 +105,16 @@
     &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
     &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
     &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/handler&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
     &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
     &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
+    &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
+    &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
     &quot;settings.editor.selected.configurable&quot;: &quot;terminal&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
@@ -121,11 +127,11 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="D:\spring_project\py\my-dify\internal\core" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
-      <recent name="D:\spring_project\py\my-dify\internal\extension" />
+      <recent name="D:\spring_project\py\my-dify\internal\core" />
+      <recent name="D:\spring_project\py\my-dify\internal\entity" />
+      <recent name="D:\spring_project\py\my-dify\internal\model" />
       <recent name="D:\spring_project\py\my-dify\internal\service" />
-      <recent name="D:\spring_project\py\my-dify\internal\schema" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -164,9 +170,8 @@
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <option name="SDK_HOME" value="" />
-      <option name="SDK_NAME" value="Python 3.13 (my-dify)" />
       <option name="WORKING_DIRECTORY" value="" />
-      <option name="IS_MODULE_SDK" value="false" />
+      <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
@@ -219,17 +224,12 @@
       <method v="2" />
     </configuration>
     <list>
-      <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.main" />
+      <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.db upgrade" />
       <item itemvalue="Shell Script.pipreqs" />
     </list>
-    <recent_temporary>
-      <list>
-        <item itemvalue="Python.main" />
-      </list>
-    </recent_temporary>
   </component>
   <component name="SharedIndexes">
     <attachedChunks>
@@ -265,7 +265,11 @@
       <workItem from="1768059328376" duration="238000" />
       <workItem from="1768059575962" duration="1855000" />
       <workItem from="1768061564095" duration="27000" />
-      <workItem from="1768128742800" duration="7004000" />
+      <workItem from="1768128742800" duration="8814000" />
+      <workItem from="1768226769958" duration="4968000" />
+      <workItem from="1768231781645" duration="201000" />
+      <workItem from="1768232005943" duration="327000" />
+      <workItem from="1768232693569" duration="557000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -291,7 +295,15 @@
       <option name="project" value="LOCAL" />
       <updated>1767975868324</updated>
     </task>
-    <option name="localTasksCounter" value="4" />
+    <task id="LOCAL-00004" summary="feat(dataset): 添加知识库管理相关模块及腾讯云COS文件存储支持&#10;&#10;- 新增知识库相关数据库模型，包括 Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule 及 AppDatasetJoin&#10;- 新增 DatasetHandler 处理REST API请求，实现知识库创建、查询、更新及分页列表功能&#10;- 新增 DatasetService 提供业务逻辑支持，实现知识库增删改查及分页查询&#10;- 新增相关 Marshmallow 和 FlaskForm 验证和序列化Schema，保证数据校验和响应格式&#10;- 新增默认知识库描述格式化文本常量，补全描述信息逻辑&#10;- 新增文件提取器 FileExtractor，支持从腾讯云COS下载文件并解析为文本或文档列表&#10;- 新增腾讯云COS对象存储服务 CosService，支持文件上传、下载及访问URL生成&#10;- 新增文本嵌入模型服务 EmbeddingsService，集成Redis缓存及DashScope嵌入模型&#10;- 添加Celery初始化及Redis配置，支持异步任务处理&#10;- 更新依赖注入和模块导入，完善upload_file相关模型和服务&#10;- 调整部分代码样式和文档注释，移除无用头部注释，提高代码整洁度">
+      <option name="closed" value="true" />
+      <created>1768140304702</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1768140304702</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -312,9 +324,18 @@
     <MESSAGE value="新功能: 项目目录结构初始化" />
     <MESSAGE value="新功能: 项目异常初始化" />
     <MESSAGE value="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(api): 实现自定义API工具全栈支持&#10;&#10;- 新增ApiToolProvider和ApiTool数据库模型，实现自定义API工具存储&#10;- 实现ApiProviderManager，支持根据工具配置生成动态LangChain工具&#10;- 完成ApiToolService业务逻辑，包括增删改查及OpenAPI规范校验&#10;- 提供ApiToolHandler接口，实现API工具管理的HTTP层处理&#10;- 定义相关请求响应Schema，实现参数校验及数据格式转换&#10;- 添加内置工具管理相关模块及工具分类管理，支持内置服务提供者加载&#10;- 实现App模型及对应服务和处理器，新增基础应用管理及聊天接口&#10;- 集成数据库SQLAlchemy及迁移支持，完善依赖注入模块配置&#10;- 统一导入导出多个模块，优化代码结构与模块依赖管理" />
+    <MESSAGE value="feat(dataset): 添加知识库管理相关模块及腾讯云COS文件存储支持&#10;&#10;- 新增知识库相关数据库模型，包括 Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule 及 AppDatasetJoin&#10;- 新增 DatasetHandler 处理REST API请求，实现知识库创建、查询、更新及分页列表功能&#10;- 新增 DatasetService 提供业务逻辑支持，实现知识库增删改查及分页查询&#10;- 新增相关 Marshmallow 和 FlaskForm 验证和序列化Schema，保证数据校验和响应格式&#10;- 新增默认知识库描述格式化文本常量，补全描述信息逻辑&#10;- 新增文件提取器 FileExtractor，支持从腾讯云COS下载文件并解析为文本或文档列表&#10;- 新增腾讯云COS对象存储服务 CosService，支持文件上传、下载及访问URL生成&#10;- 新增文本嵌入模型服务 EmbeddingsService，集成Redis缓存及DashScope嵌入模型&#10;- 添加Celery初始化及Redis配置，支持异步任务处理&#10;- 更新依赖注入和模块导入，完善upload_file相关模型和服务&#10;- 调整部分代码样式和文档注释，移除无用头部注释，提高代码整洁度" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(dataset): 添加知识库管理相关模块及腾讯云COS文件存储支持&#10;&#10;- 新增知识库相关数据库模型，包括 Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule 及 AppDatasetJoin&#10;- 新增 DatasetHandler 处理REST API请求，实现知识库创建、查询、更新及分页列表功能&#10;- 新增 DatasetService 提供业务逻辑支持，实现知识库增删改查及分页查询&#10;- 新增相关 Marshmallow 和 FlaskForm 验证和序列化Schema，保证数据校验和响应格式&#10;- 新增默认知识库描述格式化文本常量，补全描述信息逻辑&#10;- 新增文件提取器 FileExtractor，支持从腾讯云COS下载文件并解析为文本或文档列表&#10;- 新增腾讯云COS对象存储服务 CosService，支持文件上传、下载及访问URL生成&#10;- 新增文本嵌入模型服务 EmbeddingsService，集成Redis缓存及DashScope嵌入模型&#10;- 添加Celery初始化及Redis配置，支持异步任务处理&#10;- 更新依赖注入和模块导入，完善upload_file相关模型和服务&#10;- 调整部分代码样式和文档注释，移除无用头部注释，提高代码整洁度" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1768139925649" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1768232597252" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+  </component>
+  <component name="github-copilot-workspace">
+    <instructionFileLocations>
+      <option value=".github/instructions" />
+    </instructionFileLocations>
+    <promptFileLocations>
+      <option value=".github/prompts" />
+    </promptFileLocations>
   </component>
 </project>

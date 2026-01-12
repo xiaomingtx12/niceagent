@@ -19,7 +19,7 @@ marshmallow>=3.18.0,<4.0.0
 pydantic==2.12.5
 python-dotenv==1.2.1
 PyYAML==6.0.3
-redis==7.1.0
+redis>=5.2.0,<7.0.0
 Requests==2.32.5
 tiktoken==0.12.0
 weaviate_client==4.19.2

@@ -1,5 +1,5 @@
 from flask_migrate import Migrate
-from injector import Module, Binder
+from injector import Module, Binder, Injector
 from redis import Redis
 
 from internal.extension.database_extension import db
@@ -15,3 +15,6 @@ class ExtensionModule(Module):
         binder.bind(SQLAlchemy, to=db)
         binder.bind(Migrate, to=migrate)
         binder.bind(Redis, to=redis_client)
+
+
+injector = Injector([ExtensionModule])
