@@ -4,6 +4,7 @@ cos_python_sdk_v5==1.9.41
 einops==0.8.1
 Flask==3.1.2
 flask_cors==6.0.2
+Flask_Login==0.6.3
 Flask_Migrate==4.1.0
 flask_sqlalchemy==3.1.1
 flask_wtf==1.2.2
@@ -20,6 +21,8 @@ langgraph==1.0.6
 marshmallow==4.2.0
 numpy==2.4.1
 pydantic==2.12.5
+PyJWT==2.10.1
+PyJWT==2.10.1
 python-dotenv==1.2.1
 PyYAML==6.0.3
 Requests==2.32.5

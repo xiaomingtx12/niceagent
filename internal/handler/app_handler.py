@@ -2,6 +2,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict
 
+from flask_login import login_required
 from injector import inject
 from langchain.chat_models import init_chat_model
 from langchain_classic.base_memory import BaseMemory
@@ -22,19 +23,23 @@ class AppHandler(object):
 
     app_service: AppService
 
+    @login_required
     def create_app(self):
         """调用服务创建新的APP记录"""
         app = self.app_service.create_app()
         return success_message(f"应用已经成功创建，id为{app.id}")
 
+    @login_required
     def get_app(self, id: uuid.UUID):
         app = self.app_service.get_app(id)
         return success_message(f"应用已经成功获取，名字是{app.name}")
 
+    @login_required
     def update_app(self, id: uuid.UUID):
         app = self.app_service.update_app(id)
         return success_message(f"应用已经成功修改，修改的名字是:{app.name}")
 
+    @login_required
     def delete_app(self, id: uuid.UUID):
         app = self.app_service.delete_app(id)
         return success_message(f"应用已经成功删除，id为:{app.id}")

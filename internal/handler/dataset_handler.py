@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from flask import request
+from flask_login import login_required
 from injector import inject
 
 from internal.core.file_extractor import FileExtractor
@@ -38,6 +39,7 @@ class DatasetHandler:
     db: SQLAlchemy
     vector_database_service: VectorDatabaseService
 
+    @login_required
     def hit(self, dataset_id: UUID):
         """根据传递的知识库id+检索参数执行召回测试"""
         # 1.提取数据并校验
@@ -50,12 +52,14 @@ class DatasetHandler:
 
         return success_json(hit_result)
 
+    @login_required
     def get_dataset_queries(self, dataset_id: UUID):
         """根据传递的知识库id获取最近的10条查询记录"""
         dataset_queries = self.dataset_service.get_dataset_queries(dataset_id)
         resp = GetDatasetQueriesResp(many=True)
         return success_json(resp.dump(dataset_queries))
 
+    @login_required
     def embeddings_query(self):
         upload_file = self.db.session.query(UploadFile).get(
             "0092971c-1f1f-4a1e-a7bd-4aac5f2c6991"
@@ -66,6 +70,7 @@ class DatasetHandler:
         # keywords = self.jieba_service.extract_keywords(query)
         # return success_json({"keywords": keywords})
 
+    @login_required
     def create_dataset(self):
         """创建知识库"""
         # 1.提取请求并校验
@@ -79,6 +84,7 @@ class DatasetHandler:
         # 3.返回成功调用提示
         return success_message("创建知识库成功")
 
+    @login_required
     def get_dataset(self, dataset_id: UUID):
         """根据传递的知识库id获取详情"""
         dataset = self.dataset_service.get_dataset(dataset_id)
@@ -86,6 +92,7 @@ class DatasetHandler:
 
         return success_json(resp.dump(dataset))
 
+    @login_required
     def update_dataset(self, dataset_id: UUID):
         """根据传递的知识库id+信息更新知识库"""
         # 1.提取请求并校验
@@ -99,6 +106,7 @@ class DatasetHandler:
         # 3.返回成功调用提示
         return success_message("更新知识库成功")
 
+    @login_required
     def get_datasets_with_page(self):
         """获取知识库分页+搜索列表数据"""
         # 1.提取query数据并校验
@@ -114,6 +122,7 @@ class DatasetHandler:
 
         return success_json(PageModel(list=resp.dump(datasets), paginator=paginator))
 
+    @login_required
     def delete_dataset(self, dataset_id: UUID):
         """根据传递的知识库id删除知识库"""
         self.dataset_service.delete_dataset(dataset_id)

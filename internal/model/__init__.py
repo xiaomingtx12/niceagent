@@ -1,3 +1,4 @@
+from .account import Account, AccountOAuth
 from .api_tool import ApiTool, ApiToolProvider
 from .app import App
 from .conversation import Message, Conversation, MessageAgentThought
@@ -18,4 +19,6 @@ __all__ = [
     "Conversation",
     "Message",
     "MessageAgentThought",
+    "Account",
+    "AccountOAuth"
 ]

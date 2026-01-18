@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from flask import request
+from flask_login import login_required
 from injector import inject
 
 from internal.schema.document_schema import (
@@ -25,6 +26,7 @@ class DocumentHandler:
 
     document_service: DocumentService
 
+    @login_required
     def create_documents(self, dataset_id: UUID):
         """知识库新增/上传文档列表"""
         # 1.提取请求并校验
@@ -42,6 +44,7 @@ class DocumentHandler:
 
         return success_json(resp.dump((documents, batch)))
 
+    @login_required
     def get_document(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id获取文档详情信息"""
         document = self.document_service.get_document(dataset_id, document_id)
@@ -50,6 +53,7 @@ class DocumentHandler:
 
         return success_json(resp.dump(document))
 
+    @login_required
     def update_document_name(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id更新对应文档的名称信息"""
         # 1.提取请求并校验数据
@@ -64,6 +68,7 @@ class DocumentHandler:
 
         return success_message("更新文档名称成功")
 
+    @login_required
     def update_document_enabled(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id更新指定文档的启用状态"""
         # 1.提取请求并校验
@@ -78,12 +83,14 @@ class DocumentHandler:
 
         return success_message("更改文档启用状态成功")
 
+    @login_required
     def delete_document(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id删除指定的文档信息"""
         self.document_service.delete_document(dataset_id, document_id)
 
         return success_message("删除文档成功")
 
+    @login_required
     def get_documents_with_page(self, dataset_id: UUID):
         """根据传递的知识库id获取文档分页列表数据"""
         # 1.提取请求数据并校验
@@ -101,6 +108,7 @@ class DocumentHandler:
 
         return success_json(PageModel(list=resp.dump(documents), paginator=paginator))
 
+    @login_required
     def get_documents_status(self, dataset_id: UUID, batch: str):
         """根据传递的知识库id+批处理标识获取文档的状态"""
         documents_status = self.document_service.get_documents_status(dataset_id, batch)
