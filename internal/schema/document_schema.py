@@ -25,7 +25,7 @@ class CreateDocumentsReq(FlaskForm):
         "process_type",
         validators=[
             DataRequired("文件处理类型不能为空"),
-            AnyOf(values=["automic", "custom"], message="处理类型格式错误"),
+            AnyOf(values=["automatic", "custom"], message="处理类型格式错误"),
         ],
     )
     rule = DictField(
