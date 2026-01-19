@@ -1,19 +1,27 @@
-import uuid
 from dataclasses import dataclass
-from typing import Any, Dict
+from uuid import UUID
 
-from flask_login import login_required
+from flask import request
+from flask_login import login_required, current_user
 from injector import inject
-from langchain.chat_models import init_chat_model
-from langchain_classic.base_memory import BaseMemory
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tracers import Run
 
-from config.config import _get_env
 from internal.exception import FailException
-from internal.schema.app_schema import CompletionReq
-from internal.service import AppService
+from internal.schema.app_schema import (
+    CreateAppReq,
+    GetAppResp,
+    FallbackHistoryToDraftReq,
+    GetPublishHistoriesWithPageReq,
+    GetPublishHistoriesWithPageResp,
+    UpdateDebugConversationSummaryReq,
+    DebugChatReq,
+)
+from internal.service import AppService, RetrievalService
+from pkg.paginator import PageModel
 from pkg.response import success_message, validate_error_json, success_json
+
+
+def compact_generate_response(response):
+    pass
 
 
 @inject
@@ -22,71 +30,130 @@ class AppHandler(object):
     """应用控制器"""
 
     app_service: AppService
+    retrieval_service: RetrievalService
 
     @login_required
     def create_app(self):
         """调用服务创建新的APP记录"""
-        app = self.app_service.create_app()
-        return success_message(f"应用已经成功创建，id为{app.id}")
-
-    @login_required
-    def get_app(self, id: uuid.UUID):
-        app = self.app_service.get_app(id)
-        return success_message(f"应用已经成功获取，名字是{app.name}")
-
-    @login_required
-    def update_app(self, id: uuid.UUID):
-        app = self.app_service.update_app(id)
-        return success_message(f"应用已经成功修改，修改的名字是:{app.name}")
-
-    @login_required
-    def delete_app(self, id: uuid.UUID):
-        app = self.app_service.delete_app(id)
-        return success_message(f"应用已经成功删除，id为:{app.id}")
-
-    @classmethod
-    def _load_memory_variables(
-        cls, input: Dict[str, Any], config: RunnableConfig
-    ) -> Dict[str, Any]:
-        """加载记忆变量信息"""
-        configurable = config.get("configurable", {})
-        configurable_memory = configurable.get("memory", None)
-        if configurable_memory is not None and isinstance(
-            configurable_memory, BaseMemory
-        ):
-            return configurable_memory.load_memory_variables(input)
-        return {"history": []}
-
-    @classmethod
-    def _save_context(cls, run_obj: Run, config: RunnableConfig) -> None:
-        """存储对应的上下文信息到记忆实体中"""
-        configurable = config.get("configurable", {})
-        configurable_memory = configurable.get("memory", None)
-        if configurable_memory is not None and isinstance(
-            configurable_memory, BaseMemory
-        ):
-            configurable_memory.save_context(run_obj.inputs, run_obj.outputs)
-
-    def debug(self, app_id: uuid.UUID):
-        """聊天接口"""
-        # 1.提取从接口中获取的输入，POST
-        req = CompletionReq()
+        req = CreateAppReq()
         if not req.validate():
             return validate_error_json(req.errors)
-        # 初始化模型
-        # 格式：init_chat_model("提供商:模型名称")
-        model = init_chat_model(
-            "groq:llama-3.3-70b-versatile",  # Groq 提供的 Llama 3.3 模型
-            api_key=_get_env("GROQ_API_KEY"),
+
+        # 2.调用服务创建应用信息
+        app = self.app_service.create_app(req, current_user)
+
+        # 3.返回创建成功响应提示
+        return success_json({"id": app.id})
+
+    @login_required
+    def get_app(self, app_id: UUID):
+        app = self.app_service.get_app(app_id, current_user)
+        resp = GetAppResp()
+        return success_json(resp.dump(app))
+
+    @login_required
+    def get_draft_app_config(self, app_id: UUID):
+        """根据传递的应用id获取应用的最新草稿配置"""
+        draft_config = self.app_service.get_draft_app_config(app_id, current_user)
+        return success_json(draft_config)
+
+    @login_required
+    def update_draft_app_config(self, app_id: UUID):
+        """根据传递的应用id+草稿配置更新应用的最新草稿配置"""
+        # 1.获取草稿请求json数据
+        draft_app_config = request.get_json(force=True, silent=True) or {}
+
+        # 2.调用服务更新应用的草稿配置
+        self.app_service.update_draft_app_config(app_id, draft_app_config, current_user)
+
+        return success_message("更新应用草稿配置成功")
+
+    @login_required
+    def publish(self, app_id: UUID):
+        """根据传递的应用id发布/更新特定的草稿配置信息"""
+        self.app_service.publish_draft_app_config(app_id, current_user)
+        return success_message("发布/更新应用配置成功")
+
+    @login_required
+    def cancel_publish(self, app_id: UUID):
+        """根据传递的应用id，取消发布指定的应用配置信息"""
+        self.app_service.cancel_publish_app_config(app_id, current_user)
+        return success_message("取消发布应用配置成功")
+
+    @login_required
+    def fallback_history_to_draft(self, app_id: UUID):
+        """根据传递的应用id+历史配置版本id，退回指定版本到草稿中"""
+        # 1.提取数据并校验
+        req = FallbackHistoryToDraftReq()
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        # 2.调用服务回退指定版本到草稿
+        self.app_service.fallback_history_to_draft(
+            app_id, req.app_config_version_id.data, current_user
         )
-        # 使用实际的查询，如果请求体中有query参数
-        query_text = (
-            req.query.data
-            if hasattr(req, "query") and req.query.data
-            else "解释一下什么是递归？用一句话。"
+
+        return success_message("回退历史配置至草稿成功")
+
+    @login_required
+    def get_publish_histories_with_page(self, app_id: UUID):
+        """根据传递的应用id，获取应用发布历史列表"""
+        # 1.获取请求数据并校验
+        req = GetPublishHistoriesWithPageReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        # 2.调用服务获取分页列表数据
+        app_config_versions, paginator = (
+            self.app_service.get_publish_histories_with_page(app_id, req, current_user)
         )
-        response = model.stream(query_text)
-        return success_json({"response": str(response)})
+
+        # 3.创建响应结构并返回
+        resp = GetPublishHistoriesWithPageResp(many=True)
+
+        return success_json(
+            PageModel(list=resp.dump(app_config_versions), paginator=paginator)
+        )
+
+    @login_required
+    def get_debug_conversation_summary(self, app_id: UUID):
+        """根据传递的应用id获取调试会话长期记忆"""
+        summary = self.app_service.get_debug_conversation_summary(app_id, current_user)
+        return success_json({"summary": summary})
+
+    @login_required
+    def update_debug_conversation_summary(self, app_id: UUID):
+        """根据传递的应用id+摘要信息更新调试会话长期记忆"""
+        # 1.提取数据并校验
+        req = UpdateDebugConversationSummaryReq()
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        # 2.调用服务更新调试会话长期记忆
+        self.app_service.update_debug_conversation_summary(
+            app_id, req.summary.data, current_user
+        )
+
+        return success_message("更新AI应用长期记忆成功")
+
+    @login_required
+    def delete_debug_conversation(self, app_id: UUID):
+        """根据传递的应用id，清空该应用的调试会话记录"""
+        self.app_service.delete_debug_conversation(app_id, current_user)
+        return success_message("清空应用调试会话记录成功")
+
+    @login_required
+    def debug_chat(self, app_id: UUID):
+        """根据传递的应用id+query，发起调试对话"""
+        # 1.提取数据并校验数据
+        req = DebugChatReq()
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        # 2.调用服务发起会话调试
+        response = self.app_service.debug_chat(app_id, req.query.data, current_user)
+
+        return compact_generate_response(response)
 
     def ping(self):
         raise FailException("数据未找到")

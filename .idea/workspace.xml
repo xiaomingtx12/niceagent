@@ -4,39 +4,22 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(agent): 新增智能体基础结构及函数调用智能体实现&#10;&#10;- 新增AgentConfig和AgentState数据模型，支持智能体配置管理和状态跟踪&#10;- 实现BaseAgent抽象基类，定义智能体通用接口&#10;- 实现FunctionCallAgent，基于函数调用的智能体运行流程和状态图编译&#10;- 添加AgentQueueManager，管理智能体任务队列及Redis缓存标记&#10;- 定义智能体队列事件模型及事件类型枚举&#10;- 修正document_schema中process_type字段的默认值拼写错误&#10;- 更新requirements.txt，引入新依赖及版本升级，支持LangChain及相关组件&#10;- 新增agents包__init__.py，统一导出基础智能体和函数调用智能体接口">
-      <change afterPath="$PROJECT_DIR$/internal/extension/login_extension.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/account_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/auth_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/oauth_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/middleware/middleware.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/account_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/auth_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/oauth_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/account_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/jwt_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/oauth_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/oauth/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/oauth/github_oauth.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/oauth/oauth.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/password/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/pkg/password/password.py" afterDir="false" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(app): 实现应用配置与调试会话功能&#10;&#10;- 新增应用配置模型AppConfig及其版本历史表AppConfigVersion&#10;- 扩展App模型，支持关联发布配置、草稿配置与调试会话&#10;- 提供草稿配置自动创建与访问属性&#10;- 实现应用草稿配置的增删改查及发布、取消发布功能&#10;- 管理应用关联的知识库与工具数据的校验和同步&#10;- 支持应用发布历史记录的分页查询及历史版本回退功能&#10;- 实现调试会话的长期记忆获取、更新和清空接口&#10;- 提供基于草稿配置的调试对话接口，支持多模型调用扩展&#10;- 增加对应请求响应的Schema定义及参数校验&#10;- 优化AppHandler，完整实现应用相关接口并加入用户权限验证">
+      <change afterPath="$PROJECT_DIR$/internal/entity/app_entity.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/api_tool_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/api_tool_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/agent_queue_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/agent_queue_manager.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/queue_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/queue_entity.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/builtin_tool_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/builtin_tool_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/dataset_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/dataset_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/document_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/document_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/segment_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/segment_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/middleware/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/middleware/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/lib/helper.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/lib/helper.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -68,6 +51,11 @@
     <option name="myRunOnSave" value="true" />
   </component>
   <component name="Git.Settings">
+    <option name="RECENT_BRANCH_BY_REPOSITORY">
+      <map>
+        <entry key="$PROJECT_DIR$" value="master" />
+      </map>
+    </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
   <component name="OptimizeOnSaveOptions">
@@ -84,49 +72,50 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Flask 服务器.Flask (app/http/app.py).executor&quot;: &quot;Run&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Notification.DisplayName-DoNotAsk-Black action on save file ignored&quot;: &quot;Black action on save file ignored&quot;,
-    &quot;Notification.DoNotAsk-Black action on save file ignored&quot;: &quot;true&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;Shell Script.celery.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/handler&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Flask 服务器.Flask (app/http/app.py).executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
+    "Notification.DoNotAsk-Black action on save file ignored": "true",
+    "Python.main.executor": "Run",
+    "Python.test.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "Shell Script.celery.executor": "Run",
+    "Shell Script.db migrate.executor": "Run",
+    "Shell Script.db upgrade.executor": "Run",
+    "Shell Script.pipreqs.executor": "Run",
+    "git-widget-placeholder": "app-debug",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/spring_project/py/my-dify/internal/entity",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "模块",
+    "project.structure.proportion": "0.15332031",
+    "project.structure.side.proportion": "0.41965318",
+    "settings.editor.selected.configurable": "editor.preferences.import",
+    "typescript.add.unambiguous.imports.on.the.fly": "true",
+    "vue.rearranger.settings.migration": "true"
   },
-  &quot;keyToStringList&quot;: {
-    &quot;DatabaseDriversLRU&quot;: [
-      &quot;redis&quot;,
-      &quot;postgresql&quot;
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "redis",
+      "postgresql"
     ]
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\entity" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
       <recent name="D:\spring_project\py\my-dify\internal\extension" />
       <recent name="D:\spring_project\py\my-dify\internal\schema" />
       <recent name="D:\spring_project\py\my-dify\internal\service" />
-      <recent name="D:\spring_project\py\my-dify\internal\middleware" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -250,8 +239,8 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-jdk-9823dce3aa75-bf35d07a577b-intellij.indexing.shared.core-IU-252.26199.169" />
-        <option value="bundled-js-predefined-d6986cc7102b-9c94529fcfe0-JavaScript-IU-252.26199.169" />
+        <option value="bundled-js-predefined-d6986cc7102b-9c94529fcfe0-JavaScript-PY-252.26199.168" />
+        <option value="bundled-python-sdk-b3d66beaba9a-c6efb3732140-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-252.26199.168" />
       </set>
     </attachedChunks>
   </component>
@@ -290,6 +279,7 @@
       <workItem from="1768288099227" duration="5215000" />
       <workItem from="1768562247305" duration="7486000" />
       <workItem from="1768732827155" duration="12000" />
+      <workItem from="1768817290139" duration="7680000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -331,7 +321,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768723981994</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持">
+      <option name="closed" value="true" />
+      <created>1768755865264</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1768755865264</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -342,7 +340,19 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State />
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="HEAD" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
           </value>
         </entry>
       </map>
@@ -355,10 +365,11 @@
     <MESSAGE value="feat(dataset): 添加知识库管理相关模块及腾讯云COS文件存储支持&#10;&#10;- 新增知识库相关数据库模型，包括 Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule 及 AppDatasetJoin&#10;- 新增 DatasetHandler 处理REST API请求，实现知识库创建、查询、更新及分页列表功能&#10;- 新增 DatasetService 提供业务逻辑支持，实现知识库增删改查及分页查询&#10;- 新增相关 Marshmallow 和 FlaskForm 验证和序列化Schema，保证数据校验和响应格式&#10;- 新增默认知识库描述格式化文本常量，补全描述信息逻辑&#10;- 新增文件提取器 FileExtractor，支持从腾讯云COS下载文件并解析为文本或文档列表&#10;- 新增腾讯云COS对象存储服务 CosService，支持文件上传、下载及访问URL生成&#10;- 新增文本嵌入模型服务 EmbeddingsService，集成Redis缓存及DashScope嵌入模型&#10;- 添加Celery初始化及Redis配置，支持异步任务处理&#10;- 更新依赖注入和模块导入，完善upload_file相关模型和服务&#10;- 调整部分代码样式和文档注释，移除无用头部注释，提高代码整洁度" />
     <MESSAGE value="feat(dataset): 新增知识库查询和删除功能及召回测试接口&#10;&#10;- 添加知识库最近查询记录获取接口和相关响应结构&#10;- 实现知识库删除功能，涵盖相关文档、片段及向量数据异步清理&#10;- 新增知识库召回测试入参及服务调用实现&#10;- 数据库模型支持相关新增字段和相关状态枚举定义&#10;- 更新handler层支持新增的查询记录及召回测试接口&#10;- 增加异步任务处理知识库删除后的清理工作&#10;- 优化dataset_service中权限校验及错误处理逻辑" />
     <MESSAGE value="feat(agent): 新增智能体基础结构及函数调用智能体实现&#10;&#10;- 新增AgentConfig和AgentState数据模型，支持智能体配置管理和状态跟踪&#10;- 实现BaseAgent抽象基类，定义智能体通用接口&#10;- 实现FunctionCallAgent，基于函数调用的智能体运行流程和状态图编译&#10;- 添加AgentQueueManager，管理智能体任务队列及Redis缓存标记&#10;- 定义智能体队列事件模型及事件类型枚举&#10;- 修正document_schema中process_type字段的默认值拼写错误&#10;- 更新requirements.txt，引入新依赖及版本升级，支持LangChain及相关组件&#10;- 新增agents包__init__.py，统一导出基础智能体和函数调用智能体接口" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(agent): 新增智能体基础结构及函数调用智能体实现&#10;&#10;- 新增AgentConfig和AgentState数据模型，支持智能体配置管理和状态跟踪&#10;- 实现BaseAgent抽象基类，定义智能体通用接口&#10;- 实现FunctionCallAgent，基于函数调用的智能体运行流程和状态图编译&#10;- 添加AgentQueueManager，管理智能体任务队列及Redis缓存标记&#10;- 定义智能体队列事件模型及事件类型枚举&#10;- 修正document_schema中process_type字段的默认值拼写错误&#10;- 更新requirements.txt，引入新依赖及版本升级，支持LangChain及相关组件&#10;- 新增agents包__init__.py，统一导出基础智能体和函数调用智能体接口" />
+    <MESSAGE value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1768725749110" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1768835951726" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>
