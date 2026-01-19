@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Time    : 2024/10/01 15:37
-@Author  : thezehui@gmail.com
-@File    : agent_entity.py
-"""
 from uuid import UUID
 
 from langchain_core.language_models import BaseLanguageModel

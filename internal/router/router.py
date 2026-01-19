@@ -13,6 +13,9 @@ from internal.handler import (
     OAuthHandler,
     AccountHandler,
     AuthHandler,
+    AIHandler,
+    ApiKeyHandler,
+    OpenAPIHandler,
 )
 from internal.handler import BuiltinToolHandler
 
@@ -32,11 +35,16 @@ class Router:
     oauth_handler: OAuthHandler
     account_handler: AccountHandler
     auth_handler: AuthHandler
+    ai_handler: AIHandler
+    api_key_handler: ApiKeyHandler
+    openapi_handler: OpenAPIHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
         # 1.创建一个蓝图（一组路由的集合/前台路由/后台路由）
         bp = Blueprint("my_dify", __name__, url_prefix="")
+        openapi_bp = Blueprint("openapi", __name__, url_prefix="")
+
         # 2.将url与对应的控制器方法做绑定
         bp.add_url_rule("/ping", methods=["GET"], view_func=self.app_handler.ping)
         bp.add_url_rule(
@@ -285,6 +293,46 @@ class Router:
             methods=["POST"],
             view_func=self.account_handler.update_avatar,
         )
+        # 8.AI辅助模块
+        bp.add_url_rule(
+            "/ai/optimize-prompt",
+            methods=["POST"],
+            view_func=self.ai_handler.optimize_prompt,
+        )
+        bp.add_url_rule(
+            "/ai/suggested-questions",
+            methods=["POST"],
+            view_func=self.ai_handler.generate_suggested_questions,
+        )
+        # 9.API秘钥模块
+        bp.add_url_rule(
+            "/openapi/api-keys", view_func=self.api_key_handler.get_api_keys_with_page
+        )
+        bp.add_url_rule(
+            "/openapi/api-keys",
+            methods=["POST"],
+            view_func=self.api_key_handler.create_api_key,
+        )
+        bp.add_url_rule(
+            "/openapi/api-keys/<uuid:api_key_id>",
+            methods=["POST"],
+            view_func=self.api_key_handler.update_api_key,
+        )
+        bp.add_url_rule(
+            "/openapi/api-keys/<uuid:api_key_id>/is-active",
+            methods=["POST"],
+            view_func=self.api_key_handler.update_api_key_is_active,
+        )
+        bp.add_url_rule(
+            "/openapi/api-keys/<uuid:api_key_id>/delete",
+            methods=["POST"],
+            view_func=self.api_key_handler.delete_api_key,
+        )
+        openapi_bp.add_url_rule(
+            "/openapi/chat",
+            methods=["POST"],
+            view_func=self.openapi_handler.chat,
+        )
 
-        # 7.在应用上去注册蓝图
+        # 10.在应用上去注册蓝图
         app.register_blueprint(bp)
