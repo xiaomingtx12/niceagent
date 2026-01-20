@@ -18,6 +18,8 @@ from internal.handler import (
     OpenAPIHandler,
 )
 from internal.handler import BuiltinToolHandler
+from internal.handler.builtin_app_handler import BuiltinAppHandler
+from internal.handler.workflow_handler import WorkflowHandler
 
 
 @inject
@@ -38,6 +40,8 @@ class Router:
     ai_handler: AIHandler
     api_key_handler: ApiKeyHandler
     openapi_handler: OpenAPIHandler
+    builtin_app_handler: BuiltinAppHandler
+    workflow_handler: WorkflowHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -333,6 +337,68 @@ class Router:
             methods=["POST"],
             view_func=self.openapi_handler.chat,
         )
+        # 10.内置应用模块
+        bp.add_url_rule(
+            "/builtin-apps/categories",
+            view_func=self.builtin_app_handler.get_builtin_app_categories,
+        )
+        bp.add_url_rule(
+            "/builtin-apps", view_func=self.builtin_app_handler.get_builtin_apps
+        )
+        bp.add_url_rule(
+            "/builtin-apps/add-builtin-app-to-space",
+            methods=["POST"],
+            view_func=self.builtin_app_handler.add_builtin_app_to_space,
+        )
 
-        # 10.在应用上去注册蓝图
+        # 11.工作流模块
+        bp.add_url_rule(
+            "/workflows", view_func=self.workflow_handler.get_workflows_with_page
+        )
+        bp.add_url_rule(
+            "/workflows",
+            methods=["POST"],
+            view_func=self.workflow_handler.create_workflow,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>",
+            view_func=self.workflow_handler.get_workflow,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>",
+            methods=["POST"],
+            view_func=self.workflow_handler.update_workflow,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>/delete",
+            methods=["POST"],
+            view_func=self.workflow_handler.delete_workflow,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>/draft-graph",
+            methods=["POST"],
+            view_func=self.workflow_handler.update_draft_graph,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>/draft-graph",
+            view_func=self.workflow_handler.get_draft_graph,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>/debug",
+            methods=["POST"],
+            view_func=self.workflow_handler.debug_workflow,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>/publish",
+            methods=["POST"],
+            view_func=self.workflow_handler.publish_workflow,
+        )
+        bp.add_url_rule(
+            "/workflows/<uuid:workflow_id>/cancel-publish",
+            methods=["POST"],
+            view_func=self.workflow_handler.cancel_publish_workflow,
+        )
+
+        # 12.在应用上去注册蓝图
         app.register_blueprint(bp)
+        app.register_blueprint(openapi_bp)
