@@ -16,10 +16,12 @@ from internal.handler import (
     AIHandler,
     ApiKeyHandler,
     OpenAPIHandler,
+    BuiltinToolHandler,
+    BuiltinAppHandler,
+    WorkflowHandler,
+    AssistantAgentHandler,
+    LanguageModelHandler,
 )
-from internal.handler import BuiltinToolHandler
-from internal.handler.builtin_app_handler import BuiltinAppHandler
-from internal.handler.workflow_handler import WorkflowHandler
 
 
 @inject
@@ -42,6 +44,8 @@ class Router:
     openapi_handler: OpenAPIHandler
     builtin_app_handler: BuiltinAppHandler
     workflow_handler: WorkflowHandler
+    assistant_agent_handler: AssistantAgentHandler
+    language_model_handler: LanguageModelHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -399,6 +403,40 @@ class Router:
             view_func=self.workflow_handler.cancel_publish_workflow,
         )
 
-        # 12.在应用上去注册蓝图
+        # 12.语言模型模块
+        bp.add_url_rule(
+            "/language-models",
+            view_func=self.language_model_handler.get_language_models,
+        )
+        bp.add_url_rule(
+            "/language-models/<string:provider_name>/icon",
+            view_func=self.language_model_handler.get_language_model_icon,
+        )
+        bp.add_url_rule(
+            "/language-models/<string:provider_name>/<string:model_name>",
+            view_func=self.language_model_handler.get_language_model,
+        )
+
+        # 13.辅助Agent模块
+        bp.add_url_rule(
+            "/assistant-agent/chat",
+            methods=["POST"],
+            view_func=self.assistant_agent_handler.assistant_agent_chat,
+        )
+        bp.add_url_rule(
+            "/assistant-agent/chat/<uuid:task_id>/stop",
+            methods=["POST"],
+            view_func=self.assistant_agent_handler.stop_assistant_agent_chat,
+        )
+        bp.add_url_rule(
+            "/assistant-agent/messages",
+            view_func=self.assistant_agent_handler.get_assistant_agent_messages_with_page,
+        )
+        bp.add_url_rule(
+            "/assistant-agent/delete-conversation",
+            methods=["POST"],
+            view_func=self.assistant_agent_handler.delete_assistant_agent_conversation,
+        )
+        # 14.在应用上去注册蓝图
         app.register_blueprint(bp)
         app.register_blueprint(openapi_bp)

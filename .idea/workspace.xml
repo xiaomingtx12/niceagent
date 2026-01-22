@@ -4,66 +4,81 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(api): 新增AI辅助和API秘钥管理功能&#10;&#10;- 新增AIHandler处理器，提供提示词优化和建议问题生成接口&#10;- 新增ApiKeyHandler处理器，实现API秘钥的创建、更新、删除和分页查询&#10;- 引入AIService，支持优化提示词生成和建议问题功能&#10;- 新增ApiKeyService，支持API秘钥的增删改查及凭证校验&#10;- 新增OpenAPIHandler及OpenAPIService，支持开放API的聊天对话接口&#10;- 增加EndUser模型，用于管理终端用户关联应用及账号&#10;- 在请求中间件添加对API秘钥的鉴权逻辑，支持OpenAPI蓝图的授权&#10;- 更新应用配置服务AppConfigService，完善工具和知识库的校验及获取&#10;- 新增AI提示词模板及优化提示词流程，提升AI模块交互体验&#10;- 丰富数据模型，包含ApiKey和EndUser实体及对应导入声明&#10;- 统一导入和导出各处理器、服务及模型，完善模块结构清晰度">
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_app_manager.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/travel_assistant.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/categories/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/categories/categories.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/entities/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/entities/builtin_app_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/builtin_apps/entities/category_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/entities/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/entities/edge_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/entities/node_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/entities/variable_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/entities/workflow_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/base_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/code_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/code_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/dataset_retrieval/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/dataset_retrieval/dataset_retrieval_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/dataset_retrieval/dataset_retrieval_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/end/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/end/end_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/end/end_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/http_request/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/http_request/http_request_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/http_request/http_request_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/start/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/start/start_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/start/start_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/template_transform/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/template_transform/template_transform_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/template_transform/template_transform_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_node.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/utils/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/utils/helper.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/workflow.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/workflow/workflow_validate_rule.jpg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/entity/workflow_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/builtin_app_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/workflow_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/model/workflow.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/builtin_app_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/workflow_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/builtin_app_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/workflow_service.py" afterDir="false" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力">
+      <change afterPath="$PROJECT_DIR$/docs/01.项目API文档.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/02.LLMOps数据库ER图.drawio" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/03.Postman请求结构.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/04.并发写入日志冲突.jpg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/05.weaviate连接未关闭.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/06.gpt2词库无配置错误.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250101.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250102.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250201.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/default_model_parameter_template.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/model_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/provider_entity.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/language_model_manager.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/_asset/icon.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/chat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-128k.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-32k.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-8k.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/chat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/qwen2.5-7b.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/chat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/completion.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/gpt-4o-mini.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/gpt-4o.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/_asset/icon.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/chat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-max.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-plus.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/_asset/icon.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/chat.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-128k.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-8k.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-4.0-8k.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/vector_store/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/handler/language_model_handler.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/schema/assistant_agent_schema.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/faiss_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/task/app_task.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/default_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/entity/app_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/app_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/entity/conversation_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/conversation_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/lib/helper.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/lib/helper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/account.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/account.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_config_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/jieba_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/jieba_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/retrieval_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/retrieval_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -116,56 +131,56 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Flask 服务器.Flask (app/http/app.py).executor&quot;: &quot;Run&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Notification.DisplayName-DoNotAsk-Black action on save file ignored&quot;: &quot;Black action on save file ignored&quot;,
-    &quot;Notification.DoNotAsk-Black action on save file ignored&quot;: &quot;true&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;Shell Script.celery.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;workflow&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/schema&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;editor.preferences.import&quot;,
-    &quot;typescript.add.unambiguous.imports.on.the.fly&quot;: &quot;true&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Flask 服务器.Flask (app/http/app.py).executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
+    "Notification.DoNotAsk-Black action on save file ignored": "true",
+    "Python.main.executor": "Run",
+    "Python.test.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "Shell Script.celery.executor": "Run",
+    "Shell Script.db migrate.executor": "Run",
+    "Shell Script.db upgrade.executor": "Run",
+    "Shell Script.pipreqs.executor": "Run",
+    "git-widget-placeholder": "workflow",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/spring_project/py/my-dify",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "模块",
+    "project.structure.proportion": "0.15332031",
+    "project.structure.side.proportion": "0.41965318",
+    "settings.editor.selected.configurable": "editor.preferences.import",
+    "typescript.add.unambiguous.imports.on.the.fly": "true",
+    "vue.rearranger.settings.migration": "true"
   },
-  &quot;keyToStringList&quot;: {
-    &quot;DatabaseDriversLRU&quot;: [
-      &quot;redis&quot;,
-      &quot;postgresql&quot;
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "redis",
+      "postgresql"
     ]
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
-      <recent name="D:\spring_project\py\my-dify\internal\schema" />
+      <recent name="D:\spring_project\py\my-dify" />
+      <recent name="D:\spring_project\py\my-dify\internal\core\agent\agents" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
-      <recent name="D:\spring_project\py\my-dify\internal\core" />
-      <recent name="D:\spring_project\py\my-dify\internal\service" />
-      <recent name="D:\spring_project\py\my-dify\internal\entity" />
+      <recent name="D:\spring_project\py\my-dify\internal\task" />
+      <recent name="D:\spring_project\py\my-dify\internal\schema" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
     </key>
   </component>
-  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
+  <component name="RunManager" selected="Shell Script.db migrate">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -325,7 +340,9 @@
       <workItem from="1768732827155" duration="12000" />
       <workItem from="1768817290139" duration="8935000" />
       <workItem from="1768898279541" duration="8114000" />
-      <workItem from="1768925919225" duration="411000" />
+      <workItem from="1768925919225" duration="659000" />
+      <workItem from="1768999268547" duration="11211000" />
+      <workItem from="1769089387698" duration="4609000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -383,7 +400,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768838157229</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力">
+      <option name="closed" value="true" />
+      <created>1768926336927</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1768926336927</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -421,10 +446,11 @@
     <MESSAGE value="feat(agent): 新增智能体基础结构及函数调用智能体实现&#10;&#10;- 新增AgentConfig和AgentState数据模型，支持智能体配置管理和状态跟踪&#10;- 实现BaseAgent抽象基类，定义智能体通用接口&#10;- 实现FunctionCallAgent，基于函数调用的智能体运行流程和状态图编译&#10;- 添加AgentQueueManager，管理智能体任务队列及Redis缓存标记&#10;- 定义智能体队列事件模型及事件类型枚举&#10;- 修正document_schema中process_type字段的默认值拼写错误&#10;- 更新requirements.txt，引入新依赖及版本升级，支持LangChain及相关组件&#10;- 新增agents包__init__.py，统一导出基础智能体和函数调用智能体接口" />
     <MESSAGE value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
     <MESSAGE value="feat(app): 重构应用模块，新增配置版本历史及调试会话支持&#10;&#10;- 在App模型中新增草稿配置和调试会话字段及相关属性方法&#10;- 新增AppConfig与AppConfigVersion模型，实现应用配置版本管理&#10;- 新增AppDatasetJoin模型用于应用与知识库的关联&#10;- 添加应用状态、配置类型枚举类及默认应用配置常量&#10;- 重构AppService，完善创建、获取、更新、发布及回退配置逻辑&#10;- 实现应用调试会话的创建、获取、更新和清空操作&#10;- 优化草稿配置中工具和知识库的校验及同步机制&#10;- 重构AppHandler控制器，支持应用创建、获取、配置管理及调试会话接口&#10;- 改进AgentQueueManager，实现基于task_id的多队列管理及消息发布订阅&#10;- 增强AgentState状态类，添加任务id和迭代次数字段&#10;- 扩展内部模型导入，支持新增实体的注册和统一管理&#10;- 提升接口请求参数校验，新增多个请求体和响应体的Schema定义" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(app): 重构应用模块，新增配置版本历史及调试会话支持&#10;&#10;- 在App模型中新增草稿配置和调试会话字段及相关属性方法&#10;- 新增AppConfig与AppConfigVersion模型，实现应用配置版本管理&#10;- 新增AppDatasetJoin模型用于应用与知识库的关联&#10;- 添加应用状态、配置类型枚举类及默认应用配置常量&#10;- 重构AppService，完善创建、获取、更新、发布及回退配置逻辑&#10;- 实现应用调试会话的创建、获取、更新和清空操作&#10;- 优化草稿配置中工具和知识库的校验及同步机制&#10;- 重构AppHandler控制器，支持应用创建、获取、配置管理及调试会话接口&#10;- 改进AgentQueueManager，实现基于task_id的多队列管理及消息发布订阅&#10;- 增强AgentState状态类，添加任务id和迭代次数字段&#10;- 扩展内部模型导入，支持新增实体的注册和统一管理&#10;- 提升接口请求参数校验，新增多个请求体和响应体的Schema定义" />
+    <MESSAGE value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1768926298914" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1769097992525" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

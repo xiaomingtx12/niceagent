@@ -25,7 +25,7 @@ class JiebaService:
 
     @classmethod
     def extract_keywords(
-        cls, text: str, max_keyword_pre_chunk: int = 10, jieba=None
+        cls, text: str, max_keyword_pre_chunk: int = 10
     ) -> List[str]:
         """
         根据输入的文本提取关键词列表
@@ -37,9 +37,9 @@ class JiebaService:
         cls._init_tfidf()
 
         # 使用独立的 TFIDF 实例提取关键词，避免全局污染
-        return jieba.analyse.extract_tags(
+        # 直接使用TFIDF实例的extract_tags方法
+        return cls._tfidf.extract_tags(
             sentence=text,
             topK=max_keyword_pre_chunk,
-            allowPOS=(),  # 可根据需求添加词性过滤，如 allowPOS=('n', 'v')
-            tfidf=cls._tfidf,  # 指定自定义停用词的 TFIDF 实例
+            withFlag=False,  # 不返回词性标注
         )

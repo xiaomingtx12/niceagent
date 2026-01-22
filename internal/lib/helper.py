@@ -1,7 +1,9 @@
 import importlib
 from datetime import datetime
+from enum import Enum
 from hashlib import sha3_256
 from typing import Any
+from uuid import UUID
 
 from langchain_core.documents import Document
 from pydantic import BaseModel
@@ -50,7 +52,7 @@ def remove_fields(data_dict: dict, fields: list[str]) -> None:
         data_dict.pop(field, None)
 
 
-# todo 版本升级
+# todo 将Pydantic版本升级
 def convert_model_to_dict(obj: Any, *args, **kwargs):
     """辅助函数，将Pydantic V1版本中的UUID/Enum等数据转换成可序列化存储的数据。"""
     # 1.如果是Pydantic的BaseModel类型，递归处理其字段
@@ -82,3 +84,17 @@ def convert_model_to_dict(obj: Any, *args, **kwargs):
 
     # 7.对其他类型的字段，保持原样
     return obj
+
+
+def get_value_type(value: Any) -> Any:
+    """根据传递的值获取变量的类型，并将str和bool转换成string和boolean"""
+    # 1.计算变量的类型并转换成字符串
+    value_type = type(value).__name__
+
+    # 2.判断是否为str或者是bool
+    if value_type == "str":
+        return "string"
+    elif value_type == "bool":
+        return "boolean"
+
+    return value_type
