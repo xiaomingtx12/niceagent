@@ -1,10 +1,13 @@
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
 from flask import Request
 from injector import inject
+from psycopg2 import OperationalError as Psycopg2OperationalError
+from sqlalchemy.exc import OperationalError
 
-from internal.exception import UnauthorizedException
+from internal.exception import UnauthorizedException, FailException
 from internal.model import Account
 from internal.service import JwtService, AccountService, ApiKeyService
 
@@ -28,7 +31,16 @@ class Middleware:
             # 3.解析token信息得到用户信息并返回
             payload = self.jwt_service.parse_token(access_token)
             account_id = payload.get("sub")
-            return self.account_service.get_account(account_id)
+            try:
+                account = self.account_service.get_account(account_id)
+                if not account:
+                    raise UnauthorizedException("当前账户不存在，请重新登录")
+                return account
+            except (OperationalError, Psycopg2OperationalError) as e:
+                logging.error(
+                    f"Database connection error when loading account {account_id}: {str(e)}"
+                )
+                raise FailException("数据库连接异常，请稍后重试")
         elif request.blueprint == "openapi":
             # 4.校验获取api_key
             api_key = self._validate_credential(request)

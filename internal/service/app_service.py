@@ -41,7 +41,11 @@ from internal.exception import (
 )
 from internal.model import App, Account, ApiTool, Dataset, Conversation, Message
 from internal.model.app import AppConfigVersion, AppDatasetJoin, AppConfig
-from internal.schema.app_schema import CreateAppReq, GetPublishHistoriesWithPageReq
+from internal.schema.app_schema import (
+    CreateAppReq,
+    GetPublishHistoriesWithPageReq,
+    GetAppsWithPageReq,
+)
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
@@ -55,6 +59,7 @@ from ..core.agent.entities.queue_entity import QueueEvent
 from ..core.language_model import LanguageModelManager
 from ..core.language_model.entities.model_entity import ModelFeature
 from ..entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
+from ..lib.helper import remove_fields
 
 
 @inject
@@ -196,6 +201,91 @@ class AppService(BaseService):
         if app.account_id != account.id:
             raise ForbiddenException("当前账号无权限访问该应用，请核实后尝试")
         return app
+
+    def delete_app(self, app_id: UUID, account: Account) -> App:
+        """根据传递的应用id+账号，删除指定的应用信息，目前仅删除应用基础信息即可"""
+        app = self.get_app(app_id, account)
+        self.delete(app)
+        return app
+
+    def update_app(self, app_id: UUID, account: Account, **kwargs) -> App:
+        """根据传递的应用id+账号+信息，更新指定的应用"""
+        app = self.get_app(app_id, account)
+        self.update(app, **kwargs)
+        return app
+
+    def copy_app(self, app_id: UUID, account: Account) -> App:
+        """根据传递的应用id，拷贝Agent相关信息并创建一个新Agent"""
+        # 1.获取App+草稿配置，并校验权限
+        app = self.get_app(app_id, account)
+        draft_app_config = app.draft_app_config
+
+        # 2.将数据转换为字典并剔除无用数据
+        app_dict = app.__dict__.copy()
+        draft_app_config_dict = draft_app_config.__dict__.copy()
+
+        # 3.剔除无用字段
+        app_remove_fields = [
+            "id",
+            "app_config_id",
+            "draft_app_config_id",
+            "debug_conversation_id",
+            "status",
+            "updated_at",
+            "created_at",
+            "_sa_instance_state",
+        ]
+        draft_app_config_remove_fields = [
+            "id",
+            "app_id",
+            "version",
+            "updated_at",
+            "created_at",
+            "_sa_instance_state",
+        ]
+        remove_fields(app_dict, app_remove_fields)
+        remove_fields(draft_app_config_dict, draft_app_config_remove_fields)
+
+        # 4.开启数据库自动提交上下文
+        with self.db.auto_commit():
+            # 5.创建一个新的应用记录
+            new_app = App(**app_dict, status=AppStatus.DRAFT)
+            self.db.session.add(new_app)
+            self.db.session.flush()
+
+            # 6.添加草稿配置
+            new_draft_app_config = AppConfigVersion(
+                **draft_app_config_dict,
+                app_id=new_app.id,
+                version=0,
+            )
+            self.db.session.add(new_draft_app_config)
+            self.db.session.flush()
+
+            # 7.更新应用的草稿配置id
+            new_app.draft_app_config_id = new_draft_app_config.id
+
+        # 8.返回创建好的新应用
+        return new_app
+
+    def get_apps_with_page(
+        self, req: GetAppsWithPageReq, account: Account
+    ) -> tuple[list[App], Paginator]:
+        """根据传递的分页参数获取当前登录账号下的应用分页列表数据"""
+        # 1.构建分页器
+        paginator = Paginator(db=self.db, req=req)
+
+        # 2.构建筛选条件
+        filters = [App.account_id == account.id]
+        if req.search_word.data:
+            filters.append(App.name.ilike(f"%{req.search_word.data}%"))
+
+        # 3.执行分页操作
+        apps = paginator.paginate(
+            self.db.session.query(App).filter(*filters).order_by(desc("created_at"))
+        )
+
+        return apps, paginator
 
     def get_draft_app_config(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """根据传递的应用id，获取指定的应用草稿配置信息"""

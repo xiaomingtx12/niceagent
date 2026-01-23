@@ -27,15 +27,18 @@ class BaseAgent(Serializable, Runnable):
         # 字段允许接收任意类型，且不需要校验器
         arbitrary_types_allowed = True
 
+    name: str = "base_agent"
+
     def __init__(
             self,
             llm: BaseLanguageModel,
             agent_config: AgentConfig,
             *args,
+            name: str = "base_agent",
             **kwargs,
     ):
         """构造函数，初始化智能体图结构程序"""
-        super().__init__(*args, llm=llm, agent_config=agent_config, **kwargs)
+        super().__init__(*args, name=name, llm=llm, agent_config=agent_config, **kwargs)
         self._agent = self._build_agent()
         self._agent_queue_manager = AgentQueueManager(
             user_id=agent_config.user_id,

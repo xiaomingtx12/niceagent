@@ -4,7 +4,34 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/queue_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/queue_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/api_tool_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/api_tool_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/dataset_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/dataset_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/document_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/document_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/segment_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/segment_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/middleware/middleware.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/middleware/middleware.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/account.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/account.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/api_tool_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/api_tool_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_config_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/base_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/base_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/cos_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/cos_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/dataset_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/dataset_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/document_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/document_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/segment_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/segment_service.py" afterDir="false" />
+    </list>
+    <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
+      <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/01.项目API文档.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/02.LLMOps数据库ER图.drawio" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/03.Postman请求结构.json" afterDir="false" />
@@ -14,74 +41,6 @@
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250101.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250102.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250201.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/default_model_parameter_template.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/model_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/entities/provider_entity.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/language_model_manager.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/_asset/icon.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/chat.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-128k.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-32k.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-8k.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/_asset/icon.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/chat.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/qwen2.5-7b.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/_asset/icon.svg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/chat.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/completion.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/gpt-4o-mini.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/gpt-4o.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/openai/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/_asset/icon.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/chat.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-max.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-plus.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/_asset/icon.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/chat.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-128k.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-8k.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-4.0-8k.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/positions.yaml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/vector_store/__init__.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/handler/language_model_handler.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/schema/assistant_agent_schema.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/faiss_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/task/app_task.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/default_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/app_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/app_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/conversation_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/conversation_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/lib/helper.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/lib/helper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/account.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/account.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_config_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/jieba_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/jieba_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/retrieval_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/retrieval_service.py" afterDir="false" />
-    </list>
-    <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
-      <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -180,7 +139,7 @@
       <recent name="D:\spring_project\py\my-dify\internal\server" />
     </key>
   </component>
-  <component name="RunManager" selected="Shell Script.db migrate">
+  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -284,8 +243,8 @@
     <list>
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.main" />
-      <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.celery" />
+      <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.db upgrade" />
       <item itemvalue="Shell Script.pipreqs" />
     </list>
@@ -342,7 +301,12 @@
       <workItem from="1768898279541" duration="8114000" />
       <workItem from="1768925919225" duration="659000" />
       <workItem from="1768999268547" duration="11211000" />
-      <workItem from="1769089387698" duration="4609000" />
+      <workItem from="1769089387698" duration="4723000" />
+      <workItem from="1769098668948" duration="81000" />
+      <workItem from="1769098966997" duration="1883000" />
+      <workItem from="1769158953601" duration="8384000" />
+      <workItem from="1769177360580" duration="64000" />
+      <workItem from="1769177452900" duration="3453000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -408,7 +372,15 @@
       <option name="project" value="LOCAL" />
       <updated>1768926336927</updated>
     </task>
-    <option name="localTasksCounter" value="9" />
+    <task id="LOCAL-00009" summary="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性">
+      <option name="closed" value="true" />
+      <created>1769098512933</created>
+      <option name="number" value="00009" />
+      <option name="presentableId" value="LOCAL-00009" />
+      <option name="project" value="LOCAL" />
+      <updated>1769098512933</updated>
+    </task>
+    <option name="localTasksCounter" value="10" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -447,10 +419,27 @@
     <MESSAGE value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
     <MESSAGE value="feat(app): 重构应用模块，新增配置版本历史及调试会话支持&#10;&#10;- 在App模型中新增草稿配置和调试会话字段及相关属性方法&#10;- 新增AppConfig与AppConfigVersion模型，实现应用配置版本管理&#10;- 新增AppDatasetJoin模型用于应用与知识库的关联&#10;- 添加应用状态、配置类型枚举类及默认应用配置常量&#10;- 重构AppService，完善创建、获取、更新、发布及回退配置逻辑&#10;- 实现应用调试会话的创建、获取、更新和清空操作&#10;- 优化草稿配置中工具和知识库的校验及同步机制&#10;- 重构AppHandler控制器，支持应用创建、获取、配置管理及调试会话接口&#10;- 改进AgentQueueManager，实现基于task_id的多队列管理及消息发布订阅&#10;- 增强AgentState状态类，添加任务id和迭代次数字段&#10;- 扩展内部模型导入，支持新增实体的注册和统一管理&#10;- 提升接口请求参数校验，新增多个请求体和响应体的Schema定义" />
     <MESSAGE value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
+    <MESSAGE value="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性" />
+  </component>
+  <component name="XDebuggerManager">
+    <breakpoint-manager>
+      <breakpoints>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/internal/service/document_service.py</url>
+          <line>47</line>
+          <option name="timeStamp" value="1" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
+          <url>file://$PROJECT_DIR$/internal/service/document_service.py</url>
+          <line>46</line>
+          <option name="timeStamp" value="2" />
+        </line-breakpoint>
+      </breakpoints>
+    </breakpoint-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1769097992525" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1769179060354" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

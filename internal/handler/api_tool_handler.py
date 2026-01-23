@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from flask import request
-from flask_login import login_required
+from flask_login import login_required, current_user
 from injector import inject
 
 from internal.schema.api_tool_schema import (
@@ -34,7 +34,7 @@ class ApiToolHandler:
             return validate_error_json(req.errors)
 
         api_tool_providers, paginator = (
-            self.api_tool_service.get_api_tool_providers_with_page(req)
+            self.api_tool_service.get_api_tool_providers_with_page(req, current_user)
         )
 
         resp = GetApiToolProvidersWithPageResp(many=True)
@@ -50,7 +50,7 @@ class ApiToolHandler:
         if not req.validate():
             return validate_error_json(req.errors)
 
-        self.api_tool_service.create_api_tool(req)
+        self.api_tool_service.create_api_tool(req,current_user)
 
         return success_message("创建自定义API插件成功")
 
@@ -61,14 +61,14 @@ class ApiToolHandler:
         if not req.validate():
             return validate_error_json(req.errors)
 
-        self.api_tool_service.update_api_tool_provider(provider_id, req)
+        self.api_tool_service.update_api_tool_provider(provider_id, req,current_user)
 
         return success_message("更新自定义API插件成功")
 
     @login_required
     def get_api_tool(self, provider_id: UUID, tool_name: str):
         """根据传递的provider_id+tool_name获取工具的详情信息"""
-        api_tool = self.api_tool_service.get_api_tool(provider_id, tool_name)
+        api_tool = self.api_tool_service.get_api_tool(provider_id, tool_name,current_user)
 
         resp = GetApiToolResp()
 
@@ -77,7 +77,7 @@ class ApiToolHandler:
     @login_required
     def get_api_tool_provider(self, provider_id: UUID):
         """根据传递的provider_id获取工具提供者的原始信息"""
-        api_tool_provider = self.api_tool_service.get_api_tool_provider(provider_id)
+        api_tool_provider = self.api_tool_service.get_api_tool_provider(provider_id,current_user)
 
         resp = GetApiToolProviderResp()
 
@@ -86,7 +86,7 @@ class ApiToolHandler:
     @login_required
     def delete_api_tool_provider(self, provider_id: UUID):
         """根据传递的provider_id删除对应的工具提供者信息"""
-        self.api_tool_service.delete_api_tool_provider(provider_id)
+        self.api_tool_service.delete_api_tool_provider(provider_id,current_user)
 
         return success_message("删除自定义API插件成功")
 

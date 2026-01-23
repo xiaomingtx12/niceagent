@@ -1,4 +1,6 @@
 import importlib
+import random
+import string
 from datetime import datetime
 from enum import Enum
 from hashlib import sha3_256
@@ -98,3 +100,14 @@ def get_value_type(value: Any) -> Any:
         return "boolean"
 
     return value_type
+
+
+def generate_random_string(length: int = 16) -> str:
+    """根据传递的位数，生成随机字符串"""
+    # 1.定义字符集，包含大小写字母和数字
+    chars = string.ascii_letters + string.digits
+
+    # 2.使用random.choices生成指定长度的随机字符串
+    random_str = "".join(random.choices(chars, k=length))
+
+    return random_str

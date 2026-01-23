@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 
 from sqlalchemy import (
@@ -14,10 +13,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
-from internal.entity.app_entity import AppConfigType, DEFAULT_APP_CONFIG
+from internal.entity.app_entity import AppConfigType, DEFAULT_APP_CONFIG, AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.extension.database_extension import db
 from .conversation import Conversation
+from ..lib.helper import generate_random_string
 
 
 class App(db.Model):
@@ -27,9 +27,10 @@ class App(db.Model):
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_app_id"),
         Index("idx_app_account_id", "account_id"),
+        Index("app_token_idx", "token"),
     )
 
-    id = Column(UUID, default=uuid.uuid4, nullable=False)
+    id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
     account_id = Column(UUID, nullable=False)
     app_config_id = Column(UUID, nullable=True)  # 发布配置id，当值为空时代表没有发布
     draft_app_config_id = Column(UUID, nullable=True)  # 关联的草稿配置id
@@ -39,11 +40,21 @@ class App(db.Model):
     name = Column(String(255), default="", nullable=False)
     icon = Column(String(255), default="", nullable=False)
     description = Column(Text, default="", nullable=False)
+    token = Column(
+        String(255), nullable=True, server_default=text("''::character varying")
+    )  # 应用凭证信息
     status = Column(String(255), default="", nullable=False)
     updated_at = Column(
         DateTime, default=datetime.now, onupdate=datetime.now, nullable=False
     )
     created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+    @property
+    def app_config(self) -> "AppConfig":
+        """只读属性，返回当前应用的运行配置"""
+        if not self.app_config_id:
+            return None
+        return db.session.query(AppConfig).get(self.app_config_id)
 
     @property
     def draft_app_config(self) -> "AppConfigVersion":
@@ -105,6 +116,24 @@ class App(db.Model):
 
         return debug_conversation
 
+    @property
+    def token_with_default(self) -> str:
+        """获取带有默认值的token"""
+        # 1.判断状态是否为已发布
+        if self.status != AppStatus.PUBLISHED:
+            # 2.非发布的情况下需要清空数据，并提交更新
+            if self.token is not None or self.token != "":
+                self.token = None
+                db.session.commit()
+            return ""
+
+        # 3.已发布状态需要判断token是否存在，不存在则生成
+        if self.token is None or self.token == "":
+            self.token = generate_random_string(16)
+            db.session.commit()
+
+        return self.token
+
 
 class AppConfig(db.Model):
     """应用配置模型"""
@@ -131,6 +160,9 @@ class AppConfig(db.Model):
     workflows = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 应用关联的工作流列表
+    datasets = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 应用关联的知识库列表
     retrieval_config = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 检索配置
@@ -149,6 +181,11 @@ class AppConfig(db.Model):
     text_to_speech = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 文本转语音配置
+    suggested_after_answer = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{\"enable\": true}'::jsonb"),
+    )  # 回答后生成建议问题
     review_config = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 审核配置

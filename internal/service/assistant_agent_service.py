@@ -82,6 +82,7 @@ class AssistantAgentService(BaseService):
 
         # 7.构建Agent智能体，使用FunctionCallAgent
         agent = FunctionCallAgent(
+            name="assistant_agent",
             llm=llm,
             agent_config=AgentConfig(
                 user_id=account.id,

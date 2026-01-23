@@ -29,7 +29,7 @@ from internal.handler import (
 class Router:
     """路由"""
 
-    app_handler = AppHandler
+    app_handler: AppHandler
     builtin_tool_handler: BuiltinToolHandler
     api_tool_handler: ApiToolHandler
     dataset_handler: DatasetHandler
@@ -55,10 +55,26 @@ class Router:
 
         # 2.将url与对应的控制器方法做绑定
         bp.add_url_rule("/ping", methods=["GET"], view_func=self.app_handler.ping)
+        bp.add_url_rule("/apps", view_func=self.app_handler.get_apps_with_page)
         bp.add_url_rule(
             "/apps", methods=["POST"], view_func=self.app_handler.create_app
         )
         bp.add_url_rule("/apps/<uuid:app_id>", view_func=self.app_handler.get_app)
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>",
+            methods=["POST"],
+            view_func=self.app_handler.update_app,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/delete",
+            methods=["POST"],
+            view_func=self.app_handler.delete_app,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/copy",
+            methods=["POST"],
+            view_func=self.app_handler.copy_app,
+        )
         bp.add_url_rule(
             "/apps/<uuid:app_id>/draft-app-config",
             view_func=self.app_handler.get_draft_app_config,
@@ -183,10 +199,6 @@ class Router:
             "/datasets/<uuid:dataset_id>",
             methods=["POST"],
             view_func=self.dataset_handler.update_dataset,
-        )
-
-        bp.add_url_rule(
-            "/datasets/embeddings", view_func=self.dataset_handler.embeddings_query
         )
         bp.add_url_rule(
             "/datasets/<uuid:dataset_id>/queries",

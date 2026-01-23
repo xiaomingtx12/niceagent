@@ -1,9 +1,12 @@
+import logging
 import os
 
 from flask import Flask
 from flask_cors import CORS
 from flask_login import LoginManager
 from flask_migrate import Migrate
+from psycopg2 import OperationalError as Psycopg2OperationalError
+from sqlalchemy.exc import OperationalError
 
 from config import Config
 from internal.exception import CustomException
@@ -25,7 +28,7 @@ class Http(Flask):
         login_manager: LoginManager,
         middleware: Middleware,
         router: Router,
-        **kwargs
+        **kwargs,
     ):
         # 1.调用父类构造函数初始化
         super(Http, self).__init__(*args, **kwargs)
@@ -35,6 +38,12 @@ class Http(Flask):
 
         # 3.注册绑定异常错误处理
         self.register_error_handler(Exception, self._register_error_handler)
+        self.register_error_handler(
+            OperationalError, self._handle_database_operational_error
+        )
+        self.register_error_handler(
+            Psycopg2OperationalError, self._handle_database_operational_error
+        )
         self.register_error_handler(404, self._handle_not_found_error)
 
         # 4.初始化flask扩展
@@ -95,6 +104,17 @@ class Http(Flask):
             Response(
                 code=HttpCode.NOT_FOUND,
                 message="The requested resource was not found",
+                data={},
+            )
+        )
+
+    def _handle_database_operational_error(self, error: Exception):
+        """处理数据库操作异常"""
+        logging.error(f"Database operational error: {str(error)}")
+        return json(
+            Response(
+                code=HttpCode.FAIL,
+                message="数据库连接异常，请稍后重试",
                 data={},
             )
         )

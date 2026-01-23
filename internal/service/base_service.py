@@ -1,4 +1,8 @@
+import logging
 from typing import Any, Optional
+
+from psycopg2 import OperationalError as Psycopg2OperationalError
+from sqlalchemy.exc import OperationalError
 
 from internal.exception import FailException
 from pkg.sqlalchemy import SQLAlchemy
@@ -34,4 +38,16 @@ class BaseService:
 
     def get(self, model: Any, primary_key: Any) -> Optional[Any]:
         """根据传递的模型类+主键的信息获取唯一数据"""
-        return self.db.session.query(model).get(primary_key)
+        try:
+            return self.db.session.query(model).get(primary_key)
+        except (OperationalError, Psycopg2OperationalError) as e:
+            logging.error(
+                f"Database connection error when getting {model.__name__} with id {primary_key}: {str(e)}"
+            )
+            # 尝试刷新会话连接
+            try:
+                self.db.session.rollback()
+                return self.db.session.query(model).get(primary_key)
+            except (OperationalError, Psycopg2OperationalError):
+                # 如果重试仍然失败，抛出自定义异常
+                raise FailException("数据库连接异常，请稍后重试")
