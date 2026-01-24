@@ -4,17 +4,15 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(auth): 完成账号权限校验及多处服务传参优化&#10;&#10;- Account模型继承UserMixin，完善用户认证支持&#10;- API工具相关接口及服务方法均增加current_user参数进行权限校验&#10;- App模型新增token字段及token_with_default属性，支持应用凭证管理&#10;- 应用服务新增分页查询、拷贝、更新、删除功能，均基于当前登录账号权限&#10;- 添加对工作流配置的处理校验逻辑，确保数据有效性和一致性&#10;- 调整COS文件上传服务，接收当前登录账号参数执行账号权限检查&#10;- 修复BaseService获取数据时数据库连接异常处理，增强系统稳定性&#10;- Dataset相关接口及服务方法均添加current_user参数，实现权限控制&#10;- App调试接口中DebugChatReq支持校验上传图片URL的格式及数量限制&#10;- BaseAgent类构造函数新增name参数，方便智能体实例命名&#10;- 代码结构优化，多处函数参数调整，确保业务逻辑基于当前登录账号安全执行">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/.run/Flask (app_http_app.py).run.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/entity/audio_entity.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/account.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/account.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/api_key.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/api_key.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/api_tool.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/api_tool.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/conversation.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/conversation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/dataset.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/dataset.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/end_user.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/end_user.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/upload_file.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/upload_file.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/workflow.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/workflow.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -27,6 +25,25 @@
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250101.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250102.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250201.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-bert-2048/refs/main" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-bert-2048/snapshots/7710840340a098cfb869c4f65e87cf2b1b70caca/configuration_hf_nomic_bert.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-bert-2048/snapshots/7710840340a098cfb869c4f65e87cf2b1b70caca/modeling_hf_nomic_bert.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/.no_exist/e5cf08aadaa33385f5990def41f7a23405aec398/adapter_config.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/refs/main" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/README.md" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/config.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/config_sentence_transformers.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/modules.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/sentence_bert_config.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/1298e1141878_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/602c5d87cb9a_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/61ae5e82e226_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/88998d2b7a48_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/b49796d9c797_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/b6675a561f33_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/d8c9feddfa73_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/e203bd44d213_.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/migration/versions/eabe3494065e_.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -65,6 +82,9 @@
   <component name="OptimizeOnSaveOptions">
     <option name="myRunOnSave" value="true" />
   </component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="CurrentFile" />
+  </component>
   <component name="ProjectColorInfo">{
   &quot;associatedIndex&quot;: 7
 }</component>
@@ -78,7 +98,7 @@
   </component>
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
-    "Flask 服务器.Flask (app/http/app.py).executor": "Run",
+    "Flask 服务器.Flask (app/http/app.py).executor": "Debug",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
     "Notification.DoNotAsk-Black action on save file ignored": "true",
@@ -93,7 +113,7 @@
     "Shell Script.pipreqs.executor": "Run",
     "git-widget-placeholder": "workflow",
     "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "D:/spring_project/py/my-dify",
+    "last_opened_file_path": "D:/spring_project/py/my-dify/internal/entity",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -115,11 +135,11 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\entity" />
       <recent name="D:\spring_project\py\my-dify" />
       <recent name="D:\spring_project\py\my-dify\internal\core\agent\agents" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
       <recent name="D:\spring_project\py\my-dify\internal\task" />
-      <recent name="D:\spring_project\py\my-dify\internal\schema" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -147,23 +167,6 @@
       <option name="MODULE_MODE" value="false" />
       <option name="REDIRECT_INPUT" value="false" />
       <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="Flask (app/http/app.py)" type="Python.FlaskServer" singleton="false" nameIsGenerated="true">
-      <option name="flaskDebug" value="true" />
-      <module name="my-dify" />
-      <option name="target" value="$PROJECT_DIR$/app/http/app.py" />
-      <option name="targetType" value="PATH" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="launchJavascriptDebuger" value="false" />
       <method v="2" />
     </configuration>
     <configuration name="celery" type="ShConfigurationType">
@@ -293,7 +296,7 @@
       <workItem from="1769158953601" duration="8384000" />
       <workItem from="1769177360580" duration="64000" />
       <workItem from="1769177452900" duration="4329000" />
-      <workItem from="1769254634623" duration="3988000" />
+      <workItem from="1769254634623" duration="12172000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -375,7 +378,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769181111888</updated>
     </task>
-    <option name="localTasksCounter" value="11" />
+    <task id="LOCAL-00011" summary="feat(model): 为多个模型添加数据库索引优化查询性能&#10;&#10;- 在Account模型中添加email索引，加快基于email的查询&#10;- 在AccountOAuth模型中添加account_id及openid-provider组合索引&#10;- 为APIKey模型添加account_id和api_key索引提升API密钥检索效率&#10;- 在APIToolProvider和APITool模型中添加相关字段索引优化关联查询&#10;- 为AppConfig、AppConfigVersion及AppDatasetJoin模型添加app_id相关索引&#10;- 为Conversation及Message模型添加app_id、created_by等索引提升消息和会话检索速度&#10;- 在MessageAgentThought模型添加app_id、conversation_id和message_id索引&#10;- 为Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule模型继续添加多字段组合索引&#10;- 在EndUser和UploadFile模型添加账号相关索引强化权限控制的数据访问速度&#10;- 工作流模型Workflow和WorkflowResult均添加账号、应用及工作流相关索引&#10;- Conversation和Message模型中新增多处关联属性提高ORM查询便捷性和代码清晰度">
+      <option name="closed" value="true" />
+      <created>1769260604998</created>
+      <option name="number" value="00011" />
+      <option name="presentableId" value="LOCAL-00011" />
+      <option name="project" value="LOCAL" />
+      <updated>1769260604998</updated>
+    </task>
+    <option name="localTasksCounter" value="12" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -416,26 +427,11 @@
     <MESSAGE value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
     <MESSAGE value="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性" />
     <MESSAGE value="feat(auth): 完成账号权限校验及多处服务传参优化&#10;&#10;- Account模型继承UserMixin，完善用户认证支持&#10;- API工具相关接口及服务方法均增加current_user参数进行权限校验&#10;- App模型新增token字段及token_with_default属性，支持应用凭证管理&#10;- 应用服务新增分页查询、拷贝、更新、删除功能，均基于当前登录账号权限&#10;- 添加对工作流配置的处理校验逻辑，确保数据有效性和一致性&#10;- 调整COS文件上传服务，接收当前登录账号参数执行账号权限检查&#10;- 修复BaseService获取数据时数据库连接异常处理，增强系统稳定性&#10;- Dataset相关接口及服务方法均添加current_user参数，实现权限控制&#10;- App调试接口中DebugChatReq支持校验上传图片URL的格式及数量限制&#10;- BaseAgent类构造函数新增name参数，方便智能体实例命名&#10;- 代码结构优化，多处函数参数调整，确保业务逻辑基于当前登录账号安全执行" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(auth): 完成账号权限校验及多处服务传参优化&#10;&#10;- Account模型继承UserMixin，完善用户认证支持&#10;- API工具相关接口及服务方法均增加current_user参数进行权限校验&#10;- App模型新增token字段及token_with_default属性，支持应用凭证管理&#10;- 应用服务新增分页查询、拷贝、更新、删除功能，均基于当前登录账号权限&#10;- 添加对工作流配置的处理校验逻辑，确保数据有效性和一致性&#10;- 调整COS文件上传服务，接收当前登录账号参数执行账号权限检查&#10;- 修复BaseService获取数据时数据库连接异常处理，增强系统稳定性&#10;- Dataset相关接口及服务方法均添加current_user参数，实现权限控制&#10;- App调试接口中DebugChatReq支持校验上传图片URL的格式及数量限制&#10;- BaseAgent类构造函数新增name参数，方便智能体实例命名&#10;- 代码结构优化，多处函数参数调整，确保业务逻辑基于当前登录账号安全执行" />
-  </component>
-  <component name="XDebuggerManager">
-    <breakpoint-manager>
-      <breakpoints>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/internal/service/document_service.py</url>
-          <line>47</line>
-          <option name="timeStamp" value="1" />
-        </line-breakpoint>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/internal/service/document_service.py</url>
-          <line>46</line>
-          <option name="timeStamp" value="2" />
-        </line-breakpoint>
-      </breakpoints>
-    </breakpoint-manager>
+    <MESSAGE value="feat(model): 为多个模型添加数据库索引优化查询性能&#10;&#10;- 在Account模型中添加email索引，加快基于email的查询&#10;- 在AccountOAuth模型中添加account_id及openid-provider组合索引&#10;- 为APIKey模型添加account_id和api_key索引提升API密钥检索效率&#10;- 在APIToolProvider和APITool模型中添加相关字段索引优化关联查询&#10;- 为AppConfig、AppConfigVersion及AppDatasetJoin模型添加app_id相关索引&#10;- 为Conversation及Message模型添加app_id、created_by等索引提升消息和会话检索速度&#10;- 在MessageAgentThought模型添加app_id、conversation_id和message_id索引&#10;- 为Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule模型继续添加多字段组合索引&#10;- 在EndUser和UploadFile模型添加账号相关索引强化权限控制的数据访问速度&#10;- 工作流模型Workflow和WorkflowResult均添加账号、应用及工作流相关索引&#10;- Conversation和Message模型中新增多处关联属性提高ORM查询便捷性和代码清晰度" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(model): 为多个模型添加数据库索引优化查询性能&#10;&#10;- 在Account模型中添加email索引，加快基于email的查询&#10;- 在AccountOAuth模型中添加account_id及openid-provider组合索引&#10;- 为APIKey模型添加account_id和api_key索引提升API密钥检索效率&#10;- 在APIToolProvider和APITool模型中添加相关字段索引优化关联查询&#10;- 为AppConfig、AppConfigVersion及AppDatasetJoin模型添加app_id相关索引&#10;- 为Conversation及Message模型添加app_id、created_by等索引提升消息和会话检索速度&#10;- 在MessageAgentThought模型添加app_id、conversation_id和message_id索引&#10;- 为Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule模型继续添加多字段组合索引&#10;- 在EndUser和UploadFile模型添加账号相关索引强化权限控制的数据访问速度&#10;- 工作流模型Workflow和WorkflowResult均添加账号、应用及工作流相关索引&#10;- Conversation和Message模型中新增多处关联属性提高ORM查询便捷性和代码清晰度" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1769260373311" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1769263556083" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

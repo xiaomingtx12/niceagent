@@ -18,10 +18,17 @@ from internal.schema.app_schema import (
     UpdateAppReq,
     GetAppsWithPageReq,
     GetAppsWithPageResp,
+    GetDebugConversationMessagesWithPageReq,
+    GetDebugConversationMessagesWithPageResp,
 )
 from internal.service import AppService, RetrievalService
 from pkg.paginator import PageModel
-from pkg.response import success_message, validate_error_json, success_json
+from pkg.response import (
+    success_message,
+    validate_error_json,
+    success_json,
+    compact_generate_response,
+)
 
 
 @inject
@@ -196,6 +203,44 @@ class AppHandler(object):
         response = self.app_service.debug_chat(app_id, req.query.data, current_user)
 
         return compact_generate_response(response)
+
+    @login_required
+    def get_debug_conversation_messages_with_page(self, app_id: UUID):
+        """根据传递的应用id，获取该应用的调试会话分页列表记录"""
+        # 1.提取请求并校验数据
+        req = GetDebugConversationMessagesWithPageReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        # 2.调用服务获取数据
+        messages, paginator = (
+            self.app_service.get_debug_conversation_messages_with_page(
+                app_id, req, current_user
+            )
+        )
+
+        # 3.创建响应结构
+        resp = GetDebugConversationMessagesWithPageResp(many=True)
+
+        return success_json(PageModel(list=resp.dump(messages), paginator=paginator))
+
+    @login_required
+    def stop_debug_chat(self, app_id: UUID, task_id: UUID):
+        """根据传递的应用id+任务id停止某个应用的指定调试会话"""
+        self.app_service.stop_debug_chat(app_id, task_id, current_user)
+        return success_message("停止应用调试会话成功")
+
+    @login_required
+    def get_published_config(self, app_id: UUID):
+        """根据传递的应用id获取应用的发布配置信息"""
+        published_config = self.app_service.get_published_config(app_id, current_user)
+        return success_json(published_config)
+
+    @login_required
+    def regenerate_web_app_token(self, app_id: UUID):
+        """根据传递的应用id重新生成WebApp凭证标识"""
+        token = self.app_service.regenerate_web_app_token(app_id, current_user)
+        return success_json({"token": token})
 
     def ping(self):
         raise FailException("数据未找到")

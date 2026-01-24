@@ -122,6 +122,24 @@ class Router:
             methods=["POST"],
             view_func=self.app_handler.debug_chat,
         )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/conversations/tasks/<uuid:task_id>/stop",
+            methods=["POST"],
+            view_func=self.app_handler.stop_debug_chat,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/conversations/messages",
+            view_func=self.app_handler.get_debug_conversation_messages_with_page,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/published-config",
+            view_func=self.app_handler.get_published_config,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/published-config/regenerate-web-app-token",
+            methods=["POST"],
+            view_func=self.app_handler.regenerate_web_app_token,
+        )
 
         # 3.内置插件广场模块
         bp.add_url_rule(
