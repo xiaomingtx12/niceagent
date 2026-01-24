@@ -139,7 +139,10 @@ class AppConfig(db.Model):
     """应用配置模型"""
 
     __tablename__ = "app_config"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_app_config_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_app_config_id"),
+        Index("app_config_app_id_idx", "app_id"),
+    )
 
     id = Column(
         UUID, nullable=False, server_default=text("uuid_generate_v4()")
@@ -160,9 +163,7 @@ class AppConfig(db.Model):
     workflows = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 应用关联的工作流列表
-    datasets = Column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )  # 应用关联的知识库列表
+    # 应用关联的知识库列表
     retrieval_config = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 检索配置
@@ -204,7 +205,10 @@ class AppConfigVersion(db.Model):
     """应用配置版本历史表，用于存储草稿配置+历史发布配置"""
 
     __tablename__ = "app_config_version"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_app_config_version_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_app_config_version_id"),
+        Index("app_config_version_app_id_idx", "app_id"),
+    )
 
     id = Column(
         UUID, nullable=False, server_default=text("uuid_generate_v4()")
@@ -246,6 +250,11 @@ class AppConfigVersion(db.Model):
     text_to_speech = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 文本转语音配置
+    suggested_after_answer = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{\"enable\": true}'::jsonb"),
+    )  # 回答后生成建议问题
     review_config = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 审核配置
@@ -268,7 +277,10 @@ class AppDatasetJoin(db.Model):
     """应用知识库关联表模型"""
 
     __tablename__ = "app_dataset_join"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_app_dataset_join_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_app_dataset_join_id"),
+        Index("app_dataset_join_app_id_dataset_id_idx", "app_id", "dataset_id"),
+    )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
     app_id = Column(UUID, nullable=False)

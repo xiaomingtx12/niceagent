@@ -10,8 +10,11 @@ from sqlalchemy import (
     Float,
     text,
     PrimaryKeyConstraint,
+    func,
+    Index,
 )
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship
 
 from internal.extension.database_extension import db
 
@@ -20,7 +23,11 @@ class Conversation(db.Model):
     """交流会话模型"""
 
     __tablename__ = "conversation"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_conversation_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_conversation_id"),
+        Index("conversation_app_id_idx", "app_id"),
+        Index("conversation_app_created_by_idx", "created_by"),
+    )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
     app_id = Column(UUID, nullable=False)  # 关联应用id
@@ -53,12 +60,29 @@ class Conversation(db.Model):
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
+    @property
+    def is_new(self) -> bool:
+        """只读属性，用于判断该会话是否是第一次创建"""
+        message_count = (
+            db.session.query(func.count(Message.id))
+            .filter(
+                Message.conversation_id == self.id,
+            )
+            .scalar()
+        )
+
+        return False if message_count > 1 else True
+
 
 class Message(db.Model):
     """交流消息模型"""
 
     __tablename__ = "message"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_message_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_message_id"),
+        Index("message_conversation_id_idx", "conversation_id"),
+        Index("message_created_by_idx", "created_by"),
+    )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
 
@@ -78,6 +102,9 @@ class Message(db.Model):
     query = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 用户提问的原始query
+    image_urls = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 用户提问的图片URL列表信息
     message = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 产生answer的消息列表
@@ -134,12 +161,33 @@ class Message(db.Model):
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
+    # 智能体推理列表，创建表关联
+    agent_thoughts = relationship(
+        "MessageAgentThought",
+        backref="msg",
+        lazy="selectin",
+        passive_deletes="all",
+        uselist=True,
+        foreign_keys=[id],
+        primaryjoin="MessageAgentThought.message_id == Message.id",
+    )
+
+    @property
+    def conversation(self) -> Conversation:
+        """只读属性，返回该消息对应的会话记录"""
+        return db.session.query(Conversation).get(self.conversation_id)
+
 
 class MessageAgentThought(db.Model):
     """智能体消息推理模型，用于记录Agent生成最终消息答案时"""
 
     __tablename__ = "message_agent_thought"
-    __table_args__ = (PrimaryKeyConstraint("id", name="pk_message_agent_thought_id"),)
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_message_agent_thought_id"),
+        Index("message_agent_thought_app_id_idx", "app_id"),
+        Index("message_agent_thought_conversation_id_idx", "conversation_id"),
+        Index("message_agent_thought_message_id_idx", "message_id"),
+    )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
 
