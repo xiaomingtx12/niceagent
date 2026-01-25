@@ -1,5 +1,6 @@
 from .account_handler import AccountHandler
 from .ai_handler import AIHandler
+from .analysis_handler import AnalysisHandler
 from .api_key_handler import ApiKeyHandler
 from .api_tool_handler import ApiToolHandler
 from .app_handler import AppHandler
@@ -14,6 +15,7 @@ from .oauth_handler import OAuthHandler
 from .openapi_handler import OpenAPIHandler
 from .segment_handler import SegmentHandler
 from .upload_file_handler import UploadFileHandler
+from .web_app_handler import WebAppHandler
 from .workflow_handler import WorkflowHandler
 
 __all__ = [
@@ -35,4 +37,6 @@ __all__ = [
     "AssistantAgentHandler",
     "AssistantAgentHandler",
     "LanguageModelHandler",
+    "AnalysisHandler",
+    "WebAppHandler",
 ]
