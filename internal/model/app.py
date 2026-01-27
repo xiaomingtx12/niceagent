@@ -200,6 +200,15 @@ class AppConfig(db.Model):
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
+    @property
+    def app_dataset_joins(self) -> list["AppDatasetJoin"]:
+        """只读属性，获取配置的知识库关联记录"""
+        return (
+            db.session.query(AppDatasetJoin).filter(
+                AppDatasetJoin.app_id == self.app_id
+            ).all()
+        )
+
 
 class AppConfigVersion(db.Model):
     """应用配置版本历史表，用于存储草稿配置+历史发布配置"""

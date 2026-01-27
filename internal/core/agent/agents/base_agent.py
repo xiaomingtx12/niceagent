@@ -12,7 +12,7 @@ from pydantic import PrivateAttr
 from internal.core.agent.entities.agent_entity import AgentConfig, AgentState
 from internal.exception import FailException
 from .agent_queue_manager import AgentQueueManager
-from ..entities.queue_entity import AgentResult, AgentThought
+from ..entities.queue_entity import AgentResult, AgentThought, QueueEvent
 
 
 class BaseAgent(Serializable, Runnable):
@@ -52,7 +52,84 @@ class BaseAgent(Serializable, Runnable):
 
     def invoke(self, input: AgentState, config: Optional[RunnableConfig] = None) -> AgentResult:
         """块内容响应，一次性生成完整内容后返回"""
-        pass
+        # 1.调用stream方法获取流式事件输出数据
+        content = input["messages"][0].content
+        query = ""
+        image_urls = []
+        if isinstance(content, str):
+            query = content
+        elif isinstance(content, list):
+            query = content[0]["text"]
+            image_urls = [
+                chunk["image_url"]["url"]
+                for chunk in content
+                if chunk.get("type") == "image_url"
+            ]
+        agent_result = AgentResult(query=query, image_urls=image_urls)
+        agent_thoughts = {}
+        for agent_thought in self.stream(input, config):
+            # 2.提取事件id并转换成字符串
+            event_id = str(agent_thought.id)
+
+            # 3.除了ping事件，其他事件全部记录
+            if agent_thought.event != QueueEvent.PING:
+                # 4.单独处理agent_message事件，因为该事件为数据叠加
+                if agent_thought.event == QueueEvent.AGENT_MESSAGE:
+                    # 5.检测是否已存储了事件
+                    if event_id not in agent_thoughts:
+                        # 6.初始化智能体消息事件
+                        agent_thoughts[event_id] = agent_thought
+                    else:
+                        # 7.叠加智能体消息事件
+                        agent_thoughts[event_id] = agent_thoughts[event_id].model_copy(
+                            update={
+                                "thought": agent_thoughts[event_id].thought
+                                + agent_thought.thought,
+                                "answer": agent_thoughts[event_id].answer
+                                + agent_thought.answer,
+                                "latency": agent_thought.latency,
+                            }
+                        )
+                    # 8.更新智能体消息答案
+                    agent_result.answer += agent_thought.answer
+                else:
+                    # 9.处理其他类型的智能体事件，类型均为覆盖
+                    agent_thoughts[event_id] = agent_thought
+
+                    # 10.单独判断是否为异常消息类型，如果是则修改状态并记录错误
+                    if agent_thought.event in [
+                        QueueEvent.STOP,
+                        QueueEvent.TIMEOUT,
+                        QueueEvent.ERROR,
+                    ]:
+                        agent_result.status = agent_thought.event
+                        agent_result.error = (
+                            agent_thought.observation
+                            if agent_thought.event == QueueEvent.ERROR
+                            else ""
+                        )
+
+        # 11.将推理字典转换成列表并存储
+        agent_result.agent_thoughts = [
+            agent_thought for agent_thought in agent_thoughts.values()
+        ]
+
+        # 12.完善message
+        agent_result.message = next(
+            (
+                agent_thought.message
+                for agent_thought in agent_thoughts.values()
+                if agent_thought.event == QueueEvent.AGENT_MESSAGE
+            ),
+            [],
+        )
+
+        # 13.更新总耗时
+        agent_result.latency = sum(
+            [agent_thought.latency for agent_thought in agent_thoughts.values()]
+        )
+
+        return agent_result
 
     def stream(
             self,

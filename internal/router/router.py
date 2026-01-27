@@ -23,6 +23,10 @@ from internal.handler import (
     LanguageModelHandler,
     AnalysisHandler,
     WebAppHandler,
+    ConversationHandler,
+    AudioHandler,
+    PlatformHandler,
+    WechatHandler,
 )
 
 
@@ -50,6 +54,10 @@ class Router:
     language_model_handler: LanguageModelHandler
     analysis_handler: AnalysisHandler
     web_app_handler: WebAppHandler
+    conversation_handler: ConversationHandler
+    audio_handler: AudioHandler
+    platform_handler: PlatformHandler
+    wechat_handler: WechatHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -497,6 +505,64 @@ class Router:
             view_func=self.web_app_handler.get_conversations,
         )
 
-        # 16.在应用上去注册蓝图
+        # 16.会话模块
+        bp.add_url_rule(
+            "/conversations/<uuid:conversation_id>/messages",
+            view_func=self.conversation_handler.get_conversation_messages_with_page,
+        )
+        bp.add_url_rule(
+            "/conversations/<uuid:conversation_id>/delete",
+            methods=["POST"],
+            view_func=self.conversation_handler.delete_conversation,
+        )
+        bp.add_url_rule(
+            "/conversations/<uuid:conversation_id>/messages/<uuid:message_id>/delete",
+            methods=["POST"],
+            view_func=self.conversation_handler.delete_message,
+        )
+        bp.add_url_rule(
+            "/conversations/<uuid:conversation_id>/name",
+            view_func=self.conversation_handler.get_conversation_name,
+        )
+        bp.add_url_rule(
+            "/conversations/<uuid:conversation_id>/name",
+            methods=["POST"],
+            view_func=self.conversation_handler.update_conversation_name,
+        )
+        bp.add_url_rule(
+            "/conversations/<uuid:conversation_id>/is-pinned",
+            methods=["POST"],
+            view_func=self.conversation_handler.update_conversation_is_pinned,
+        )
+
+        # 17.语音转换模块
+        bp.add_url_rule(
+            "/audio/audio-to-text",
+            methods=["POST"],
+            view_func=self.audio_handler.audio_to_text,
+        )
+        bp.add_url_rule(
+            "/audio/message-to-audio",
+            methods=["POST"],
+            view_func=self.audio_handler.message_to_audio,
+        )
+
+        # 18.第三方平台配置模块
+        bp.add_url_rule(
+            "/platform/<uuid:app_id>/wechat-config",
+            view_func=self.platform_handler.get_wechat_config,
+        )
+        bp.add_url_rule(
+            "/platform/<uuid:app_id>/wechat-config",
+            methods=["POST"],
+            view_func=self.platform_handler.update_wechat_config,
+        )
+        bp.add_url_rule(
+            "/wechat/<uuid:app_id>",
+            methods=["GET", "POST"],
+            view_func=self.wechat_handler.wechat,
+        )
+
+        # 19.在应用上去注册蓝图
         app.register_blueprint(bp)
         app.register_blueprint(openapi_bp)

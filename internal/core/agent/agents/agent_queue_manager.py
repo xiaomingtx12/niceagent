@@ -122,7 +122,7 @@ class AgentQueueManager:
 
     def _is_stopped(self, task_id: UUID) -> bool:
         """检查任务是否停止"""
-        task_stopped_cache_key = self._generate_task_stopped_cache_key(self.task_id)
+        task_stopped_cache_key = self.generate_task_stopped_cache_key(task_id)
         result = self.redis_client.get(task_stopped_cache_key)
 
         if result is not None:
@@ -157,7 +157,7 @@ class AgentQueueManager:
         return q
 
     @classmethod
-    def set_stop_flask(
+    def set_stop_flag(
         cls, task_id: UUID, invoke_from: InvokeFrom, user_id: UUID
     ) -> None:
         """根据传递的任务id+调用来源停止某次会话"""

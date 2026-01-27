@@ -54,12 +54,11 @@ def remove_fields(data_dict: dict, fields: list[str]) -> None:
         data_dict.pop(field, None)
 
 
-# todo 将Pydantic版本升级
 def convert_model_to_dict(obj: Any, *args, **kwargs):
-    """辅助函数，将Pydantic V1版本中的UUID/Enum等数据转换成可序列化存储的数据。"""
+    """辅助函数，将Pydantic V2版本中的UUID/Enum等数据转换成可序列化存储的数据。"""
     # 1.如果是Pydantic的BaseModel类型，递归处理其字段
     if isinstance(obj, BaseModel):
-        obj_dict = obj.dict(*args, **kwargs)
+        obj_dict = obj.model_dump(*args, **kwargs)
         # 2.递归处理嵌套字段
         for key, value in obj_dict.items():
             obj_dict[key] = convert_model_to_dict(value, *args, **kwargs)

@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional
 
-from pydantic import Field, field_validator, HttpUrl
+from pydantic import Field, field_validator, HttpUrl, ConfigDict, field_serializer
 
 from internal.core.workflow.entities.node_entity import BaseNodeData
 from internal.core.workflow.entities.variable_entity import (
@@ -34,8 +34,12 @@ class HttpRequestInputType(str, Enum):
 
 class HttpRequestNodeData(BaseNodeData):
     """HTTP请求节点数据"""
-
+    
     url: Optional[HttpUrl] = None  # 请求URL地址
+
+    @field_serializer('url')
+    def serialize_url(self, url: Optional[HttpUrl]) -> Optional[str]:
+        return str(url) if url is not None else None
     method: HttpRequestMethod = HttpRequestMethod.GET  # API请求方法
     inputs: list[VariableEntity] = Field(default_factory=list)  # 输入变量列表
     outputs: list[VariableEntity] = Field(

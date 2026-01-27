@@ -34,7 +34,7 @@ class FunctionCallAgent(BaseAgent):
     def _build_agent(self) -> CompiledStateGraph:
         """构建LangGraph图结构编译程序"""
         # 1.创建图
-        graph = StateGraph(AgentState)
+        graph = StateGraph(AgentState)  # type: ignore
 
         # 2.添加节点
         graph.add_node("preset_operation", self._preset_operation_node)
@@ -129,7 +129,7 @@ class FunctionCallAgent(BaseAgent):
                     state["task_id"], "智能体历史消息列表格式错误"
                 )
                 logging.exception(
-                    f"智能体历史消息列表格式错误, len(history)={len(history)}, history={json.dumps(messages_to_dict(history))}"
+                    f"智能体历史消息列表格式错误, len(history)={len(history)}, history={json.dumps(messages_to_dict(history), ensure_ascii=False)}"
                 )
                 raise FailException("智能体历史消息列表格式错误")
             # 5.拼接历史消息
@@ -236,7 +236,20 @@ class FunctionCallAgent(BaseAgent):
                 state["task_id"], f"LLM节点发生错误, 错误信息: {str(e)}"
             )
             raise e
-        # 8.如果类型为推理则添加智能体推理事件
+
+        # 8.计算LLM的输入+输出token总数
+        input_token_count = self.llm.get_num_tokens_from_messages(state["messages"])
+        output_token_count = self.llm.get_num_tokens_from_messages([gathered])
+
+        # 9.获取输入/输出价格和单位
+        input_price, output_price, unit = self.llm.get_pricing()
+
+        # 10.计算总token+总成本
+        total_token_count = input_token_count + output_token_count
+        total_price = (
+            input_token_count * input_price + output_token_count * output_price
+        ) * unit
+        # 11.如果类型为推理则添加智能体推理事件
         if generation_type == "thought":
             self.agent_queue_manager.publish(
                 state["task_id"],
@@ -244,13 +257,48 @@ class FunctionCallAgent(BaseAgent):
                     id=id,
                     task_id=state["task_id"],
                     event=QueueEvent.AGENT_THOUGHT,
-                    thought=json.dumps(gathered.tool_calls),
+                    thought=json.dumps(gathered.tool_calls, ensure_ascii=False),
+                    # 消息相关字段
                     message=messages_to_dict(state["messages"]),
+                    message_token_count=input_token_count,
+                    message_unit_price=input_price,
+                    message_price_unit=unit,
+                    # 答案相关字段
+                    answer="",
+                    answer_token_count=output_token_count,
+                    answer_unit_price=output_price,
+                    answer_price_unit=unit,
+                    # Agent推理统计相关
+                    total_token_count=total_token_count,
+                    total_price=total_price,
                     latency=(time.perf_counter() - start_at),
                 ),
             )
         elif generation_type == "message":
-            # 9.如果LLM直接生成answer则表示已经拿到了最终答案，则停止监听
+            # 7.如果LLM直接生成answer则表示已经拿到了最终答案，则停止监听
+            self.agent_queue_manager.publish(
+                state["task_id"],
+                AgentThought(
+                    id=id,
+                    task_id=state["task_id"],
+                    event=QueueEvent.AGENT_MESSAGE,
+                    thought="",
+                    # 消息相关字段
+                    message=messages_to_dict(state["messages"]),
+                    message_token_count=input_token_count,
+                    message_unit_price=input_price,
+                    message_price_unit=unit,
+                    # 答案相关字段
+                    answer="",
+                    answer_token_count=output_token_count,
+                    answer_unit_price=output_price,
+                    answer_price_unit=unit,
+                    # Agent推理统计相关
+                    total_token_count=total_token_count,
+                    total_price=total_price,
+                    latency=(time.perf_counter() - start_at),
+                ),
+            )
             self.agent_queue_manager.publish(
                 state["task_id"],
                 AgentThought(
@@ -289,7 +337,7 @@ class FunctionCallAgent(BaseAgent):
             messages.append(
                 ToolMessage(
                     tool_call_id=tool_call["id"],
-                    content=json.dumps(tool_result),
+                    content=json.dumps(tool_result, ensure_ascii=False),
                     name=tool_call["name"],
                 )
             )
@@ -306,7 +354,7 @@ class FunctionCallAgent(BaseAgent):
                     id=id,
                     task_id=state["task_id"],
                     event=event,
-                    observation=json.dumps(tool_result),
+                    observation=json.dumps(tool_result, ensure_ascii=False),
                     tool=tool_call["name"],
                     tool_input=tool_call["args"],
                     latency=(time.perf_counter() - start_at),
