@@ -279,15 +279,16 @@ class WechatService(BaseService):
                 ),
             )
 
-            # 8.定义智能体状态基础数据
-            agent_state = {
-                "messages": [llm.convert_to_human_message(query, [])],
-                "history": history,
-                "long_term_memory": conversation.summary,
-            }
+            # 8.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
+            all_messages = history + [llm.convert_to_human_message(query, [])]
 
             # 9.调用智能体获取执行结果
-            agent_result = agent.invoke(agent_state)
+            agent_result = agent.invoke(
+                {
+                    "messages": all_messages,
+                    "long_term_memory": conversation.summary,
+                }
+            )
 
             # 10.将数据存储到数据库中，包含会话、消息、推理过程
             self.conversation_service.save_agent_thoughts(

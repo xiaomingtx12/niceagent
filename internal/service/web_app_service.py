@@ -187,13 +187,14 @@ class WebAppService(BaseService):
         )
 
         # 13.定义字典存储推理过程，并调用智能体获取消息
+        # 注意：将历史消息和当前消息合并到messages字段中（AgentState已移除history字段）
+        all_messages = history + [
+            llm.convert_to_human_message(req.query.data, req.image_urls.data)
+        ]
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": [
-                    llm.convert_to_human_message(req.query.data, req.image_urls.data)
-                ],
-                "history": history,
+                "messages": all_messages,
                 "long_term_memory": conversation.summary,
             }
         ):

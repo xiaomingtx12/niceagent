@@ -113,39 +113,44 @@ class ConversationService(BaseService):
     @classmethod
     def generate_suggested_questions(cls, histories: str) -> list[str]:
         """根据传递的历史信息生成最多不超过3个的建议问题"""
-        # 1.创建prompt
-        prompt = ChatPromptTemplate.from_messages(
-            [("system", SUGGESTED_QUESTIONS_TEMPLATE), ("human", "{histories}")]
-        )
-
-        # 2.构建大语言模型实例，并且将大语言模型的温度调低，降低幻觉的概率
-        llm = Chat(
-            model="qwen-max",
-            features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
-            metadata={},
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-        )
-        structured_llm = llm.with_structured_output(SuggestedQuestions)
-
-        # 3.构建链应用
-        chain = prompt | structured_llm
-
-        # 4.调用链并获取建议问题列表
-        suggested_questions = chain.invoke({"histories": histories})
-
-        # 5.提取建议问题列表
-        questions = []
         try:
+            # 1.创建prompt
+            prompt = ChatPromptTemplate.from_messages(
+                [("system", SUGGESTED_QUESTIONS_TEMPLATE), ("human", "{histories}")]
+            )
+
+            # 2.构建大语言模型实例，并且将大语言模型的温度调低，降低幻觉的概率
+            llm = Chat(
+                model="qwen-max",
+                features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
+                metadata={},
+                api_key=os.getenv("DASHSCOPE_API_KEY"),
+            )
+            structured_llm = llm.with_structured_output(SuggestedQuestions)
+
+            # 3.构建链应用
+            chain = prompt | structured_llm
+
+            # 4.调用链并获取建议问题列表
+            suggested_questions = chain.invoke({"histories": histories})
+
+            # 5.提取建议问题列表
+            questions = []
             if suggested_questions and hasattr(suggested_questions, "questions"):
                 questions = suggested_questions.questions
+            
+            # 6.限制问题数量
+            if len(questions) > 3:
+                questions = questions[:3]
+
+            return questions
+            
         except Exception as e:
             logging.exception(
-                f"生成建议问题出错, suggested_questions: {suggested_questions}, 错误信息: {str(e)}"
+                f"生成建议问题失败, histories: {histories[:200]}..., 错误信息: {str(e)}"
             )
-        if len(questions) > 3:
-            questions = questions[:3]
-
-        return questions
+            # 返回空列表，避免影响用户体验
+            return []
 
     def save_agent_thoughts(
         self,

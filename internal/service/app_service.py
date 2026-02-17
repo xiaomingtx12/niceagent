@@ -623,15 +623,16 @@ class AppService(BaseService):
                 review_config=draft_app_config["review_config"],
             ),
         )
+        # 12.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
+        all_messages = history + [HumanMessage(query)]
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": [HumanMessage(query)],
-                "history": history,
+                "messages": all_messages,
                 "long_term_memory": debug_conversation.summary,
             }
         ):
-            # 11.提取thought以及answer
+            # 13.提取thought以及answer
             event_id = str(agent_thought.id)
 
             # 12.将数据填充到agent_thought，便于存储到数据库服务中
@@ -690,21 +691,14 @@ class AppService(BaseService):
             yield f"event: {agent_thought.event}\ndata:{json.dumps(data)}\n\n"
 
         # 22.将消息以及推理过程添加到数据库
-        thread = Thread(
-            target=self.conversation_service.save_agent_thoughts,
-            kwargs={
-                "flask_app": current_app._get_current_object(),
-                "account_id": account.id,
-                "app_id": app_id,
-                "app_config": draft_app_config,
-                "conversation_id": debug_conversation.id,
-                "message_id": message.id,
-                "agent_thoughts": [
-                    agent_thought for agent_thought in agent_thoughts.values()
-                ],
-            },
+        self.conversation_service.save_agent_thoughts(
+            account_id=account.id,
+            app_id=app.id,
+            app_config=draft_app_config,
+            conversation_id=debug_conversation.id,
+            message_id=message.id,
+            agent_thoughts=[agent_thought for agent_thought in agent_thoughts.values()],
         )
-        thread.start()
 
     def stop_debug_chat(self, app_id: UUID, task_id: UUID, account: Account) -> None:
         """根据传递的应用id+任务id+账号，停止某个应用的调试会话，中断流式事件"""

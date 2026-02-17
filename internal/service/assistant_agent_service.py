@@ -90,15 +90,16 @@ class AssistantAgentService(BaseService):
             ),
         )
 
+        # 8.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
+        all_messages = history + [HumanMessage(query)]
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": [HumanMessage(query)],
-                "history": history,
+                "messages": all_messages,
                 "long_term_memory": conversation.summary,
             }
         ):
-            # 8.提取thought以及answer
+            # 9.提取thought以及answer
             event_id = str(agent_thought.id)
 
             # 9.将数据填充到agent_thought，便于存储到数据库服务中

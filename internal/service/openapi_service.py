@@ -157,20 +157,21 @@ class OpenAPIService(BaseService):
             ),
         )
 
-        # 16.定义智能体状态基础数据
-        agent_state = {
-            "messages": [HumanMessage(req.query.data)],
-            "history": history,
-            "long_term_memory": conversation.summary,
-        }
-
+        # 16.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
+        all_messages = history + [HumanMessage(req.query.data)]
+        
         # 17.根据stream类型差异执行不同的代码
         if req.stream.data is True:
             agent_thoughts_dict = {}
 
             def handle_stream() -> Generator:
                 """流式事件处理器，在Python只要在函数内部使用了yield关键字，那么这个函数的返回值类型肯定是生成器"""
-                for agent_thought in agent.stream(agent_state):
+                for agent_thought in agent.stream(
+                    {
+                        "messages": all_messages,
+                        "long_term_memory": conversation.summary,
+                    }
+                ):
                     # 提取thought以及answer
                     event_id = str(agent_thought.id)
 
@@ -231,10 +232,15 @@ class OpenAPIService(BaseService):
 
             return handle_stream()
 
-        # 17.块内容输出
-        agent_result = agent.invoke(agent_state)
+        # 18.块内容输出（非流式调用）
+        agent_result = agent.invoke(
+            {
+                "messages": all_messages,
+                "long_term_memory": conversation.summary,
+            }
+        )
 
-        # 18.将消息以及推理过程添加到数据库
+        # 19.将消息以及推理过程添加到数据库
         self.conversation_service.save_agent_thoughts(
             account_id=account.id,
             app_id=app.id,

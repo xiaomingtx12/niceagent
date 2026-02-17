@@ -145,11 +145,12 @@ class BaseAgent(Serializable, Runnable):
 
         # 2.构建对应的任务id及数据初始化
         input["task_id"] = input.get("task_id", uuid.uuid4())
-        input["history"] = input.get("history", [])
         input["iteration_count"] = input.get("iteration_count", 0)
+        input["long_term_memory"] = input.get("long_term_memory", "")
 
         # 3.创建子线程并执行
         thread = Thread(target=self._agent.invoke, args=(input,))
+        thread.daemon = True  # 设置为守护线程，主线程结束时自动结束
         thread.start()
 
         # 4.调用队列管理器监听数据并返回迭代器
