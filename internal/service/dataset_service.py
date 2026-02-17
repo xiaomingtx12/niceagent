@@ -74,7 +74,7 @@ class DatasetService(BaseService):
 
         # 1.获取知识库并校验权限
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise NotFoundException("该知识库不存在")
 
         # 2.调用知识库查询模型查找最近的10条记录
@@ -98,7 +98,7 @@ class DatasetService(BaseService):
         """根据传递的知识库id获取知识库记录"""
 
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise NotFoundException("该知识库不存在")
 
         return dataset
@@ -113,7 +113,7 @@ class DatasetService(BaseService):
 
         # 1.检测知识库是否存在并校验
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise NotFoundException("该知识库不存在")
 
         # 2.检测修改后的知识库名称是否出现重名
@@ -171,12 +171,12 @@ class DatasetService(BaseService):
         self,
         dataset_id: UUID,
         account: Account,
-    ) -> Dataset:
+    ) -> None:
         """根据传递的知识库id删除知识库信息，涵盖知识库底下的所有文档、片段、关键词，以及向量数据库里存储的数据"""
 
         # 1.获取知识库并校验权限
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise NotFoundException("该知识库不存在")
 
         try:
@@ -205,7 +205,7 @@ class DatasetService(BaseService):
 
         # 1.检测知识库是否存在并校验
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise NotFoundException("该知识库不存在")
 
         # 2.调用检索服务执行检索

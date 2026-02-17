@@ -77,7 +77,7 @@ class SegmentHandler:
 
         # 2.调用服务更新文档片段的启用状态
         self.segment_service.update_segment_enabled(
-            dataset_id, document_id, segment_id, req.enabled.data
+            dataset_id, document_id, segment_id, req.enabled.data, current_user
         )
 
         return success_message("修改片段状态成功")

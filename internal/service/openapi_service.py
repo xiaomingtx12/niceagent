@@ -1,15 +1,12 @@
 import json
 from dataclasses import dataclass
-from threading import Thread
 from typing import Generator
 
 from flask import current_app
 from injector import inject
-from internal.schema.openapi_schema import OpenAPIChatReq
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 
-from internal.core.agent.agents import FunctionCallAgent
+from internal.core.agent.agents import FunctionCallAgent, ReACTAgent
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
 from internal.core.memory import TokenBufferMemory
@@ -18,6 +15,7 @@ from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import Account, EndUser, Conversation, Message
+from internal.schema.openapi_schema import OpenAPIChatReq
 from pkg.response import Response
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
@@ -25,6 +23,7 @@ from .app_service import AppService
 from .base_service import BaseService
 from .conversation_service import ConversationService
 from .retrieval_service import RetrievalService
+from ..core.language_model.entities.model_entity import ModelFeature
 
 
 @inject
@@ -99,10 +98,9 @@ class OpenAPIService(BaseService):
             },
         )
 
-        # todo:9.根据传递的Model_config创建LLM实例，等待多LLM接入时需要调整
-        llm = ChatOpenAI(
-            model=app_config["model_config"]["model"],
-            **app_config["model_config"]["parameters"],
+        # 9.从语言模型中根据模型配置获取模型实例
+        llm = self.language_model_service.load_language_model(
+            app_config.get("model_config", {})
         )
 
         # 10.实例化TokenBufferMemory用于提取短期记忆
@@ -134,26 +132,39 @@ class OpenAPIService(BaseService):
             )
             tools.append(dataset_retrieval)
 
-        # todo:14.构建Agent智能体，目前暂时使用FunctionCallAgent
-        agent = FunctionCallAgent(
+        # 14.检测是否关联工作流，如果关联了工作流则将工作流构建成工具添加到tools中
+        if app_config["workflows"]:
+            workflow_tools = (
+                self.app_config_service.get_langchain_tools_by_workflow_ids(
+                    [workflow["id"] for workflow in app_config["workflows"]]
+                )
+            )
+            tools.extend(workflow_tools)
+
+        # 15.根据LLM是否支持tool_call决定使用不同的Agent
+        agent_class = (
+            FunctionCallAgent if ModelFeature.TOOL_CALL in llm.features else ReACTAgent
+        )
+        agent = agent_class(
             llm=llm,
             agent_config=AgentConfig(
                 user_id=account.id,
                 invoke_from=InvokeFrom.DEBUGGER,
+                preset_prompt=app_config["preset_prompt"],
                 enable_long_term_memory=app_config["long_term_memory"]["enable"],
                 tools=tools,
                 review_config=app_config["review_config"],
             ),
         )
 
-        # 15.定义智能体状态基础数据
+        # 16.定义智能体状态基础数据
         agent_state = {
             "messages": [HumanMessage(req.query.data)],
             "history": history,
             "long_term_memory": conversation.summary,
         }
 
-        # 16.根据stream类型差异执行不同的代码
+        # 17.根据stream类型差异执行不同的代码
         if req.stream.data is True:
             agent_thoughts_dict = {}
 
@@ -207,22 +218,16 @@ class OpenAPIService(BaseService):
                     yield f"event: {agent_thought.event}\ndata:{json.dumps(data)}\n\n"
 
                 # 22.将消息以及推理过程添加到数据库
-                thread = Thread(
-                    target=self.conversation_service.save_agent_thoughts,
-                    kwargs={
-                        "flask_app": current_app._get_current_object(),
-                        "account_id": account.id,
-                        "app_id": app.id,
-                        "app_config": app_config,
-                        "conversation_id": conversation.id,
-                        "message_id": message.id,
-                        "agent_thoughts": [
-                            agent_thought
-                            for agent_thought in agent_thoughts_dict.values()
-                        ],
-                    },
+                self.conversation_service.save_agent_thoughts(
+                    account_id=account.id,
+                    app_id=app.id,
+                    app_config=app_config,
+                    conversation_id=conversation.id,
+                    message_id=message.id,
+                    agent_thoughts=[
+                        agent_thought for agent_thought in agent_thoughts_dict.values()
+                    ],
                 )
-                thread.start()
 
             return handle_stream()
 
@@ -230,19 +235,14 @@ class OpenAPIService(BaseService):
         agent_result = agent.invoke(agent_state)
 
         # 18.将消息以及推理过程添加到数据库
-        thread = Thread(
-            target=self.conversation_service.save_agent_thoughts,
-            kwargs={
-                "flask_app": current_app._get_current_object(),
-                "account_id": account.id,
-                "app_id": app.id,
-                "app_config": app_config,
-                "conversation_id": conversation.id,
-                "message_id": message.id,
-                "agent_thoughts": agent_result.agent_thoughts,
-            },
+        self.conversation_service.save_agent_thoughts(
+            account_id=account.id,
+            app_id=app.id,
+            app_config=app_config,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            agent_thoughts=agent_result.agent_thoughts,
         )
-        thread.start()
 
         return Response(
             data={
@@ -250,6 +250,7 @@ class OpenAPIService(BaseService):
                 "end_user_id": str(end_user.id),
                 "conversation_id": str(conversation.id),
                 "query": req.query.data,
+                "image_urls": req.image_urls.data,
                 "answer": agent_result.answer,
                 "total_token_count": 0,
                 "latency": agent_result.latency,

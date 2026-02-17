@@ -4,12 +4,31 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 添加语音及会话处理功能，完善Agent推理统计&#10;&#10;- 新增AudioHandler及AudioService，支持语音转文本和消息转流式语音&#10;- 新增ConversationHandler及ConversationService，实现会话消息分页查询、修改和删除功能&#10;- Core Agent中BaseAgent完善invoke方法，实现流式智能体事件处理聚合&#10;- FunctionCallAgent增强智能体推理事件记录，添加token计数及费用统计字段&#10;- ConversationService优化智能体推理消息存储，异步更新会话摘要与名称&#10;- 修正AgentQueueManager中停止标识相关方法命名及调用&#10;- App模型新增只读属性app_dataset_joins，方便获取知识库关联记录&#10;- 更新相关模块导入，完善Wechat及Platform相关handler、service和model导出">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式">
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/__init__.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/_asset/icon.svg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/positions.yaml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/searx_search.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/searx_search.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/entities/model_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/entities/model_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.run/Flask (app_http_app.py).run.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.run/Flask (app_http_app.py).run.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/extension/logging_extension.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/extension/logging_extension.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/builtin_tool_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/builtin_tool_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/segment_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/segment_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/openapi_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/openapi_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/ai_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/ai_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/api_tool_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/api_tool_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/dataset_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/dataset_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/document_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/document_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/embeddings_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/embeddings_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/openapi_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/segment_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/segment_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -106,11 +125,11 @@
     &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
     &quot;Shell Script.celery.executor&quot;: &quot;Run&quot;,
     &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
+    &quot;Shell Script.db upgrade.executor&quot;: &quot;Debug&quot;,
     &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
     &quot;git-widget-placeholder&quot;: &quot;workflow&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/handler&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core/tools/builtin_tools/providers/bing&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -132,11 +151,11 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\core\tools\builtin_tools\providers\bing" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
       <recent name="D:\spring_project\py\my-dify\internal\service" />
       <recent name="D:\spring_project\py\my-dify\internal\entity" />
       <recent name="D:\spring_project\py\my-dify\internal\model" />
-      <recent name="D:\spring_project\py\my-dify\internal\schema" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -297,7 +316,16 @@
       <workItem from="1769322463351" duration="9424000" />
       <workItem from="1769405234302" duration="3391000" />
       <workItem from="1769520110907" duration="8680000" />
-      <workItem from="1769585092346" duration="4084000" />
+      <workItem from="1769585092346" duration="12250000" />
+      <workItem from="1769853698813" duration="739000" />
+      <workItem from="1770878916309" duration="4948000" />
+      <workItem from="1770972373525" duration="5529000" />
+      <workItem from="1771059830838" duration="4858000" />
+      <workItem from="1771165214982" duration="1253000" />
+      <workItem from="1771180740697" duration="262000" />
+      <workItem from="1771252655977" duration="2943000" />
+      <workItem from="1771255752614" duration="8774000" />
+      <workItem from="1771314488146" duration="3042000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -411,7 +439,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769526234546</updated>
     </task>
-    <option name="localTasksCounter" value="15" />
+    <task id="LOCAL-00015" summary="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式">
+      <option name="closed" value="true" />
+      <created>1769590555553</created>
+      <option name="number" value="00015" />
+      <option name="presentableId" value="LOCAL-00015" />
+      <option name="project" value="LOCAL" />
+      <updated>1769590555553</updated>
+    </task>
+    <option name="localTasksCounter" value="16" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -456,7 +492,8 @@
     <MESSAGE value="feat(app): 添加应用调试会话与发布配置相关接口&#10;&#10;- 新增获取应用调试会话分页消息列表接口及服务方法&#10;- 实现根据应用ID和任务ID停止调试会话功能&#10;- 增加获取应用发布配置接口及重新生成WebApp凭证功能&#10;- 在Agent模块中注册ReACTAgent，支持多Agent模型选择&#10;- 应用配置校验逻辑完善，支持模型配置严格校验和工作流验证&#10;- 优化Agent推理消息结构，支持更多统计字段记录&#10;- 路由中增加调试会话、发布配置及令牌管理相关路由绑定&#10;- 增加AudioEntity语音音色允许列表，扩展文本转语音配置&#10;- 依赖注入新增LoginManager，支持登录权限验证机制" />
     <MESSAGE value="feat(app): 添加应用统计分析与WebApp交互功能&#10;&#10;- 新增AnalysisHandler与AnalysisService，实现应用统计分析接口&#10;- 统计近7天和14天消息数据，计算会话数、活跃用户、会话平均互动数等指标&#10;- 缓存统计结果到Redis，提升接口响应性能&#10;- 实现数据趋势和环比计算，辅助业务决策&#10;- 新增WebAppHandler与WebAppService，支持基于token的WebApp信息查询&#10;- 提供WebApp聊天接口，支持消息发送、流式响应和停止会话功能&#10;- 增加WebApp会话列表查询，支持是否置顶筛选&#10;- 注册路由绑定统计分析和WebApp相关接口" />
     <MESSAGE value="feat(core): 添加语音及会话处理功能，完善Agent推理统计&#10;&#10;- 新增AudioHandler及AudioService，支持语音转文本和消息转流式语音&#10;- 新增ConversationHandler及ConversationService，实现会话消息分页查询、修改和删除功能&#10;- Core Agent中BaseAgent完善invoke方法，实现流式智能体事件处理聚合&#10;- FunctionCallAgent增强智能体推理事件记录，添加token计数及费用统计字段&#10;- ConversationService优化智能体推理消息存储，异步更新会话摘要与名称&#10;- 修正AgentQueueManager中停止标识相关方法命名及调用&#10;- App模型新增只读属性app_dataset_joins，方便获取知识库关联记录&#10;- 更新相关模块导入，完善Wechat及Platform相关handler、service和model导出" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 添加语音及会话处理功能，完善Agent推理统计&#10;&#10;- 新增AudioHandler及AudioService，支持语音转文本和消息转流式语音&#10;- 新增ConversationHandler及ConversationService，实现会话消息分页查询、修改和删除功能&#10;- Core Agent中BaseAgent完善invoke方法，实现流式智能体事件处理聚合&#10;- FunctionCallAgent增强智能体推理事件记录，添加token计数及费用统计字段&#10;- ConversationService优化智能体推理消息存储，异步更新会话摘要与名称&#10;- 修正AgentQueueManager中停止标识相关方法命名及调用&#10;- App模型新增只读属性app_dataset_joins，方便获取知识库关联记录&#10;- 更新相关模块导入，完善Wechat及Platform相关handler、service和model导出" />
+    <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -470,7 +507,7 @@
     </breakpoint-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1769585096067" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1771317416953" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

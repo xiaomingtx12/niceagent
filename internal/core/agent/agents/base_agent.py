@@ -30,15 +30,14 @@ class BaseAgent(Serializable, Runnable):
     name: str = "base_agent"
 
     def __init__(
-            self,
-            llm: BaseLanguageModel,
-            agent_config: AgentConfig,
-            *args,
-            name: str = "base_agent",
-            **kwargs,
+        self,
+        llm: BaseLanguageModel,
+        agent_config: AgentConfig,
+        *args,
+        **kwargs,
     ):
         """构造函数，初始化智能体图结构程序"""
-        super().__init__(*args, name=name, llm=llm, agent_config=agent_config, **kwargs)
+        super().__init__(*args, llm=llm, agent_config=agent_config, **kwargs)
         self._agent = self._build_agent()
         self._agent_queue_manager = AgentQueueManager(
             user_id=agent_config.user_id,
@@ -50,7 +49,9 @@ class BaseAgent(Serializable, Runnable):
         """构建智能体函数，等待子类实现"""
         raise NotImplementedError("_build_agent()未实现")
 
-    def invoke(self, input: AgentState, config: Optional[RunnableConfig] = None) -> AgentResult:
+    def invoke(
+        self, input: AgentState, config: Optional[RunnableConfig] = None
+    ) -> AgentResult:
         """块内容响应，一次性生成完整内容后返回"""
         # 1.调用stream方法获取流式事件输出数据
         content = input["messages"][0].content
@@ -132,10 +133,10 @@ class BaseAgent(Serializable, Runnable):
         return agent_result
 
     def stream(
-            self,
-            input: AgentState,
-            config: Optional[RunnableConfig] = None,
-            **kwargs: Optional[Any],
+        self,
+        input: AgentState,
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Optional[Any],
     ) -> Iterator[AgentThought]:
         """流式输出，每个Not节点或者LLM每生成一个token时则会返回相应内容"""
         # 1.检测子类是否已构建Agent智能体，如果未构建则抛出错误
@@ -148,10 +149,7 @@ class BaseAgent(Serializable, Runnable):
         input["iteration_count"] = input.get("iteration_count", 0)
 
         # 3.创建子线程并执行
-        thread = Thread(
-            target=self._agent.invoke,
-            args=(input,)
-        )
+        thread = Thread(target=self._agent.invoke, args=(input,))
         thread.start()
 
         # 4.调用队列管理器监听数据并返回迭代器

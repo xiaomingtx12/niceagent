@@ -1,6 +1,7 @@
 import logging
 import os.path
-from logging.handlers import TimedRotatingFileHandler
+import sys
+from logging.handlers import TimedRotatingFileHandler, RotatingFileHandler
 
 from flask import Flask
 
@@ -15,14 +16,27 @@ def init_app(app: Flask):
     # 2.定义日志的文件名
     log_file = os.path.join(log_folder, "app.log")
 
-    # 3.设置日志的格式，并且让日志每天更新一次
-    handler = TimedRotatingFileHandler(
-        log_file,
-        when="midnight",
-        interval=1,
-        backupCount=30,
-        encoding="utf-8",
-    )
+    # 3.在Windows系统上使用不同的日志处理器来避免文件锁定问题
+    if sys.platform.startswith('win'):
+        # 在Windows上使用RotatingFileHandler以避免文件锁定问题
+        # 使用更小的文件大小限制来避免长时间持有文件句柄
+        handler = RotatingFileHandler(
+            log_file,
+            maxBytes=1024 * 1024 * 10,  # 10MB
+            backupCount=10,
+            encoding="utf-8",
+            delay=True  # 延迟创建文件直到第一次写入
+        )
+    else:
+        # 非Windows系统继续使用时间轮转
+        handler = TimedRotatingFileHandler(
+            log_file,
+            when="midnight",
+            interval=1,
+            backupCount=30,
+            encoding="utf-8",
+        )
+    
     formatter = logging.Formatter(
         "[%(asctime)s.%(msecs)03d] %(filename)s -> %(funcName)s line:%(lineno)d [%(levelname)s]: %(message)s"
     )

@@ -1,19 +1,21 @@
 import json
+import os
 from dataclasses import dataclass
 from typing import Generator
 from uuid import UUID
 
 from injector import inject
-from internal.entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 
+from internal.entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
 from internal.exception import ForbiddenException
 from internal.model import Account, Message
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .conversation_service import ConversationService
+from ..core.language_model.entities.model_entity import ModelFeature
+from ..core.language_model.providers.tongyi.chat import Chat
 
 
 @inject
@@ -48,7 +50,13 @@ class AIService(BaseService):
         )
 
         # 2.构建LLM
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+        # llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.5)
+        llm = Chat(
+            model="qwen-max",
+            features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
+            metadata={},
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+        )
 
         # 3.组装优化链
         optimize_chain = prompt_template | llm | StrOutputParser()

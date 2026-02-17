@@ -49,7 +49,8 @@ class EmbeddingsService:
     @classmethod
     def calculate_token_count(cls, query: str) -> int:
         """计算传入文本的token数"""
-        encoding = tiktoken.encoding_name_for_model("gpt-5-")
+        # 使用cl100k_base编码，这是大多数现代模型（包括GPT-3.5和GPT-4）使用的编码
+        encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(query))
 
     @property

@@ -45,7 +45,7 @@ class DocumentService(BaseService):
         """根据传递的信息创建文档列表并调用异步任务"""
         # 1.检测知识库权限
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise ForbiddenException("当前用户无该知识库权限或知识库不存在")
 
         # 2.提取文件并校验文件权限与文件扩展
@@ -111,7 +111,7 @@ class DocumentService(BaseService):
         """根据传递的知识库id+处理批次获取文档列表的状态"""
         # 1.检测知识库权限
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise ForbiddenException("当前用户无该知识库权限或知识库不存在")
 
         # 2.查询当前知识库下该批次的文档列表
@@ -188,7 +188,7 @@ class DocumentService(BaseService):
         document = self.get(Document, document_id)
         if document is None:
             raise NotFoundException("该文档不存在，请核实后重试")
-        if document.dataset_id != dataset_id or str(document.account_id) != account.id:
+        if document.dataset_id != dataset_id or document.account_id != account.id:
             raise ForbiddenException("当前用户获取该文档，请核实后重试")
 
         return document
@@ -201,7 +201,7 @@ class DocumentService(BaseService):
         document = self.get(Document, document_id)
         if document is None:
             raise NotFoundException("该文档不存在，请核实后重试")
-        if document.dataset_id != dataset_id or str(document.account_id) != account.id:
+        if document.dataset_id != dataset_id or document.account_id != account.id:
             raise ForbiddenException("当前用户无权限修改该文档，请核实后重试")
 
         return self.update(document, **kwargs)
@@ -219,7 +219,7 @@ class DocumentService(BaseService):
         document = self.get(Document, document_id)
         if document is None:
             raise NotFoundException("该文档不存在，请核实后重试")
-        if document.dataset_id != dataset_id or str(document.account_id) != account.id:
+        if document.dataset_id != dataset_id or document.account_id != account.id:
             raise ForbiddenException("当前用户无权限修改该知识库下的文档，请核实后重试")
 
         # 2.判断文档是否处于可以修改的状态，只有构建完成才可以修改enabled
@@ -260,7 +260,7 @@ class DocumentService(BaseService):
         document = self.get(Document, document_id)
         if document is None:
             raise NotFoundException("该文档不存在，请核实后重试")
-        if document.dataset_id != dataset_id or str(document.account_id) != account.id:
+        if document.dataset_id != dataset_id or document.account_id != account.id:
             raise ForbiddenException("当前用户无权限删除该知识库下的文档，请核实后重试")
 
         # 2.判断文档是否处于可删除状态，只有构建完成/出错的时候才可以删除，其他情况需要等待构建完成
@@ -285,7 +285,7 @@ class DocumentService(BaseService):
 
         # 1.获取知识库并校验权限
         dataset = self.get(Dataset, dataset_id)
-        if dataset is None or str(dataset.account_id) != account.id:
+        if dataset is None or dataset.account_id != account.id:
             raise NotFoundException("该知识库不存在，或无权限")
 
         # 2.构建分页查询器

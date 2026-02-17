@@ -2,7 +2,6 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
-from threading import Thread
 from typing import Generator
 from uuid import UUID
 
@@ -58,13 +57,6 @@ class AssistantAgentService(BaseService):
             status=MessageStatus.NORMAL,
         )
 
-        # 4.使用GPT模型作为辅助Agent的LLM大脑
-        # llm = Chat(
-        #     model="gpt-4o-mini",
-        #     temperature=0.8,
-        #     features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
-        #     metadata={},
-        # )
         # 4.使用tongyi模型作为辅助Agent的LLM大脑
         llm = Chat(
             model="qwen-max",
@@ -72,7 +64,6 @@ class AssistantAgentService(BaseService):
             metadata={},
             api_key=os.getenv("DASHSCOPE_API_KEY"),
         )
-        # llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.8)
 
         # 5.实例化TokenBufferMemory用于提取短期记忆
         token_buffer_memory = TokenBufferMemory(
@@ -90,7 +81,6 @@ class AssistantAgentService(BaseService):
 
         # 7.构建Agent智能体，使用FunctionCallAgent
         agent = FunctionCallAgent(
-            name="assistant_agent",
             llm=llm,
             agent_config=AgentConfig(
                 user_id=account.id,
@@ -124,8 +114,20 @@ class AssistantAgentService(BaseService):
                             update={
                                 "thought": agent_thoughts[event_id].thought
                                 + agent_thought.thought,
+                                # 消息相关数据
+                                "message": agent_thought.message,
+                                "message_token_count": agent_thought.message_token_count,
+                                "message_unit_price": agent_thought.message_unit_price,
+                                "message_price_unit": agent_thought.message_price_unit,
+                                # 答案相关字段
                                 "answer": agent_thoughts[event_id].answer
                                 + agent_thought.answer,
+                                "answer_token_count": agent_thought.answer_token_count,
+                                "answer_unit_price": agent_thought.answer_unit_price,
+                                "answer_price_unit": agent_thought.answer_price_unit,
+                                # Agent推理统计相关
+                                "total_token_count": agent_thought.total_token_count,
+                                "total_price": agent_thought.total_price,
                                 "latency": agent_thought.latency,
                             }
                         )
@@ -152,23 +154,14 @@ class AssistantAgentService(BaseService):
             yield f"event: {agent_thought.event}\ndata:{json.dumps(data)}\n\n"
 
         # 22.将消息以及推理过程添加到数据库
-        thread = Thread(
-            target=self.conversation_service.save_agent_thoughts,
-            kwargs={
-                "flask_app": current_app._get_current_object(),
-                "account_id": account.id,
-                "app_id": assistant_agent_id,
-                "app_config": {
-                    "long_term_memory": {"enable": True},
-                },
-                "conversation_id": conversation.id,
-                "message_id": message.id,
-                "agent_thoughts": [
-                    agent_thought for agent_thought in agent_thoughts.values()
-                ],
-            },
+        self.conversation_service.save_agent_thoughts(
+            account_id=account.id,
+            app_id=assistant_agent_id,
+            app_config={"long_term_memory": {"enable": True}},
+            conversation_id=conversation.id,
+            message_id=message.id,
+            agent_thoughts=[agent_thought for agent_thought in agent_thoughts.values()],
         )
-        thread.start()
 
     @classmethod
     def stop_chat(cls, task_id: UUID, account: Account) -> None:

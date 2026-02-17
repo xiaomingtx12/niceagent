@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,7 +16,6 @@ from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel
-from langchain_openai import ChatOpenAI
 from redis import Redis
 from sqlalchemy import func, desc
 from sqlalchemy.orm import joinedload
@@ -68,6 +68,7 @@ from ..core.agent.agents.react_agent import ReACTAgent
 from ..core.agent.entities.queue_entity import QueueEvent
 from ..core.language_model import LanguageModelManager
 from ..core.language_model.entities.model_entity import ModelFeature, ModelParameterType
+from ..core.language_model.providers.tongyi.chat import Chat
 from ..entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
 from ..entity.audio_entity import ALLOWED_AUDIO_VOICES
 from ..entity.workflow_entity import WorkflowStatus
@@ -93,7 +94,12 @@ class AppService(BaseService):
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
         # 1.创建LLM，用于生成icon提示与预设提示词
-        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.8)
+        llm = Chat(
+            model="qwen-max",
+            features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
+            metadata={},
+            api_key=os.getenv("DASHSCOPE_API_KEY"),
+        )
 
         # 2.创建DallEApiWrapper包装器
         dalle_api_wrapper = DallEAPIWrapper(model="dall-e-3", size="1024x1024")
@@ -706,7 +712,7 @@ class AppService(BaseService):
         self.get_app(app_id, account)
 
         # 2.调用智能体队列管理器停止特定任务
-        AgentQueueManager.set_stop_flask(task_id, InvokeFrom.DEBUGGER, account.id)
+        AgentQueueManager.set_stop_flag(task_id, InvokeFrom.DEBUGGER, account.id)
 
     def get_debug_conversation_messages_with_page(
         self,

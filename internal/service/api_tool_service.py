@@ -41,7 +41,7 @@ class ApiToolService(BaseService):
 
         # 1.根据传递的provider_id查找API工具提供者信息并校验
         api_tool_provider = self.get(ApiToolProvider, provider_id)
-        if api_tool_provider is None or str(api_tool_provider.account_id) != account.id:
+        if api_tool_provider is None or api_tool_provider.account_id != account.id:
             raise ValidateErrorException("该工具提供者不存在")
 
         # 2.校验openapi_schema数据
@@ -131,7 +131,7 @@ class ApiToolService(BaseService):
             .one_or_none()
         )
 
-        if api_tool is None or str(api_tool.account_id) != account.id:
+        if api_tool is None or api_tool.account_id != account.id:
             raise NotFoundException("该工具不存在")
 
         return api_tool
@@ -146,7 +146,7 @@ class ApiToolService(BaseService):
         api_tool_provider = self.get(ApiToolProvider, provider_id)
 
         # 2.检验数据是否为空，并且判断该数据是否属于当前账号
-        if api_tool_provider is None or str(api_tool_provider.account_id) != account.id:
+        if api_tool_provider is None or api_tool_provider.account_id != account.id:
             raise NotFoundException("该工具提供者不存在")
 
         return api_tool_provider
@@ -206,7 +206,7 @@ class ApiToolService(BaseService):
 
         # 1.先查找数据，检测下provider_id对应的数据是否存在，权限是否正确
         api_tool_provider = self.get(ApiToolProvider, provider_id)
-        if api_tool_provider is None or str(api_tool_provider.account_id) != account.id:
+        if api_tool_provider is None or api_tool_provider.account_id != account.id:
             raise NotFoundException("该工具提供者不存在")
 
         # 2.开启数据库的自动提交

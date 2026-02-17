@@ -58,7 +58,7 @@ class SegmentService(BaseService):
         document = self.get(Document, document_id)
         if (
             document is None
-            or str(document.account_id) != account.id
+            or document.account_id != account.id
             or document.dataset_id != dataset_id
         ):
             raise NotFoundException("该知识库文档不存在，或无权限新增，请核实后重试")
@@ -264,7 +264,7 @@ class SegmentService(BaseService):
         if (
             document is None
             or document.dataset_id != dataset_id
-            or str(document.account_id) != account.id
+            or document.account_id != account.id
         ):
             raise NotFoundException("该知识库文档不存在，或无权限查看，请核实后重试")
 
@@ -311,13 +311,13 @@ class SegmentService(BaseService):
         segment_id: UUID,
         enabled: bool,
         account: Account,
-    ) -> Segment:
+    ) -> None:
         """根据传递的信息更新文档片段的启用状态信息"""
         # 1.获取片段信息并校验权限
         segment = self.get(Segment, segment_id)
         if (
             segment is None
-            or str(segment.account_id) != account.id
+            or segment.account_id != account.id
             or segment.dataset_id != dataset_id
             or segment.document_id != document_id
         ):
