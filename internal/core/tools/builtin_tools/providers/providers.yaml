@@ -33,6 +33,13 @@
   background: "#E5E7EB"
   category: image
   created_at: 1722498386
+- name: dashscope
+  label: 阿里云通义千问
+  description: 阿里云通义千问是一个AI绘画创作大模型，支持文生图功能。
+  icon: icon.svg
+  background: "#FF6A00"
+  category: image
+  created_at: 1740132000
 - name: gaode
   label: 高德工具包
   description: 内置了高德天气预报和ip查询功能。

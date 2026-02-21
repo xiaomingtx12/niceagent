@@ -45,6 +45,20 @@ class Config:
             "broker_connection_retry_on_startup": _get_bool_env(
                 "CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP"
             ),
+            # 连接重试配置
+            "broker_connection_retry": True,
+            "broker_connection_max_retries": 10,
+            # Redis 连接池配置
+            "broker_transport_options": {
+                "socket_timeout": 30,
+                "socket_connect_timeout": 10,
+                "socket_keepalive": True,
+                "retry_on_timeout": True,
+                "max_connections": 50,
+                "health_check_interval": 30,
+            },
+            "redis_socket_timeout": 30,
+            "redis_socket_connect_timeout": 10,
         }
 
         # 辅助Agent应用id标识

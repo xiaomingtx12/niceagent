@@ -11,7 +11,7 @@ from uuid import UUID
 import requests
 from flask import current_app
 from injector import inject
-from langchain_community.utilities.dalle_image_generator import DallEAPIWrapper
+from internal.core.tools.builtin_tools.providers.dashscope import qwen_image_generation
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -101,15 +101,15 @@ class AppService(BaseService):
             api_key=os.getenv("DASHSCOPE_API_KEY"),
         )
 
-        # 2.创建DallEApiWrapper包装器
-        dalle_api_wrapper = DallEAPIWrapper(model="dall-e-3", size="1024x1024")
+        # 2.创建QwenImageGenerationTool包装器
+        qwen_image_wrapper = qwen_image_generation(model="qwen-image-max", size="1024*1024")
 
         # 3.构建生成icon链
         generate_icon_chain = (
             ChatPromptTemplate.from_template(GENERATE_ICON_PROMPT_TEMPLATE)
             | llm
             | StrOutputParser()
-            | dalle_api_wrapper.run
+            | qwen_image_wrapper._run
         )
 
         # 4.生成预设prompt链
