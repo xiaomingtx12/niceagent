@@ -155,6 +155,40 @@ class WorkflowService(BaseService):
 
         return workflows, paginator
 
+    def _is_only_position_changed(
+        self, old_graph: dict[str, Any], new_graph: dict[str, Any]
+    ) -> bool:
+        """
+        判断两个 graph 之间是否只有 position 发生了变化
+        使用 JSON 序列化对比，确保对比稳定性
+        
+        Args:
+            old_graph: 旧的 graph 配置
+            new_graph: 新的 graph 配置
+        
+        Returns:
+            True: 只有 position 变化或无变化
+            False: 有其他配置变化
+        """
+        import copy
+        
+        # 1. 深拷贝，避免修改原数据
+        old_graph_copy = copy.deepcopy(old_graph)
+        new_graph_copy = copy.deepcopy(new_graph)
+        
+        # 2. 移除所有节点的 position 字段
+        for node in old_graph_copy.get("nodes", []):
+            node.pop("position", None)
+        
+        for node in new_graph_copy.get("nodes", []):
+            node.pop("position", None)
+        
+        # 3. 序列化为 JSON 字符串后对比（sort_keys 确保顺序一致）
+        old_json = json.dumps(old_graph_copy, sort_keys=True)
+        new_json = json.dumps(new_graph_copy, sort_keys=True)
+        
+        return old_json == new_json
+
     def update_draft_graph(
         self, workflow_id: UUID, draft_graph: dict[str, Any], account: Account
     ) -> Workflow:
@@ -165,14 +199,20 @@ class WorkflowService(BaseService):
         # 2.校验传递的草稿图配置，因为有可能边有可能还未建立，所以需要校验关联的数据
         validate_draft_graph = self._validate_graph(draft_graph, account)
 
-        # 3.更新工作流草稿图配置，每次修改都将is_debug_passed的值重置为False，该处可以优化对比字典里除position的其他属性
-        self.update(
-            workflow,
-            **{
-                "draft_graph": validate_draft_graph,
-                "is_debug_passed": False,
-            },
+        # 3.判断是否只修改了 position（仅调整节点位置不需要重新调试）
+        only_position_changed = self._is_only_position_changed(
+            workflow.draft_graph, validate_draft_graph
         )
+
+        # 4.构建更新数据
+        update_data = {"draft_graph": validate_draft_graph}
+        
+        # 5.只有修改了非 position 的配置时，才重置 is_debug_passed
+        if not only_position_changed:
+            update_data["is_debug_passed"] = False
+
+        # 6.更新工作流草稿图配置
+        self.update(workflow, **update_data)
 
         return workflow
 
@@ -324,11 +364,16 @@ class WorkflowService(BaseService):
             )
         )
 
+        # 3.定义标志变量，用于标记调试是否成功
+        debug_success = False
+
         def handle_stream() -> Generator:
-            # 3.定义变量存储所有节点运行结果
+            nonlocal debug_success
+            
+            # 4.定义变量存储所有节点运行结果
             node_results = []
 
-            # 4.添加数据库工作流运行结果记录
+            # 5.添加数据库工作流运行结果记录
             workflow_result = self.create(
                 WorkflowResult,
                 **{
@@ -342,26 +387,26 @@ class WorkflowService(BaseService):
                 },
             )
 
-            # 4.调用stream服务获取工具信息
+            # 6.调用stream服务获取工具信息
             start_at = time.perf_counter()
             try:
                 for chunk in workflow_tool.stream(inputs):
-                    # 5.chunk的格式为:{"node_name": WorkflowState}，所以需要取出节点响应结构的第1个key
+                    # 7.chunk的格式为:{"node_name": WorkflowState}，所以需要取出节点响应结构的第1个key
                     first_key = next(iter(chunk))
 
-                    # 6.取出各个节点的运行结果
+                    # 8.取出各个节点的运行结果
                     node_result = chunk[first_key]["node_results"][0]
                     node_result_dict = convert_model_to_dict(node_result)
                     node_results.append(node_result_dict)
 
-                    # 7.组装响应数据并流式事件输出
+                    # 9.组装响应数据并流式事件输出
                     data = {
                         "id": str(uuid.uuid4()),
                         **node_result_dict,
                     }
                     yield f"event: workflow\ndata: {json.dumps(data)}\n\n"
 
-                # 7.流式输出完毕后，将结果存储到数据库中
+                # 10.流式输出完毕后，将结果存储到数据库中
                 self.update(
                     workflow_result,
                     **{
@@ -370,13 +415,11 @@ class WorkflowService(BaseService):
                         "latency": (time.perf_counter() - start_at),
                     },
                 )
-                self.update(
-                    workflow,
-                    **{
-                        "is_debug_passed": True,
-                    },
-                )
-            except Exception:
+                
+                # 11.标记调试成功
+                debug_success = True
+                
+            except Exception as e:
                 self.update(
                     workflow_result,
                     **{
@@ -386,7 +429,22 @@ class WorkflowService(BaseService):
                     },
                 )
 
-        return handle_stream()
+        # 12.执行生成器
+        generator = handle_stream()
+        
+        # 13.消费生成器的所有数据
+        for item in generator:
+            yield item
+        
+        # 14.生成器消费完毕后，如果调试成功，则更新 is_debug_passed
+        if debug_success:
+            self.update(
+                workflow,
+                **{
+                    "is_debug_passed": True,
+                },
+            )
+
 
     def publish_workflow(self, workflow_id: UUID, account: Account) -> Workflow:
         """根据传递的工作流id，发布指定的工作流"""

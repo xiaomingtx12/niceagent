@@ -130,9 +130,11 @@ class FunctionCallAgent(BaseAgent):
         # 3.获取当前消息列表
         messages = state["messages"]
         current_message = messages[-1]  # 当前用户消息
-        
+
         # 调试：打印当前消息列表的类型
-        logging.info(f"[DEBUG] _long_term_memory_recall_node 接收到的消息类型: {[msg.type for msg in messages]}")
+        logging.info(
+            f"[DEBUG] _long_term_memory_recall_node 接收到的消息类型: {[msg.type for msg in messages]}"
+        )
         logging.info(f"[DEBUG] _long_term_memory_recall_node 消息数量: {len(messages)}")
 
         # 4.提取历史对话消息（排除当前消息，只保留人类和AI的对话）
@@ -159,9 +161,11 @@ class FunctionCallAgent(BaseAgent):
         new_messages = [system_message]
         new_messages.extend(history_messages)
         new_messages.append(HumanMessage(current_message.content))
-        
+
         # 调试：打印构建的新消息列表顺序
-        logging.info(f"[DEBUG] 构建的新消息列表顺序: {[msg.type for msg in new_messages]}")
+        logging.info(
+            f"[DEBUG] 构建的新消息列表顺序: {[msg.type for msg in new_messages]}"
+        )
 
         # 7.返回更新：先删除所有旧消息，再添加新消息
         # 这确保了消息列表的顺序正确：系统消息始终在第一位
@@ -172,7 +176,6 @@ class FunctionCallAgent(BaseAgent):
                 *new_messages,  # 添加新消息列表
             ],
         }
-
 
     def _llm_node(self, state: AgentState) -> AgentState:
         """大语言模型节点"""
@@ -204,32 +207,36 @@ class FunctionCallAgent(BaseAgent):
         id = uuid.uuid4()
         start_at = time.perf_counter()
         llm = self.llm
-        
+
         # 调试：打印 _llm_node 接收到的消息顺序
-        logging.info(f"[DEBUG] _llm_node 接收到的消息顺序: {[msg.type for msg in state['messages']]}")
-        logging.info(f"[DEBUG] _llm_node 消息数量: {len(state['messages'])}")
+        # logging.info(f"[DEBUG] _llm_node 接收到的消息顺序: {[msg.type for msg in state['messages']]}")
+        # logging.info(f"[DEBUG] _llm_node 消息数量: {len(state['messages'])}")
         if state["messages"]:
-            logging.info(f"[DEBUG] _llm_node 第一条消息类型: {state['messages'][0].type}")
-        
+            logging.info(
+                f"[DEBUG] _llm_node 第一条消息类型: {state['messages'][0].type}"
+            )
+
         # 3.确保系统消息在第一位（防御性编程）
         messages = state["messages"]
         system_msg = None
         other_messages = []
-        
+
         for msg in messages:
             if msg.type == "system":
                 if system_msg is None:  # 只保留第一个系统消息
                     system_msg = msg
             else:
                 other_messages.append(msg)
-        
+
         # 重新组织消息：系统消息在最前面
         if system_msg:
             ordered_messages = [system_msg] + other_messages
         else:
             ordered_messages = other_messages
-        
-        logging.info(f"[DEBUG] _llm_node 重新排序后的消息顺序: {[msg.type for msg in ordered_messages]}")
+
+        logging.info(
+            f"[DEBUG] _llm_node 重新排序后的消息顺序: {[msg.type for msg in ordered_messages]}"
+        )
 
         # 3.检测大语言模型实例是否有bind_tools方法，如果没有则不绑定，如果有还需要检测tools是否为空，不为空则绑定
         if (

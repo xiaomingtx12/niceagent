@@ -5,6 +5,7 @@ from flask import Flask
 from flask_cors import CORS
 from flask_login import LoginManager
 from flask_migrate import Migrate
+from flask_weaviate import FlaskWeaviate
 from psycopg2 import OperationalError as Psycopg2OperationalError
 from sqlalchemy.exc import OperationalError
 
@@ -26,6 +27,7 @@ class Http(Flask):
         db: SQLAlchemy,
         migrate: Migrate,
         login_manager: LoginManager,
+        weaviate: FlaskWeaviate,
         middleware: Middleware,
         router: Router,
         **kwargs,
@@ -57,6 +59,7 @@ class Http(Flask):
         celery_extension.init_app(self)
         logging_extension.init_app(self)
         login_manager.init_app(self)
+        weaviate.init_app(self)
 
         # 5.解决前后端跨域问题
         CORS(

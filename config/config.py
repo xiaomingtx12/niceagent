@@ -49,3 +49,12 @@ class Config:
 
         # 辅助Agent应用id标识
         self.ASSISTANT_AGENT_ID = _get_env("ASSISTANT_AGENT_ID")
+
+        # Weaviate向量数据库配置
+        self.WEAVIATE_HTTP_HOST = _get_env("WEAVIATE_HOST")
+        self.WEAVIATE_HTTP_PORT = int(_get_env("WEAVIATE_PORT"))
+        self.WEAVIATE_HTTP_SECURE = _get_bool_env("WEAVIATE_HTTP_SECURE")
+        self.WEAVIATE_GRPC_HOST = _get_env("WEAVIATE_HOST")
+        self.WEAVIATE_GRPC_PORT = int(_get_env("WEAVIATE_GRPC_PORT"))
+        # 跳过初始化检查以减少不必要的请求
+        self.WEAVIATE_SKIP_INIT_CHECKS = _get_bool_env("WEAVIATE_SKIP_INIT_CHECKS")

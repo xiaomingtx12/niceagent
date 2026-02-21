@@ -4,22 +4,140 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式&#10;- internal/core/tools/builtin_tools/providers/searx新增Searx搜索工具及相关配置和图标文件&#10;- 优化权限验证比较方式，统一移除多处id对比时的不必要str转换&#10;- internal/extension/logging_extension.py针对Windows平台改用RotatingFileHandler避免文件锁定问题&#10;- internal/schema/openapi_schema.py扩展OpenAPIChatReq校验图片URL数量及格式的功能，支持多图上传&#10;- internal/service/openapi_service.py重构openapi聊天服务，调整agent实例化逻辑，支持多agent类型及去除异步线程保存改为同步&#10;- internal/service/conversation_service.py、internal/service/api_tool_service.py、internal/service/dataset_service.py等多处服务内权限验证逻辑精简&#10;- internal/service/document_service.py和segment_service.py统一权限判断逻辑，修正账户ID比较方式&#10;- internal/core/agent/agents/base_agent.py优化invoke函数格式及线程创建方式改善代码风格&#10;- internal/service/app_service.py中auto_create_app方法替换默认llm模型，使用tongyi的Chat及新增环境变量支持&#10;- internal/core/model/app.py新增App模型属性wechat_config，实现微信发布配置状态自动管理及同步&#10;- 调整agent停止相关调用方法名称，修正AgentQueueManager的stop标识相关调用&#10;- 移除部分冗余注释及改进注释说明，以增强代码可读性和维护性">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/docker/entrypoint.sh" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/taggers/averaged_perceptron_tagger/averaged_perceptron_tagger.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.classes.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.tagdict.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.weights.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/README" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/czech.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/danish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/dutch.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/english.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/estonian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/finnish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/french.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/german.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/greek.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/italian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/malayalam.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/norwegian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/polish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/portuguese.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/russian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/slovene.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/spanish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/swedish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/PY3/turkish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/README" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/czech.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/danish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/dutch.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/english.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/estonian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/finnish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/french.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/german.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/greek.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/italian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/malayalam.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/norwegian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/polish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/portuguese.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/russian.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/slovene.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/spanish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/swedish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt/turkish.pickle" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/README" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/czech/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/czech/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/czech/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/czech/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/danish/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/danish/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/danish/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/danish/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/dutch/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/dutch/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/dutch/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/dutch/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/english/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/english/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/english/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/english/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/estonian/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/estonian/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/estonian/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/estonian/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/finnish/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/finnish/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/finnish/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/finnish/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/french/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/french/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/french/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/french/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/german/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/german/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/german/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/german/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/greek/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/greek/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/greek/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/greek/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/italian/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/italian/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/italian/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/italian/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/norwegian/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/norwegian/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/norwegian/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/norwegian/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/polish/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/polish/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/polish/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/polish/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/portuguese/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/portuguese/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/portuguese/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/portuguese/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/russian/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/russian/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/russian/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/russian/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/slovene/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/slovene/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/slovene/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/slovene/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/spanish/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/spanish/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/spanish/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/spanish/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/swedish/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/swedish/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/swedish/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/swedish/sent_starters.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/turkish/abbrev_types.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/turkish/collocations.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/turkish/ortho_context.tab" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/internal/core/unstructured/nltk_data/tokenizers/punkt_tab/turkish/sent_starters.txt" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/default_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/searx_search.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/searx_search.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/searx_search.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/searx/searx_search.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/conversation_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/conversation_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/extension/logging_extension.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/extension/logging_extension.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/openapi_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/web_app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/web_app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/wechat_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/wechat_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/memory/token_buffer_memory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/memory/token_buffer_memory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/http_request/http_request_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/http_request/http_request_node.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/dataset_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/dataset_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/document_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/document_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/process_rule_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/process_rule_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/segment_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/segment_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/workflow_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/workflow_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
@@ -121,7 +239,7 @@
     &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
     &quot;git-widget-placeholder&quot;: &quot;workflow&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core/tools/builtin_tools/providers/bing&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -143,17 +261,22 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\core" />
       <recent name="D:\spring_project\py\my-dify\internal\core\tools\builtin_tools\providers\bing" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
       <recent name="D:\spring_project\py\my-dify\internal\service" />
       <recent name="D:\spring_project\py\my-dify\internal\entity" />
-      <recent name="D:\spring_project\py\my-dify\internal\model" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
     </key>
   </component>
-  <component name="RunManager" selected="Shell Script.pipreqs">
+  <component name="RunAnythingCache">
+    <option name="myCommands">
+      <command value="pip install tiktoken" />
+    </option>
+  </component>
+  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -238,12 +361,12 @@
       <method v="2" />
     </configuration>
     <list>
+      <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.main" />
       <item itemvalue="Shell Script.celery" />
       <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.db upgrade" />
       <item itemvalue="Shell Script.pipreqs" />
-      <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
     </list>
     <recent_temporary>
       <list>
@@ -318,6 +441,9 @@
       <workItem from="1771252655977" duration="2943000" />
       <workItem from="1771255752614" duration="8774000" />
       <workItem from="1771314488146" duration="17172000" />
+      <workItem from="1771348587238" duration="1580000" />
+      <workItem from="1771397632617" duration="8151000" />
+      <workItem from="1771597423350" duration="13928000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -508,7 +634,7 @@
     </breakpoint-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1771324248010" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1771614272836" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

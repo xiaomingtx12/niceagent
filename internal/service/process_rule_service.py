@@ -21,6 +21,17 @@ class ProcessRuleService:
         **kwargs,
     ) -> TextSplitter:
         """根据传递的处理规则+长度计算函数，获取相应的文本分割器"""
+        # 如果rule为None或不包含segment配置，使用默认值
+        if not process_rule.rule or "segment" not in process_rule.rule:
+            return RecursiveCharacterTextSplitter(
+                chunk_size=500,
+                chunk_overlap=50,
+                separators=["\n\n", "\n", "。", "！", "？", ".", "!", "?", " ", ""],
+                is_separator_regex=True,
+                length_function=length_function,
+                **kwargs,
+            )
+        
         return RecursiveCharacterTextSplitter(
             chunk_size=process_rule.rule["segment"]["chunk_size"],
             chunk_overlap=process_rule.rule["segment"]["chunk_overlap"],
@@ -33,6 +44,10 @@ class ProcessRuleService:
     @classmethod
     def clean_text_by_process_rule(cls, text: str, process_rule: ProcessRule) -> str:
         """根据传递的处理规则清除多余的字符串"""
+        # 如果rule为None或不包含pre_process_rules，直接返回原文本
+        if not process_rule.rule or "pre_process_rules" not in process_rule.rule:
+            return text
+        
         # 1.循环遍历所有与处理规则
         for pre_process_rule in process_rule.rule["pre_process_rules"]:
             # 2.删除多余空格

@@ -64,6 +64,8 @@ class TokenBufferMemory:
             max_tokens=max_token_limit,
             token_counter=self.model_instance,
             strategy="last",
+            start_on="human",  # 从人类消息开始
+            end_on="ai",  # 以AI消息结束
         )
 
     def get_history_prompt_text(

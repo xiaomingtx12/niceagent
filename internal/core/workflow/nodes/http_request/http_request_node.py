@@ -23,7 +23,7 @@ class HttpRequestNode(BaseNode):
     def invoke(
         self, state: WorkflowState, config: Optional[RunnableConfig] = None
     ) -> WorkflowState:
-        """HTTP请求节点调用函数，像指定的URL发起请求并获取相应"""
+        """HTTP请求节点调用函数，像指定的URL发起请求并获取相应数据"""
         # 1.提取节点输入变量字典
         start_at = time.perf_counter()
         _inputs_dict = extract_variables_from_state(self.node_data.inputs, state)

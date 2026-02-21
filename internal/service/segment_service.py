@@ -296,7 +296,7 @@ class SegmentService(BaseService):
         segment = self.get(Segment, segment_id)
         if (
             segment is None
-            or str(segment.account_id) != account.id
+            or segment.account_id != account.id
             or segment.dataset_id != dataset_id
             or segment.document_id != document_id
         ):

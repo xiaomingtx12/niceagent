@@ -22,4 +22,10 @@ DEFAULT_CONFIG = {
     "CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP": "True",
     # 辅助Agent智能体应用id
     "ASSISTANT_AGENT_ID": "6774fcef-b594-8008-b30c-a05b8190afe6",
+    # Weaviate向量数据库配置
+    "WEAVIATE_HOST": "localhost",
+    "WEAVIATE_PORT": 8080,
+    "WEAVIATE_HTTP_SECURE": "False",
+    "WEAVIATE_GRPC_PORT": 50051,
+    "WEAVIATE_SKIP_INIT_CHECKS": "True",
 }

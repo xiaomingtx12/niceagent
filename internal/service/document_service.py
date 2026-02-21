@@ -72,6 +72,12 @@ class DocumentService(BaseService):
 
         # 3.创建批次与处理规则并记录到数据库中
         batch = time.strftime("%Y%m%d%H%M%S") + str(random.randint(100000, 999999))
+        
+        # 如果rule为None，使用默认规则
+        if rule is None:
+            from internal.entity.dataset_entity import DEFAULT_PROCESS_RULE
+            rule = DEFAULT_PROCESS_RULE["rule"]
+        
         process_rule = self.create(
             ProcessRule,
             account_id=account.id,

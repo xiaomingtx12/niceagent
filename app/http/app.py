@@ -8,6 +8,7 @@ from internal.middleware import Middleware
 from internal.router import Router
 from internal.server import Http
 from pkg.sqlalchemy import SQLAlchemy
+from flask_weaviate import FlaskWeaviate
 
 # 将env加载到环境变量中
 dotenv.load_dotenv()
@@ -20,6 +21,7 @@ app = Http(
     migrate=injector.get(Migrate),
     router=injector.get(Router),
     login_manager=injector.get(LoginManager),
+    weaviate=injector.get(FlaskWeaviate),
     middleware=injector.get(Middleware),
 )
 
