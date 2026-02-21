@@ -1,0 +1,28 @@
+name: qwen_image_generation
+label: 通义千问图像生成
+description: 通义千问图像生成模型，支持多种艺术风格，擅长复杂文本渲染。
+params:
+  - name: model
+    label: 模型
+    type: select
+    default: qwen-image-max
+    required: true
+    options:
+      - value: qwen-image-max
+        label: "通义千问 Image Max"
+  - name: size
+    label: 图片尺寸
+    type: select
+    default: "1664*928"
+    required: true
+    options:
+      - value: "1664*928"
+        label: "(横屏)1664x928 (16:9)"
+      - value: "1472*1104"
+        label: "(横屏)1472x1104 (4:3)"
+      - value: "1328*1328"
+        label: "(方)1328x1328 (1:1)"
+      - value: "1104*1472"
+        label: "(竖屏)1104x1472 (3:4)"
+      - value: "928*1664"
+        label: "(竖屏)928x1664 (9:16)"
