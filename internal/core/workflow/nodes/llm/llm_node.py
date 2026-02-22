@@ -1,5 +1,6 @@
 import time
 from typing import Optional
+from uuid import UUID
 
 from jinja2 import Template
 from langchain_core.runnables import RunnableConfig
@@ -15,6 +16,12 @@ class LLMNode(BaseNode):
     """大语言模型节点"""
 
     node_data: LLMNodeData
+    account_id: Optional[UUID] = None
+
+    def __init__(self, node_data: LLMNodeData, account_id: Optional[UUID] = None, **kwargs):
+        """初始化 LLM 节点"""
+        super().__init__(node_data=node_data, **kwargs)
+        self.account_id = account_id
 
     def invoke(
         self, state: WorkflowState, config: Optional[RunnableConfig] = None
@@ -33,8 +40,10 @@ class LLMNode(BaseNode):
         from internal.service import LanguageModelService
 
         language_model_service = injector.get(LanguageModelService)
+        
         llm = language_model_service.load_language_model(
-            self.node_data.language_model_config
+            self.node_data.language_model_config,
+            account_id=self.account_id
         )
 
         # 4.使用stream来代替invoke，避免接口长时间未响应超时

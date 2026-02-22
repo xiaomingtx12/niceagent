@@ -16,6 +16,7 @@ from .language_model_handler import LanguageModelHandler
 from .oauth_handler import OAuthHandler
 from .openapi_handler import OpenAPIHandler
 from .platform_handler import PlatformHandler
+from .provider_api_key_handler import ProviderApiKeyHandler
 from .segment_handler import SegmentHandler
 from .upload_file_handler import UploadFileHandler
 from .web_app_handler import WebAppHandler
@@ -47,4 +48,5 @@ __all__ = [
     "ConversationHandler",
     "WechatHandler",
     "PlatformHandler",
+    "ProviderApiKeyHandler",
 ]

@@ -1,17 +1,14 @@
 import io
 import json
-import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from threading import Thread
 from typing import Any, Generator
 from uuid import UUID
 
 import requests
 from flask import current_app
 from injector import inject
-from internal.core.tools.builtin_tools.providers.dashscope import qwen_image_generation
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -26,6 +23,7 @@ from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.memory import TokenBufferMemory
 from internal.core.tools.api_tools.providers import ApiProviderManager
 from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
+from internal.core.tools.builtin_tools.providers.tongyi import qwen_image_generation
 from internal.entity.app_entity import (
     AppStatus,
     AppConfigType,
@@ -63,6 +61,7 @@ from .base_service import BaseService
 from .conversation_service import ConversationService
 from .cos_service import CosService
 from .language_model_service import LanguageModelService
+from .provider_api_key_service import ProviderApiKeyService
 from .retrieval_service import RetrievalService
 from ..core.agent.agents.react_agent import ReACTAgent
 from ..core.agent.entities.queue_entity import QueueEvent
@@ -90,19 +89,30 @@ class AppService(BaseService):
     app_config_service: AppConfigService
     language_model_service: LanguageModelService
     language_model_manager: LanguageModelManager
+    provider_api_key_service: ProviderApiKeyService
 
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
-        # 1.创建LLM，用于生成icon提示与预设提示词
+        from internal.lib.api_key_helper import get_api_key_for_provider
+
+        # 1.获取用户配置的 API Key（如果未配置会抛出异常）
+        try:
+            api_key = get_api_key_for_provider("tongyi", account_id)
+        except Exception as e:
+            raise ValidateErrorException(f"创建应用失败: {str(e)}")
+
+        # 2.创建LLM，用于生成icon提示与预设提示词
         llm = Chat(
             model="qwen-max",
             features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
             metadata={},
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            api_key=api_key,
         )
 
         # 2.创建QwenImageGenerationTool包装器
-        qwen_image_wrapper = qwen_image_generation(model="qwen-image-max", size="1024*1024")
+        qwen_image_wrapper = qwen_image_generation(
+            model="qwen-image-max", size="1024*1024"
+        )
 
         # 3.构建生成icon链
         generate_icon_chain = (
@@ -566,7 +576,7 @@ class AppService(BaseService):
 
         # 5.从语言模型管理器中加载大语言模型
         llm = self.language_model_service.load_language_model(
-            draft_app_config.get("model_config", {})
+            draft_app_config.get("model_config", {}), account_id=account.id
         )
 
         # 6.实例化TokenBufferMemory用于提取短期记忆

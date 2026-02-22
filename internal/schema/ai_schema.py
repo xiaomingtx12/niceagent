@@ -25,3 +25,10 @@ class OptimizePromptReq(FlaskForm):
             Length(max=2000, message="预设prompt的长度不能超过2000个字符"),
         ],
     )
+    
+    app_id = StringField(
+        "app_id",
+        validators=[
+            UUID(message="应用id格式必须为uuid"),
+        ],
+    )

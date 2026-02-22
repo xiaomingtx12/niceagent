@@ -56,11 +56,12 @@ class ModelParameter(BaseModel):
 
 
 class ModelFeature(str, Enum):
-    """模型特性，用于标记模型支持的特性信息，涵盖工具调用、智能体推理、图片输入"""
+    """模型特性，用于标记模型支持的特性信息，涵盖工具调用、智能体推理、图片输入、视频输入"""
 
     TOOL_CALL = "tool_call"  # 工具调用
     AGENT_THOUGHT = "agent_thought"  # 是否支持智能体推理，一般要求参数量比较大，能回答通用型任务，如果不支持推理则会直接生成答案，而不进行中间步骤
     IMAGE_INPUT = "image_input"  # 图片输入，多模态大语言模型
+    VIDEO_INPUT = "video_input"  # 视频输入，支持视频理解的多模态大语言模型
 
 
 class ModelEntity(BaseModel):

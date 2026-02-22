@@ -105,7 +105,10 @@ class Workflow(BaseTool):
             elif node.node_type == NodeType.LLM:
                 graph.add_node(
                     node_flag,
-                    NodeClasses[NodeType.LLM](node_data=node),
+                    NodeClasses[NodeType.LLM](
+                        node_data=node,
+                        account_id=self._workflow_config.account_id
+                    ),
                 )
             elif node.node_type == NodeType.TEMPLATE_TRANSFORM:
                 graph.add_node(

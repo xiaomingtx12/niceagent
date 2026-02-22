@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 from flask_login import login_required, current_user
 from injector import inject
-from internal.schema.ai_schema import OptimizePromptReq, GenerateSuggestedQuestionsReq
 
+from internal.schema.ai_schema import OptimizePromptReq, GenerateSuggestedQuestionsReq
 from internal.service import AIService
 from pkg.response import validate_error_json, compact_generate_response, success_json
 
@@ -24,7 +24,11 @@ class AIHandler:
             return validate_error_json(req.errors)
 
         # 2.调用服务优化prompt
-        resp = self.ai_service.optimize_prompt(req.prompt.data)
+        resp = self.ai_service.optimize_prompt(
+            req.prompt.data, 
+            current_user,
+            req.app_id.data if req.app_id.data else None
+        )
 
         return compact_generate_response(resp)
 

@@ -25,6 +25,7 @@ from .oauth_service import OAuthService
 from .openapi_service import OpenAPIService
 from .platform_service import PlatformService
 from .process_rule_service import ProcessRuleService
+from .provider_api_key_service import ProviderApiKeyService
 from .retrieval_service import RetrievalService
 from .segment_service import SegmentService
 from .upload_file_service import UploadFileService
@@ -68,4 +69,5 @@ __all__ = [
     "AudioService",
     "WechatService",
     "PlatformService",
+    "ProviderApiKeyService",
 ]

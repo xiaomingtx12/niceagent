@@ -7,6 +7,9 @@ from uuid import UUID
 
 from flask import request
 from injector import inject
+from sqlalchemy import desc
+
+from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
 from internal.core.workflow import Workflow as WorkflowTool
 from internal.core.workflow.entities.edge_entity import BaseEdgeData
 from internal.core.workflow.entities.node_entity import NodeType, BaseNodeData
@@ -26,10 +29,6 @@ from internal.entity.workflow_entity import (
     DEFAULT_WORKFLOW_CONFIG,
     WorkflowResultStatus,
 )
-from internal.schema.workflow_schema import CreateWorkflowReq, GetWorkflowsWithPageReq
-from sqlalchemy import desc
-
-from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
 from internal.exception import (
     ValidateErrorException,
     NotFoundException,
@@ -38,6 +37,7 @@ from internal.exception import (
 )
 from internal.lib.helper import convert_model_to_dict
 from internal.model import Account, Workflow, Dataset, ApiTool, WorkflowResult
+from internal.schema.workflow_schema import CreateWorkflowReq, GetWorkflowsWithPageReq
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
@@ -161,32 +161,32 @@ class WorkflowService(BaseService):
         """
         判断两个 graph 之间是否只有 position 发生了变化
         使用 JSON 序列化对比，确保对比稳定性
-        
+
         Args:
             old_graph: 旧的 graph 配置
             new_graph: 新的 graph 配置
-        
+
         Returns:
             True: 只有 position 变化或无变化
             False: 有其他配置变化
         """
         import copy
-        
+
         # 1. 深拷贝，避免修改原数据
         old_graph_copy = copy.deepcopy(old_graph)
         new_graph_copy = copy.deepcopy(new_graph)
-        
+
         # 2. 移除所有节点的 position 字段
         for node in old_graph_copy.get("nodes", []):
             node.pop("position", None)
-        
+
         for node in new_graph_copy.get("nodes", []):
             node.pop("position", None)
-        
+
         # 3. 序列化为 JSON 字符串后对比（sort_keys 确保顺序一致）
         old_json = json.dumps(old_graph_copy, sort_keys=True)
         new_json = json.dumps(new_graph_copy, sort_keys=True)
-        
+
         return old_json == new_json
 
     def update_draft_graph(
@@ -206,7 +206,7 @@ class WorkflowService(BaseService):
 
         # 4.构建更新数据
         update_data = {"draft_graph": validate_draft_graph}
-        
+
         # 5.只有修改了非 position 的配置时，才重置 is_debug_passed
         if not only_position_changed:
             update_data["is_debug_passed"] = False
@@ -369,7 +369,7 @@ class WorkflowService(BaseService):
 
         def handle_stream() -> Generator:
             nonlocal debug_success
-            
+
             # 4.定义变量存储所有节点运行结果
             node_results = []
 
@@ -415,10 +415,10 @@ class WorkflowService(BaseService):
                         "latency": (time.perf_counter() - start_at),
                     },
                 )
-                
+
                 # 11.标记调试成功
                 debug_success = True
-                
+
             except Exception as e:
                 self.update(
                     workflow_result,
@@ -431,11 +431,11 @@ class WorkflowService(BaseService):
 
         # 12.执行生成器
         generator = handle_stream()
-        
+
         # 13.消费生成器的所有数据
         for item in generator:
             yield item
-        
+
         # 14.生成器消费完毕后，如果调试成功，则更新 is_debug_passed
         if debug_success:
             self.update(
@@ -444,7 +444,6 @@ class WorkflowService(BaseService):
                     "is_debug_passed": True,
                 },
             )
-
 
     def publish_workflow(self, workflow_id: UUID, account: Account) -> Workflow:
         """根据传递的工作流id，发布指定的工作流"""

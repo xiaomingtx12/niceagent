@@ -10,7 +10,7 @@ from internal.schema.assistant_agent_schema import (
     GetAssistantAgentMessagesWithPageReq,
     GetAssistantAgentMessagesWithPageResp,
 )
-from internal.service import AssistantAgentService
+from internal.service import AssistantAgentService, ProviderApiKeyService
 from pkg.paginator import PageModel
 from pkg.response import (
     validate_error_json,
@@ -26,6 +26,7 @@ class AssistantAgentHandler:
     """辅助智能体处理器"""
 
     assistant_agent_service: AssistantAgentService
+    provider_api_key_service: ProviderApiKeyService
 
     @login_required
     def assistant_agent_chat(self):
@@ -35,7 +36,22 @@ class AssistantAgentHandler:
         if not req.validate():
             return validate_error_json(req.errors)
 
-        # 2.调用服务创建会话响应
+        # 2.在开始流式响应前，先验证用户是否配置了 DashScope API Key 并初始化服务
+        from pkg.response import message, HttpCode
+
+        try:
+            # 验证 API Key
+            # get_api_key_for_provider("tongyi", current_user.id)
+
+            # 初始化 embeddings 和 faiss 服务
+            self.assistant_agent_service.embeddings_service.initialize_embeddings(
+                current_user.id
+            )
+            self.assistant_agent_service.faiss_service.initialize_faiss()
+        except Exception as e:
+            return message(code=HttpCode.FAIL, msg=str(e))
+
+        # 3.调用服务创建会话响应
         response = self.assistant_agent_service.chat(req.query.data, current_user)
 
         return compact_generate_response(response)

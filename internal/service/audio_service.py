@@ -12,6 +12,7 @@ from openai import OpenAI
 from werkzeug.datastructures import FileStorage
 
 from internal.exception import NotFoundException, FailException
+from internal.lib.api_key_helper import get_api_key_for_provider
 from internal.model import Account, Message, App, AppConfig, AppConfigVersion
 from pkg.sqlalchemy import SQLAlchemy
 from .app_service import AppService
@@ -28,21 +29,27 @@ class AudioService(BaseService):
     db: SQLAlchemy
     app_service: AppService
 
-    def audio_to_text(self, audio: FileStorage) -> str:
+    def audio_to_text(self, audio: FileStorage, account: Account) -> str:
         """将传递的语音转换成文本"""
-        # 1.提取音频文件，并将音频文件转换成FileContent类型
+        # 1.获取用户配置的 OpenAI API Key
+        try:
+            api_key = get_api_key_for_provider("openai", account.id)
+        except Exception as e:
+            raise FailException(f"语音转文本失败: {str(e)}")
+
+        # 2.提取音频文件，并将音频文件转换成FileContent类型
         file_content = audio.stream.read()
         audio_file = BytesIO(file_content)
         audio_file.name = "recording.wav"
 
-        # 2.创建OpenAI客户端，并调用whisper服务将音频转换成文字
-        client = self._get_openai_client()
+        # 3.创建OpenAI客户端，并调用whisper服务将音频转换成文字
+        client = self._get_openai_client(api_key)
         transcription = client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file,
         )
 
-        # 3.返回识别的文字内容
+        # 4.返回识别的文字内容
         return transcription.text
 
     def message_to_audio(self, message_id: UUID, account: Account) -> Generator:
@@ -107,7 +114,11 @@ class AudioService(BaseService):
 
         # 6.调用tts服务将消息answer转换成流式事件输出语音
         try:
-            client = self._get_openai_client()
+
+            # 获取用户配置的 OpenAI API Key
+            api_key = get_api_key_for_provider("openai", account.id)
+
+            client = self._get_openai_client(api_key)
             response = client.audio.speech.with_streaming_response.create(
                 model="tts-1",
                 voice=voice,
@@ -135,9 +146,9 @@ class AudioService(BaseService):
         return tts()
 
     @classmethod
-    def _get_openai_client(cls) -> OpenAI:
+    def _get_openai_client(cls, api_key: str) -> OpenAI:
         """获取OpenAI客户端"""
         return OpenAI(
-            api_key=os.environ.get("OPENAI_API_KEY"),
+            api_key=api_key,
             base_url=os.environ.get("OPENAI_API_BASE"),
         )

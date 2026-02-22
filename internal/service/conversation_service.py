@@ -1,5 +1,4 @@
 import logging
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
@@ -10,7 +9,6 @@ from flask import Flask, current_app
 from injector import inject
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
 from sqlalchemy import desc
 from sqlalchemy.orm import joinedload
 
@@ -26,9 +24,8 @@ from internal.entity.conversation_entity import (
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from .provider_api_key_service import ProviderApiKeyService
 from ..core.agent.entities.queue_entity import AgentThought, QueueEvent
-from ..core.language_model.entities.model_entity import ModelFeature
-from ..core.language_model.providers.tongyi.chat import Chat
 from ..exception import NotFoundException
 from ..model import Conversation, Message, MessageAgentThought, Account
 from ..schema.conversation_schema import GetConversationMessagesWithPageReq
@@ -40,20 +37,52 @@ class ConversationService(BaseService):
     """会话服务"""
 
     db: SQLAlchemy
+    provider_api_key_service: ProviderApiKeyService
+
+    def _load_model_from_config(
+        self, model_config: dict = None, account_id: UUID = None
+    ):
+        """从模型配置加载模型实例，如果失败则使用默认模型"""
+        from internal.service.language_model_service import LanguageModelService
+        from injector import Injector
+
+        try:
+            if model_config and account_id:
+                # 使用应用配置的模型
+                language_model_service = Injector().get(LanguageModelService)
+                return language_model_service.load_language_model(
+                    model_config, account_id
+                )
+        except Exception as e:
+            logging.warning(f"加载配置模型失败: {str(e)}，使用默认模型")
 
     @classmethod
-    def summary(cls, human_message: str, ai_message: str, old_summary: str = "") -> str:
+    def summary(
+        cls,
+        human_message: str,
+        ai_message: str,
+        old_summary: str = "",
+        account_id: UUID = None,
+        model_config: dict = None,
+    ) -> str:
         """根据传递的人类消息、AI消息还有原始的摘要信息总结生成一段新的摘要"""
-        # 1.创建prompt
-        prompt = ChatPromptTemplate.from_template(SUMMARIZER_TEMPLATE)
+        from internal.service.language_model_service import LanguageModelService
+        from injector import Injector
 
-        # 2.构建大语言模型实例，并且将大语言模型的温度调低，降低幻觉的概率
-        llm = Chat(
-            model="qwen-max",
-            features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
-            metadata={},
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-        )
+        # 1.加载模型
+        llm = None
+        try:
+            if model_config and account_id:
+                # 使用应用配置的模型
+                language_model_service = Injector().get(LanguageModelService)
+                llm = language_model_service.load_language_model(
+                    model_config, account_id
+                )
+        except Exception as e:
+            logging.warning(f"加载配置模型失败: {str(e)}")
+
+        # 2.创建prompt
+        prompt = ChatPromptTemplate.from_template(SUMMARIZER_TEMPLATE)
 
         # 3.构建链应用
         summary_chain = prompt | llm | StrOutputParser()
@@ -69,34 +98,45 @@ class ConversationService(BaseService):
         return new_summary
 
     @classmethod
-    def generate_conversation_name(cls, query: str) -> str:
+    def generate_conversation_name(
+        cls, query: str, account_id: UUID = None, model_config: dict = None
+    ) -> str:
         """根据传递的query生成对应的会话名字，并且语言与用户的输入保持一致"""
-        # 1.创建prompt
+        from internal.service.language_model_service import LanguageModelService
+        from injector import Injector
+
+        # 1.加载模型
+        llm = None
+        try:
+            if model_config and account_id:
+                # 使用应用配置的模型
+                language_model_service = Injector().get(LanguageModelService)
+                llm = language_model_service.load_language_model(
+                    model_config, account_id
+                )
+        except Exception as e:
+            logging.warning(f"加载配置模型失败: {str(e)}")
+
+        # 2.创建prompt
         prompt = ChatPromptTemplate.from_messages(
             [("system", CONVERSATION_NAME_TEMPLATE), ("human", "{query}")]
         )
 
-        # 2.构建大语言模型实例，并且将大语言模型的温度调低，降低幻觉的概率
-        llm = Chat(
-            model="qwen-max",
-            features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
-            metadata={},
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
-        )
+        # 3.构建结构化输出
         structured_llm = llm.with_structured_output(ConversationInfo)
 
-        # 3.构建链应用
+        # 4.构建链应用
         chain = prompt | structured_llm
 
-        # 4.提取并整理query，截取长度过长的部分
+        # 5.提取并整理query，截取长度过长的部分
         if len(query) > 2000:
             query = query[:300] + "...[TRUNCATED]..." + query[-300:]
         query = query.replace("\n", " ")
 
-        # 5.调用链并获取会话信息
+        # 6.调用链并获取会话信息
         conversation_info = chain.invoke({"query": query})
 
-        # 6.提取会话名称
+        # 7.提取会话名称
         name = "新的会话"
         try:
             if conversation_info and hasattr(conversation_info, "subject"):
@@ -111,40 +151,51 @@ class ConversationService(BaseService):
         return name
 
     @classmethod
-    def generate_suggested_questions(cls, histories: str) -> list[str]:
+    def generate_suggested_questions(
+        cls, histories: str, account_id: UUID = None, model_config: dict = None
+    ) -> list[str]:
         """根据传递的历史信息生成最多不超过3个的建议问题"""
+        from internal.service.language_model_service import LanguageModelService
+        from injector import Injector
+
         try:
-            # 1.创建prompt
+            # 1.加载模型
+            llm = None
+            try:
+                if model_config and account_id:
+                    # 使用应用配置的模型
+                    language_model_service = Injector().get(LanguageModelService)
+                    llm = language_model_service.load_language_model(
+                        model_config, account_id
+                    )
+            except Exception as e:
+                logging.warning(f"加载配置模型失败: {str(e)}，使用默认模型")
+
+            # 2.创建prompt
             prompt = ChatPromptTemplate.from_messages(
                 [("system", SUGGESTED_QUESTIONS_TEMPLATE), ("human", "{histories}")]
             )
 
-            # 2.构建大语言模型实例，并且将大语言模型的温度调低，降低幻觉的概率
-            llm = Chat(
-                model="qwen-max",
-                features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
-                metadata={},
-                api_key=os.getenv("DASHSCOPE_API_KEY"),
-            )
+            # 3.构建结构化输出
             structured_llm = llm.with_structured_output(SuggestedQuestions)
 
-            # 3.构建链应用
+            # 4.构建链应用
             chain = prompt | structured_llm
 
-            # 4.调用链并获取建议问题列表
+            # 5.调用链并获取建议问题列表
             suggested_questions = chain.invoke({"histories": histories})
 
-            # 5.提取建议问题列表
+            # 6.提取建议问题列表
             questions = []
             if suggested_questions and hasattr(suggested_questions, "questions"):
                 questions = suggested_questions.questions
-            
-            # 6.限制问题数量
+
+            # 7.限制问题数量
             if len(questions) > 3:
                 questions = questions[:3]
 
             return questions
-            
+
         except Exception as e:
             logging.exception(
                 f"生成建议问题失败, histories: {histories[:200]}..., 错误信息: {str(e)}"
@@ -244,6 +295,8 @@ class ConversationService(BaseService):
                             "conversation_id": conversation.id,
                             "query": message.query,
                             "answer": agent_thought.answer,
+                            "account_id": account_id,
+                            "model_config": app_config.get("model_config"),
                         },
                     ).start()
 
@@ -255,6 +308,8 @@ class ConversationService(BaseService):
                             "flask_app": current_app._get_current_object(),
                             "conversation_id": conversation.id,
                             "query": message.query,
+                            "account_id": account_id,
+                            "model_config": app_config.get("model_config"),
                         },
                     ).start()
 
@@ -277,32 +332,48 @@ class ConversationService(BaseService):
         conversation_id: UUID,
         query: str,
         answer: str,
+        account_id: UUID,
+        model_config: dict = None,
     ):
         with flask_app.app_context():
+
             # 1.根据id获取会话
             conversation = self.get(Conversation, conversation_id)
 
-            # 2.计算会话新摘要信息
-            new_summary = self.summary(query, answer, conversation.summary)
+            # 3.计算会话新摘要信息
+            new_summary = self.summary(
+                query,
+                answer,
+                conversation.summary,
+                account_id,
+                model_config,
+            )
 
-            # 3.更新会话的摘要信息
+            # 4.更新会话的摘要信息
             self.update(
                 conversation,
                 summary=new_summary,
             )
 
     def _generate_conversation_name_and_update(
-        self, flask_app: Flask, conversation_id: UUID, query: str
+        self,
+        flask_app: Flask,
+        conversation_id: UUID,
+        query: str,
+        account_id: UUID,
+        model_config: dict = None,
     ) -> None:
         """生成会话名字并更新"""
         with flask_app.app_context():
             # 1.根据会话id获取会话
             conversation = self.get(Conversation, conversation_id)
 
-            # 2.计算获取新会话名字
-            new_conversation_name = self.generate_conversation_name(query)
+            # 3.计算获取新会话名字
+            new_conversation_name = self.generate_conversation_name(
+                query, account_id, model_config
+            )
 
-            # 3.调用更新服务更新会话名称
+            # 4.调用更新服务更新会话名称
             self.update(
                 conversation,
                 name=new_conversation_name,

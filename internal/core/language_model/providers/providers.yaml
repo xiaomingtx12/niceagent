@@ -20,6 +20,13 @@
   background: "#FFFFFF"
   supported_model_types:
     - chat
+- name: zhipu
+  label: 智谱AI
+  description: 智谱AI提供的免费模型，例如GLM-4-Flash、GLM-4.7-Flash等，支持工具调用。
+  icon: icon.png
+  background: "#FFFFFF"
+  supported_model_types:
+    - chat
 - name: ollama
   label: Ollama
   description: Ollama提供的本地离线大语言模型，例如qwen2.5-7b等。

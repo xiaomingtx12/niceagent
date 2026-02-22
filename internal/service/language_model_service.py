@@ -2,6 +2,7 @@ import mimetypes
 import os
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from flask import current_app
 from injector import inject
@@ -12,6 +13,7 @@ from internal.exception import NotFoundException
 from internal.lib.helper import convert_model_to_dict
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from ..lib.api_key_helper import get_api_key_for_provider
 
 
 @inject
@@ -99,28 +101,53 @@ class LanguageModelService(BaseService):
             byte_data = f.read()
             return byte_data, mimetype
 
-    def load_language_model(self, model_config: dict[str, Any]) -> BaseLanguageModel:
+    def load_language_model(
+        self,
+        model_config: dict[str, Any],
+        account_id: UUID = None,
+    ) -> BaseLanguageModel:
         """根据传递的模型配置加载大语言模型，并返回其实例"""
         try:
             # 1.从model_config中提取出provider、model、parameters
             provider_name = model_config.get("provider", "")
             model_name = model_config.get("model", "")
-            parameters = model_config.get("parameters", {})
+            parameters = model_config.get("parameters", {}).copy()
 
-            # 2.从模型管理器获取提供者、模型实体、模型类
+            # 2.获取用户的 API Key（必须成功，否则抛出异常）
+            if account_id:
+                api_key = get_api_key_for_provider(provider_name, account_id)
+                # 根据不同提供商设置对应的 API Key 参数名
+                api_key_param = self._get_api_key_param_name(provider_name)
+                parameters[api_key_param] = api_key
+
+            # 3.从模型管理器获取提供者、模型实体、模型类
             provider = self.language_model_manager.get_provider(provider_name)
             model_entity = provider.get_model_entity(model_name)
             model_class = provider.get_model_class(model_entity.model_type)
 
-            # 3.实例化模型后并返回
+            # 4.实例化模型后并返回
             return model_class(
                 **model_entity.attributes,
                 **parameters,
                 features=model_entity.features,
                 metadata=model_entity.metadata,
             )
-        except Exception as _:
-            return self.load_default_language_model()
+        except Exception as e:
+            # 记录错误日志
+            current_app.logger.error(f"加载语言模型失败: {str(e)}")
+            # 重新抛出异常，不再降级
+            raise
+
+    def _get_api_key_param_name(self, provider_name: str) -> str:
+        """根据提供商名称返回对应的 API Key 参数名"""
+        api_key_mapping = {
+            "tongyi": "dashscope_api_key",
+            "openai": "api_key",
+            "moonshot": "api_key",
+            "zhipuai": "api_key",
+            "zhipu": "api_key",
+        }
+        return api_key_mapping.get(provider_name, "api_key")
 
     def load_default_language_model(self) -> BaseLanguageModel:
         """加载默认的大语言模型，在模型管理器中获取不到模型或者出错时使用默认模型进行兜底"""

@@ -1,11 +1,9 @@
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Generator
 from uuid import UUID
 
-from flask import current_app
 from injector import inject
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
@@ -25,6 +23,7 @@ from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .conversation_service import ConversationService
+from .embeddings_service import EmbeddingsService
 from .faiss_service import FaissService
 from ..core.language_model.providers.tongyi.chat import Chat
 
@@ -36,17 +35,29 @@ class AssistantAgentService(BaseService):
 
     db: SQLAlchemy
     faiss_service: FaissService
+    embeddings_service: EmbeddingsService
     conversation_service: ConversationService
 
     def chat(self, query, account: Account) -> Generator:
         """传递query与账号实现与辅助Agent进行会话"""
-        # 1.获取辅助Agent对应的id
+        from internal.lib.api_key_helper import get_api_key_for_provider
+        from flask import current_app
+
+        # 1.获取用户配置的 tongyi API Key
+        try:
+            api_key = get_api_key_for_provider("tongyi", account.id)
+        except Exception as e:
+            from internal.exception import FailException
+
+            raise FailException(f"辅助智能体会话失败: {str(e)}")
+
+        # 2.获取辅助Agent对应的id
         assistant_agent_id = current_app.config.get("ASSISTANT_AGENT_ID")
 
-        # 2.获取当前应用的调试会话信息
+        # 3.获取当前应用的调试会话信息
         conversation = account.assistant_agent_conversation
 
-        # 3.新建一条消息记录
+        # 4.新建一条消息记录
         message = self.create(
             Message,
             app_id=assistant_agent_id,
@@ -57,15 +68,15 @@ class AssistantAgentService(BaseService):
             status=MessageStatus.NORMAL,
         )
 
-        # 4.使用tongyi模型作为辅助Agent的LLM大脑
+        # 5.使用tongyi模型作为辅助Agent的LLM大脑
         llm = Chat(
             model="qwen-max",
             features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
             metadata={},
-            api_key=os.getenv("DASHSCOPE_API_KEY"),
+            api_key=api_key,
         )
 
-        # 5.实例化TokenBufferMemory用于提取短期记忆
+        # 6.实例化TokenBufferMemory用于提取短期记忆
         token_buffer_memory = TokenBufferMemory(
             db=self.db,
             conversation=conversation,
@@ -73,13 +84,13 @@ class AssistantAgentService(BaseService):
         )
         history = token_buffer_memory.get_history_prompt_messages(message_limit=3)
 
-        # 6.将草稿配置中的tools转换成LangChain工具
+        # 7.将草稿配置中的tools转换成LangChain工具
         tools = [
             self.faiss_service.convert_faiss_to_tool(),
             self.convert_create_app_to_tool(account.id),
         ]
 
-        # 7.构建Agent智能体，使用FunctionCallAgent
+        # 8.构建Agent智能体，使用FunctionCallAgent
         agent = FunctionCallAgent(
             llm=llm,
             agent_config=AgentConfig(

@@ -9,6 +9,7 @@ from langchain_core.messages import (
     get_buffer_string,
 )
 from sqlalchemy import desc
+import tiktoken
 
 from internal.entity.conversation_entity import MessageStatus
 from internal.model import Conversation, Message
@@ -22,6 +23,31 @@ class TokenBufferMemory:
     db: SQLAlchemy  # 数据库实例
     conversation: Conversation  # 会话模型
     model_instance: BaseLanguageModel  # LLM大语言模型
+
+    def _count_tokens(self, messages: list[AnyMessage]) -> int:
+        """使用 tiktoken 计算消息列表的 token 数量"""
+        try:
+            # 尝试使用 cl100k_base 编码器（适用于 GPT-3.5/GPT-4）
+            encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            # 如果失败，使用默认编码器
+            try:
+                encoding = tiktoken.get_encoding("gpt2")
+            except Exception:
+                # 如果都失败，使用简单估算：1 token ≈ 4 字符
+                total_chars = sum(len(str(msg.content)) for msg in messages)
+                return total_chars // 4
+
+        # 计算所有消息的 token 数
+        total_tokens = 0
+        for message in messages:
+            # 每条消息有固定的格式开销（约 4 tokens）
+            total_tokens += 4
+            # 计算消息内容的 token 数
+            if hasattr(message, 'content') and message.content:
+                total_tokens += len(encoding.encode(str(message.content)))
+        
+        return total_tokens
 
     def get_history_prompt_messages(
         self,
@@ -62,7 +88,7 @@ class TokenBufferMemory:
         return trim_messages(
             messages=prompt_messages,
             max_tokens=max_token_limit,
-            token_counter=self.model_instance,
+            token_counter=self._count_tokens,  # 使用自定义的 token 计数函数
             strategy="last",
             start_on="human",  # 从人类消息开始
             end_on="ai",  # 以AI消息结束

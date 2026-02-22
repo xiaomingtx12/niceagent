@@ -43,10 +43,10 @@ class QwenImageGenerationTool(BaseTool):
         Returns:
             生成的图像URL
         """
-        # 设置API密钥
-        api_key = self.api_key or os.getenv("DASHSCOPE_API_KEY")
+        # 设置API密钥（必须通过参数传递，不再从环境变量获取）
+        api_key = self.api_key
         if not api_key:
-            return "错误: 未配置DASHSCOPE_API_KEY，请在环境变量中设置"
+            return "错误: 未配置 DashScope API 密钥，请先在设置中添加"
         
         try:
             # 构建消息

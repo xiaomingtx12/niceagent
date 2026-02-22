@@ -5,12 +5,12 @@ from uuid import UUID
 
 from flask import current_app
 from injector import inject
-from internal.schema.web_app_schema import WebAppChatReq
 from sqlalchemy import desc
 
 from internal.core.agent.agents import FunctionCallAgent, ReACTAgent, AgentQueueManager
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
+from internal.core.language_model import LanguageModelManager
 from internal.core.language_model.entities.model_entity import ModelFeature
 from internal.core.memory import TokenBufferMemory
 from internal.entity.app_entity import AppStatus
@@ -18,6 +18,7 @@ from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, Message
+from internal.schema.web_app_schema import WebAppChatReq
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from .base_service import BaseService
@@ -36,6 +37,7 @@ class WebAppService(BaseService):
     retrieval_service: RetrievalService
     conversation_service: ConversationService
     language_model_service: LanguageModelService
+    language_model_manager: LanguageModelManager
 
     def get_web_app(self, token: str) -> App:
         """根据传递的token获取WebApp实例"""
@@ -58,13 +60,25 @@ class WebAppService(BaseService):
         # 1.获取App基础信息
         app = self.get_web_app(token)
 
-        # 2.根据App基础信息构建LLM
+        # 2.获取应用配置
         app_config = self.app_config_service.get_app_config(app)
-        llm = self.language_model_service.load_language_model(
-            app_config.get("model_config", {})
-        )
+        
+        # 3.从模型配置中获取模型特性（不需要真正加载模型实例）
+        model_config = app_config.get("model_config", {})
+        provider_name = model_config.get("provider", "")
+        model_name = model_config.get("model", "")
+        
+        # 4.从模型管理器获取模型实体信息（不需要 API Key）
+        features = []
+        try:
+            provider = self.language_model_manager.get_provider(provider_name)
+            model_entity = provider.get_model_entity(model_name)
+            features = model_entity.features
+        except Exception as e:
+            # 如果获取失败，记录日志但不影响返回
+            current_app.logger.warning(f"获取模型特性失败: {str(e)}")
 
-        # 3.提取信息并返回
+        # 5.提取信息并返回
         return {
             "id": str(app.id),
             "icon": app.icon,
@@ -74,7 +88,7 @@ class WebAppService(BaseService):
                 "opening_statement": app_config.get("opening_statement"),
                 "opening_questions": app_config.get("opening_questions"),
                 "suggested_after_answer": app_config.get("suggested_after_answer"),
-                "features": llm.features,
+                "features": features,
                 "text_to_speech": app_config.get("text_to_speech"),
                 "speech_to_text": app_config.get("speech_to_text"),
             },
@@ -129,7 +143,8 @@ class WebAppService(BaseService):
 
         # 6.从语言模型管理器中加载大语言模型
         llm = self.language_model_service.load_language_model(
-            app_config.get("model_config", {})
+            app_config.get("model_config", {}),
+            account_id=account.id,
         )
 
         # 7.实例化TokenBufferMemory用于提取短期记忆

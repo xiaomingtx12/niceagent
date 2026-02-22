@@ -4,12 +4,39 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(nltk_data): 添加多语言缩略词类型词典文件&#10;&#10;- 新增捷克语缩略词类型文件，包含118条缩略词&#10;- 新增丹麦语缩略词类型文件，包含211条缩略词&#10;- 新增荷兰语缩略词类型文件，包含99条缩略词&#10;- 新增英语缩略词类型文件，包含156条缩略词&#10;- 新增爱沙尼亚语缩略词类型文件，包含48条缩略词&#10;- 新增芬兰语缩略词类型文件，包含81条缩略词&#10;- 新增法语缩略词类型文件，包含61条缩略词&#10;- 新增德语缩略词类型文件，包含71条缩略词&#10;- 新增希腊语缩略词类型文件，包含100条缩略词&#10;- 新增意大利语缩略词类型文件，包含125条缩略词&#10;- 新增挪威语缩略词类型文件，包含106条缩略词&#10;- 新增波兰语缩略词类型文件，包含225条缩略词&#10;- 新增葡萄牙语缩略词类型文件，包含72条缩略词&#10;- 新增俄语缩略词类型文件，包含1989条缩略词">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/_asset/icon.png" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/storage/vector_store/01.项目API文档.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/entities/model_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/entities/model_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/memory/token_buffer_memory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/memory/token_buffer_memory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dashscope/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/tongyi/positions.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dashscope/qwen_image_generation.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/tongyi/qwen_image_generation.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/dashscope/qwen_image_generation.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/tongyi/qwen_image_generation.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/gaode_weather.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/gaode/gaode_weather.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/app_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/app_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/workflow.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/workflow.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/ai_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/ai_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/ai_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/ai_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/ai_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/ai_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/audio_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/audio_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/embeddings_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/embeddings_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/faiss_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/faiss_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/web_app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/web_app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/workflow_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/workflow_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
@@ -101,6 +128,8 @@
     "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
     "Notification.DoNotAsk-Black action on save file ignored": "true",
     "Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor": "Run",
+    "Python.import_knowledge_to_faiss.executor": "Run",
+    "Python.import_to_faiss.executor": "Run",
     "Python.main.executor": "Run",
     "Python.test.executor": "Run",
     "RunOnceActivity.ShowReadmeOnStart": "true",
@@ -108,11 +137,12 @@
     "RunOnceActivity.git.unshallow": "true",
     "Shell Script.celery.executor": "Run",
     "Shell Script.db migrate.executor": "Run",
-    "Shell Script.db upgrade.executor": "Debug",
+    "Shell Script.db upgrade.executor": "Run",
     "Shell Script.pipreqs.executor": "Run",
+    "aidebugger.tracer.lastRunConfigName": "import_to_faiss",
     "git-widget-placeholder": "workflow",
     "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "D:/spring_project/py/my-dify/internal/core",
+    "last_opened_file_path": "D:/spring_project/py/my-dify/storage",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -134,11 +164,11 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\storage" />
+      <recent name="D:\spring_project\py\my-dify\internal\core\language_model\providers\zhipu\_asset" />
       <recent name="D:\spring_project\py\my-dify\internal\core" />
       <recent name="D:\spring_project\py\my-dify\internal\core\tools\builtin_tools\providers\bing" />
       <recent name="D:\spring_project\py\my-dify\internal\handler" />
-      <recent name="D:\spring_project\py\my-dify\internal\service" />
-      <recent name="D:\spring_project\py\my-dify\internal\entity" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -147,9 +177,56 @@
   <component name="RunAnythingCache">
     <option name="myCommands">
       <command value="pip install tiktoken" />
+      <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Shell Script.celery">
+  <component name="RunManager" selected="Python.import_to_faiss">
+    <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="my-dify" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/import_knowledge_to_faiss.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="import_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="my-dify" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/import_to_faiss.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -251,6 +328,8 @@
     </configuration>
     <list>
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
+      <item itemvalue="Python.import_knowledge_to_faiss" />
+      <item itemvalue="Python.import_to_faiss" />
       <item itemvalue="Python.main" />
       <item itemvalue="Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试" />
       <item itemvalue="Shell Script.celery" />
@@ -260,6 +339,8 @@
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.import_to_faiss" />
+        <item itemvalue="Python.import_knowledge_to_faiss" />
         <item itemvalue="Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试" />
         <item itemvalue="Python.main" />
       </list>
@@ -335,7 +416,8 @@
       <workItem from="1771348587238" duration="1580000" />
       <workItem from="1771397632617" duration="8151000" />
       <workItem from="1771597423350" duration="13928000" />
-      <workItem from="1771667564550" duration="3616000" />
+      <workItem from="1771667564550" duration="31123000" />
+      <workItem from="1771741610174" duration="4494000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -473,7 +555,23 @@
       <option name="project" value="LOCAL" />
       <updated>1771668109945</updated>
     </task>
-    <option name="localTasksCounter" value="18" />
+    <task id="LOCAL-00018" summary="feat(app): 替换icon生成模型为通义千问&#10;&#10;- 修改icon描述提示词模板，适配通义千问AI绘画&#10;- 替换app_service.py中DallEAPIWrapper为qwen_image_generation接口&#10;- 更新生成icon链调用方法，使用qwen_image_wrapper._run&#10;- 新增dashscope依赖至requirements.txt&#10;- 在providers.yaml中新增dashscope提供者配置&#10;- 配置文件新增Celery和Redis连接重试及连接池参数&#10;- 调整.idea/workspace.xml，新增Python测试配置和部分环境设置">
+      <option name="closed" value="true" />
+      <created>1771672216111</created>
+      <option name="number" value="00018" />
+      <option name="presentableId" value="LOCAL-00018" />
+      <option name="project" value="LOCAL" />
+      <updated>1771672216111</updated>
+    </task>
+    <task id="LOCAL-00019" summary="feat(dashscope): 新增通义千问图像生成工具&#10;&#10;- 添加QwenImageGenerationTool类，实现基于DashScope API的图像生成功能&#10;- 支持输入文本提示，调用qwen-image-max模型生成指定尺寸的图像&#10;- 提供参数模型QwenImageGenerationArgsSchema，定义输入参数格式&#10;- 实现API调用错误处理及响应结果解析，返回生成图像URL或错误信息&#10;- 添加工具注册配置文件positions.yaml及工具描述配置文件qwen_image_generation.yaml&#10;- 支持多种图片尺寸选择，默认1664x928，支持环境变量API密钥配置">
+      <option name="closed" value="true" />
+      <created>1771672974121</created>
+      <option name="number" value="00019" />
+      <option name="presentableId" value="LOCAL-00019" />
+      <option name="project" value="LOCAL" />
+      <updated>1771672974121</updated>
+    </task>
+    <option name="localTasksCounter" value="20" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -521,7 +619,9 @@
     <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式" />
     <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式&#10;- internal/core/tools/builtin_tools/providers/searx新增Searx搜索工具及相关配置和图标文件&#10;- 优化权限验证比较方式，统一移除多处id对比时的不必要str转换&#10;- internal/extension/logging_extension.py针对Windows平台改用RotatingFileHandler避免文件锁定问题&#10;- internal/schema/openapi_schema.py扩展OpenAPIChatReq校验图片URL数量及格式的功能，支持多图上传&#10;- internal/service/openapi_service.py重构openapi聊天服务，调整agent实例化逻辑，支持多agent类型及去除异步线程保存改为同步&#10;- internal/service/conversation_service.py、internal/service/api_tool_service.py、internal/service/dataset_service.py等多处服务内权限验证逻辑精简&#10;- internal/service/document_service.py和segment_service.py统一权限判断逻辑，修正账户ID比较方式&#10;- internal/core/agent/agents/base_agent.py优化invoke函数格式及线程创建方式改善代码风格&#10;- internal/service/app_service.py中auto_create_app方法替换默认llm模型，使用tongyi的Chat及新增环境变量支持&#10;- internal/core/model/app.py新增App模型属性wechat_config，实现微信发布配置状态自动管理及同步&#10;- 调整agent停止相关调用方法名称，修正AgentQueueManager的stop标识相关调用&#10;- 移除部分冗余注释及改进注释说明，以增强代码可读性和维护性" />
     <MESSAGE value="feat(nltk_data): 添加多语言缩略词类型词典文件&#10;&#10;- 新增捷克语缩略词类型文件，包含118条缩略词&#10;- 新增丹麦语缩略词类型文件，包含211条缩略词&#10;- 新增荷兰语缩略词类型文件，包含99条缩略词&#10;- 新增英语缩略词类型文件，包含156条缩略词&#10;- 新增爱沙尼亚语缩略词类型文件，包含48条缩略词&#10;- 新增芬兰语缩略词类型文件，包含81条缩略词&#10;- 新增法语缩略词类型文件，包含61条缩略词&#10;- 新增德语缩略词类型文件，包含71条缩略词&#10;- 新增希腊语缩略词类型文件，包含100条缩略词&#10;- 新增意大利语缩略词类型文件，包含125条缩略词&#10;- 新增挪威语缩略词类型文件，包含106条缩略词&#10;- 新增波兰语缩略词类型文件，包含225条缩略词&#10;- 新增葡萄牙语缩略词类型文件，包含72条缩略词&#10;- 新增俄语缩略词类型文件，包含1989条缩略词" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(nltk_data): 添加多语言缩略词类型词典文件&#10;&#10;- 新增捷克语缩略词类型文件，包含118条缩略词&#10;- 新增丹麦语缩略词类型文件，包含211条缩略词&#10;- 新增荷兰语缩略词类型文件，包含99条缩略词&#10;- 新增英语缩略词类型文件，包含156条缩略词&#10;- 新增爱沙尼亚语缩略词类型文件，包含48条缩略词&#10;- 新增芬兰语缩略词类型文件，包含81条缩略词&#10;- 新增法语缩略词类型文件，包含61条缩略词&#10;- 新增德语缩略词类型文件，包含71条缩略词&#10;- 新增希腊语缩略词类型文件，包含100条缩略词&#10;- 新增意大利语缩略词类型文件，包含125条缩略词&#10;- 新增挪威语缩略词类型文件，包含106条缩略词&#10;- 新增波兰语缩略词类型文件，包含225条缩略词&#10;- 新增葡萄牙语缩略词类型文件，包含72条缩略词&#10;- 新增俄语缩略词类型文件，包含1989条缩略词" />
+    <MESSAGE value="feat(app): 替换icon生成模型为通义千问&#10;&#10;- 修改icon描述提示词模板，适配通义千问AI绘画&#10;- 替换app_service.py中DallEAPIWrapper为qwen_image_generation接口&#10;- 更新生成icon链调用方法，使用qwen_image_wrapper._run&#10;- 新增dashscope依赖至requirements.txt&#10;- 在providers.yaml中新增dashscope提供者配置&#10;- 配置文件新增Celery和Redis连接重试及连接池参数&#10;- 调整.idea/workspace.xml，新增Python测试配置和部分环境设置" />
+    <MESSAGE value="feat(dashscope): 新增通义千问图像生成工具&#10;&#10;- 添加QwenImageGenerationTool类，实现基于DashScope API的图像生成功能&#10;- 支持输入文本提示，调用qwen-image-max模型生成指定尺寸的图像&#10;- 提供参数模型QwenImageGenerationArgsSchema，定义输入参数格式&#10;- 实现API调用错误处理及响应结果解析，返回生成图像URL或错误信息&#10;- 添加工具注册配置文件positions.yaml及工具描述配置文件qwen_image_generation.yaml&#10;- 支持多种图片尺寸选择，默认1664x928，支持环境变量API密钥配置" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(dashscope): 新增通义千问图像生成工具&#10;&#10;- 添加QwenImageGenerationTool类，实现基于DashScope API的图像生成功能&#10;- 支持输入文本提示，调用qwen-image-max模型生成指定尺寸的图像&#10;- 提供参数模型QwenImageGenerationArgsSchema，定义输入参数格式&#10;- 实现API调用错误处理及响应结果解析，返回生成图像URL或错误信息&#10;- 添加工具注册配置文件positions.yaml及工具描述配置文件qwen_image_generation.yaml&#10;- 支持多种图片尺寸选择，默认1664x928，支持环境变量API密钥配置" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -536,7 +636,9 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1771669403531" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1771741621494" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
+    <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>
   <component name="github-copilot-workspace">
     <instructionFileLocations>

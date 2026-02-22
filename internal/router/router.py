@@ -27,6 +27,7 @@ from internal.handler import (
     AudioHandler,
     PlatformHandler,
     WechatHandler,
+    ProviderApiKeyHandler,
 )
 
 
@@ -58,6 +59,7 @@ class Router:
     audio_handler: AudioHandler
     platform_handler: PlatformHandler
     wechat_handler: WechatHandler
+    provider_api_key_handler: ProviderApiKeyHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -377,6 +379,31 @@ class Router:
             "/openapi/api-keys/<uuid:api_key_id>/delete",
             methods=["POST"],
             view_func=self.api_key_handler.delete_api_key,
+        )
+        
+        # 9.1 提供商API密钥模块
+        bp.add_url_rule(
+            "/provider-api-keys",
+            view_func=self.provider_api_key_handler.get_provider_api_keys_with_page,
+        )
+        bp.add_url_rule(
+            "/provider-api-keys",
+            methods=["POST"],
+            view_func=self.provider_api_key_handler.create_provider_api_key,
+        )
+        bp.add_url_rule(
+            "/provider-api-keys/<uuid:provider_api_key_id>",
+            view_func=self.provider_api_key_handler.get_provider_api_key,
+        )
+        bp.add_url_rule(
+            "/provider-api-keys/<uuid:provider_api_key_id>",
+            methods=["POST"],
+            view_func=self.provider_api_key_handler.update_provider_api_key,
+        )
+        bp.add_url_rule(
+            "/provider-api-keys/<uuid:provider_api_key_id>/delete",
+            methods=["POST"],
+            view_func=self.provider_api_key_handler.delete_provider_api_key,
         )
         openapi_bp.add_url_rule(
             "/openapi/chat",
