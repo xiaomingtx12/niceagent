@@ -9,6 +9,7 @@ from .audio_handler import AudioHandler
 from .auth_handler import AuthHandler
 from .builtin_app_handler import BuiltinAppHandler
 from .builtin_tool_handler import BuiltinToolHandler
+from .builtin_workflow_handler import BuiltinWorkflowHandler
 from .conversation_handler import ConversationHandler
 from .dataset_handler import DatasetHandler
 from .document_handler import DocumentHandler
@@ -27,6 +28,7 @@ __all__ = [
     "AppHandler",
     "BuiltinToolHandler",
     "BuiltinAppHandler",
+    "BuiltinWorkflowHandler",
     "ApiToolHandler",
     "UploadFileHandler",
     "DatasetHandler",

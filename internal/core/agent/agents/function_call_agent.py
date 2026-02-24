@@ -347,7 +347,7 @@ class FunctionCallAgent(BaseAgent):
             )
         elif generation_type == "message":
             # 12.如果LLM直接生成answer则表示已经拿到了最终答案
-            # 发送最终的统计信息（包含完整答案）
+            # 发送最终的统计信息（不包含answer，避免重复）
             self.agent_queue_manager.publish(
                 state["task_id"],
                 AgentThought(
@@ -360,8 +360,8 @@ class FunctionCallAgent(BaseAgent):
                     message_token_count=input_token_count,
                     message_unit_price=input_price,
                     message_price_unit=unit,
-                    # 答案相关字段（包含完整答案）
-                    answer=accumulated_answer,
+                    # 答案相关字段（空字符串，避免重复显示）
+                    answer="",
                     answer_token_count=output_token_count,
                     answer_unit_price=output_price,
                     answer_price_unit=unit,

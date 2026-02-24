@@ -1,0 +1,155 @@
+id: "wf-doc-qa-001"
+category: "knowledge_management"
+name: "文档问答工作流"
+tool_call_name: "document_qa_workflow"
+icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/doc-icon.png"
+description: "基于知识库的文档问答工作流，支持检索增强生成(RAG)"
+nodes:
+  - id: "d4e5f6a7-0004-0004-0004-000000000001"
+    node_type: "start"
+    title: "开始"
+    description: "接收用户问题"
+    position:
+      x: 100
+      y: 200
+    inputs:
+      - name: "question"
+        type: "string"
+        required: true
+        description: "用户的问题"
+  
+  - id: "d4e5f6a7-0004-0004-0004-000000000002"
+    node_type: "dataset_retrieval"
+    title: "知识库检索"
+    description: "从知识库中检索相关文档"
+    position:
+      x: 350
+      y: 200
+    dataset_ids: []
+    retrieval_config:
+      retrieval_strategy: "semantic"
+      k: 5
+      score: 0.5
+    inputs:
+      - name: "query"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "d4e5f6a7-0004-0004-0004-000000000001"
+            ref_var_name: "question"
+    outputs:
+      - name: "combine_documents"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "d4e5f6a7-0004-0004-0004-000000000003"
+    node_type: "llm"
+    title: "生成答案"
+    description: "基于检索结果生成答案"
+    position:
+      x: 600
+      y: 200
+    prompt: "请基于以下参考文档回答用户的问题：\n\n用户问题：{{ question }}\n\n参考文档：\n{{ documents }}\n\n要求：\n1. 答案要准确、完整\n2. 引用参考文档中的内容\n3. 如果文档中没有相关信息，请明确说明\n4. 语言要清晰易懂"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.3
+        max_tokens: 2000
+    inputs:
+      - name: "question"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "d4e5f6a7-0004-0004-0004-000000000001"
+            ref_var_name: "question"
+      - name: "documents"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "d4e5f6a7-0004-0004-0004-000000000002"
+            ref_var_name: "combine_documents"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "d4e5f6a7-0004-0004-0004-000000000004"
+    node_type: "llm"
+    title: "答案优化"
+    description: "优化答案的表达和格式"
+    position:
+      x: 850
+      y: 200
+    prompt: "请优化以下答案的表达和格式：\n\n{{ answer }}\n\n优化要求：\n1. 使用Markdown格式\n2. 添加适当的标题和列表\n3. 突出重点信息\n4. 提供相关的延伸阅读建议"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.5
+        max_tokens: 2000
+    inputs:
+      - name: "answer"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "d4e5f6a7-0004-0004-0004-000000000003"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "d4e5f6a7-0004-0004-0004-000000000005"
+    node_type: "end"
+    title: "结束"
+    description: "输出最终答案"
+    position:
+      x: 1100
+      y: 200
+    outputs:
+      - name: "answer"
+        type: "string"
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "d4e5f6a7-0004-0004-0004-000000000004"
+            ref_var_name: "output"
+
+edges:
+  - id: "edge-001"
+    source: "d4e5f6a7-0004-0004-0004-000000000001"
+    target: "d4e5f6a7-0004-0004-0004-000000000002"
+    source_type: "start"
+    target_type: "dataset_retrieval"
+  - id: "edge-002"
+    source: "d4e5f6a7-0004-0004-0004-000000000002"
+    target: "d4e5f6a7-0004-0004-0004-000000000003"
+    source_type: "dataset_retrieval"
+    target_type: "llm"
+  - id: "edge-003"
+    source: "d4e5f6a7-0004-0004-0004-000000000003"
+    target: "d4e5f6a7-0004-0004-0004-000000000004"
+    source_type: "llm"
+    target_type: "llm"
+  - id: "edge-004"
+    source: "d4e5f6a7-0004-0004-0004-000000000004"
+    target: "d4e5f6a7-0004-0004-0004-000000000005"
+    source_type: "llm"
+    target_type: "end"
+
+created_at: 1740394800

@@ -1,0 +1,10 @@
+- category: content_generation
+  name: 内容生成
+- category: data_processing
+  name: 数据处理
+- category: code_analysis
+  name: 代码分析
+- category: business_automation
+  name: 业务自动化
+- category: knowledge_management
+  name: 知识管理

@@ -19,6 +19,7 @@ class BuiltinAppEntity(BaseModel):
     dialog_round: int = Field(default=DEFAULT_APP_CONFIG.get("dialog_round"))
     preset_prompt: str = Field(default=DEFAULT_APP_CONFIG.get("preset_prompt"))
     tools: list[dict[str, Any]] = Field(default_factory=list)
+    workflows: list[dict[str, Any]] = Field(default_factory=list)
     retrieval_config: dict[str, Any] = Field(
         default_factory=lambda: DEFAULT_APP_CONFIG.get("retrieval_config")
     )

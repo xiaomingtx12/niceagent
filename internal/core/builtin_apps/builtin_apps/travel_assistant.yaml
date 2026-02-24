@@ -4,8 +4,8 @@ name: "旅游助手"
 icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/153da84b-5a0c-4665-9745-9022eb846598.jpg"
 description: "负责回答旅游行程的相关问题和推荐路线"
 model_config:
-  provider: "openai"
-  model: "gpt-4o-mini"
+  provider: "tongyi"
+  model: "qwen-plus"
   parameters:
     temperature: 0.5
     top_p: 0.85

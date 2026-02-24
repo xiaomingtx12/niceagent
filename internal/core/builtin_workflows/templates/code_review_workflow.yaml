@@ -1,0 +1,214 @@
+id: "wf-code-review-001"
+category: "code_analysis"
+name: "代码审查工作流"
+tool_call_name: "code_review_workflow"
+icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/code-review-icon.png"
+description: "系统化的代码审查工作流，包含静态分析、逻辑审查、安全检查和综合评估"
+nodes:
+  - id: "a1b2c3d4-0001-0001-0001-000000000001"
+    node_type: "start"
+    title: "开始"
+    description: "接收用户提交的代码"
+    position:
+      x: 100
+      y: 200
+    inputs:
+      - name: "code"
+        type: "string"
+        required: true
+        description: "需要审查的代码片段"
+      - name: "language"
+        type: "string"
+        required: false
+        description: "编程语言类型（如Python、Java、JavaScript等）"
+  
+  - id: "a1b2c3d4-0001-0001-0001-000000000002"
+    node_type: "llm"
+    title: "静态分析"
+    description: "检查代码风格、命名规范、注释完整性"
+    position:
+      x: 350
+      y: 200
+    prompt: "请对以下{{ language }}代码进行静态分析，重点检查：\n1. 代码风格是否规范\n2. 变量和函数命名是否清晰\n3. 注释是否完整\n4. 代码结构是否清晰\n\n代码：\n```\n{{ code }}\n```\n\n请给出具体的改进建议。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.3
+        max_tokens: 2000
+    inputs:
+      - name: "code"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000001"
+            ref_var_name: "code"
+      - name: "language"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000001"
+            ref_var_name: "language"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "a1b2c3d4-0001-0001-0001-000000000003"
+    node_type: "llm"
+    title: "逻辑与性能分析"
+    description: "分析代码逻辑、算法效率、数据结构选择"
+    position:
+      x: 600
+      y: 200
+    prompt: "请对以下代码进行逻辑和性能分析：\n\n代码：\n```\n{{ code }}\n```\n\n重点分析：\n1. 代码逻辑是否正确\n2. 算法效率如何\n3. 数据结构选择是否合理\n4. 是否存在性能瓶颈\n5. 是否有优化空间\n\n请给出具体的优化建议。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.3
+        max_tokens: 2000
+    inputs:
+      - name: "code"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000001"
+            ref_var_name: "code"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "a1b2c3d4-0001-0001-0001-000000000004"
+    node_type: "llm"
+    title: "安全检查"
+    description: "识别潜在的安全漏洞和风险点"
+    position:
+      x: 850
+      y: 200
+    prompt: "请对以下代码进行安全检查：\n\n代码：\n```\n{{ code }}\n```\n\n重点检查：\n1. SQL注入风险\n2. XSS攻击风险\n3. CSRF攻击风险\n4. 敏感信息泄露\n5. 权限控制问题\n6. 输入验证问题\n\n请指出所有潜在的安全隐患并给出修复建议。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.2
+        max_tokens: 2000
+    inputs:
+      - name: "code"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000001"
+            ref_var_name: "code"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "a1b2c3d4-0001-0001-0001-000000000005"
+    node_type: "template_transform"
+    title: "生成审查报告"
+    description: "汇总所有审查结果生成完整报告"
+    position:
+      x: 1100
+      y: 200
+    template: "# 代码审查报告\n\n## 代码信息\n- 编程语言：{{ language }}\n\n## 一、静态分析\n{{ static_analysis }}\n\n## 二、逻辑与性能分析\n{{ logic_analysis }}\n\n## 三、安全检查\n{{ security_check }}\n\n## 四、综合建议\n基于以上分析，建议优先处理安全问题，然后优化性能瓶颈，最后改进代码风格。"
+    inputs:
+      - name: "language"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000001"
+            ref_var_name: "language"
+      - name: "static_analysis"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000002"
+            ref_var_name: "output"
+      - name: "logic_analysis"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000003"
+            ref_var_name: "output"
+      - name: "security_check"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000004"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+  
+  - id: "a1b2c3d4-0001-0001-0001-000000000006"
+    node_type: "end"
+    title: "结束"
+    description: "输出审查报告"
+    position:
+      x: 1350
+      y: 200
+    outputs:
+      - name: "report"
+        type: "string"
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "a1b2c3d4-0001-0001-0001-000000000005"
+            ref_var_name: "output"
+
+edges:
+  - id: "edge-001"
+    source: "a1b2c3d4-0001-0001-0001-000000000001"
+    target: "a1b2c3d4-0001-0001-0001-000000000002"
+    source_type: "start"
+    target_type: "llm"
+  - id: "edge-002"
+    source: "a1b2c3d4-0001-0001-0001-000000000002"
+    target: "a1b2c3d4-0001-0001-0001-000000000003"
+    source_type: "llm"
+    target_type: "llm"
+  - id: "edge-003"
+    source: "a1b2c3d4-0001-0001-0001-000000000003"
+    target: "a1b2c3d4-0001-0001-0001-000000000004"
+    source_type: "llm"
+    target_type: "llm"
+  - id: "edge-004"
+    source: "a1b2c3d4-0001-0001-0001-000000000004"
+    target: "a1b2c3d4-0001-0001-0001-000000000005"
+    source_type: "llm"
+    target_type: "template_transform"
+  - id: "edge-005"
+    source: "a1b2c3d4-0001-0001-0001-000000000005"
+    target: "a1b2c3d4-0001-0001-0001-000000000006"
+    source_type: "template_transform"
+    target_type: "end"
+
+created_at: 1740394800

@@ -10,6 +10,7 @@ from .audio_service import AudioService
 from .base_service import BaseService
 from .builtin_app_service import BuiltinAppService
 from .builtin_tool_service import BuiltinToolService
+from .builtin_workflow_service import BuiltinWorkflowService
 from .conversation_service import ConversationService
 from .cos_service import CosService
 from .dataset_service import DatasetService
@@ -39,6 +40,7 @@ __all__ = [
     "AppService",
     "ApiToolService",
     "BuiltinToolService",
+    "BuiltinWorkflowService",
     "CosService",
     "UploadFileService",
     "DatasetService",
