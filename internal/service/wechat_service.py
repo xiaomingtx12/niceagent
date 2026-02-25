@@ -214,10 +214,11 @@ class WechatService(BaseService):
     ):
         """使用子线程创建会话信息，避免数据处理超过5s"""
         with flask_app.app_context():
-            # 1.从语言模型中根据模型配置获取模型实例
+            # 1.从语言模型中根据模型配置获取模型实例（传入account_id以使用用户自己的API Key）
             app = self.get(App, app_id)
             llm = self.language_model_service.load_language_model(
-                app_config.get("model_config", {})
+                app_config.get("model_config", {}),
+                account_id=app.account_id,
             )
 
             # 2.实例化TokenBufferMemory用于提取短期记忆

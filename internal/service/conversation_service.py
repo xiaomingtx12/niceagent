@@ -16,8 +16,6 @@ from internal.entity.conversation_entity import (
     SUMMARIZER_TEMPLATE,
     CONVERSATION_NAME_TEMPLATE,
     ConversationInfo,
-    SUGGESTED_QUESTIONS_TEMPLATE,
-    SuggestedQuestions,
     InvokeFrom,
     MessageStatus,
 )
@@ -69,26 +67,24 @@ class ConversationService(BaseService):
         from internal.service.language_model_service import LanguageModelService
         from injector import Injector
 
-        # 1.加载模型
+        # 1.加载模型：如果未传入model_config，使用默认的tongyi配置（需要用户自己的API Key）
+        if not model_config:
+            model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
+
         llm = None
         try:
-            if model_config and account_id:
-                # 使用应用配置的模型
+            if account_id:
                 language_model_service = Injector().get(LanguageModelService)
                 llm = language_model_service.load_language_model(
                     model_config, account_id
                 )
         except Exception as e:
-            logging.warning(f"加载配置模型失败: {str(e)}")
+            logging.warning(f"加载模型失败: {str(e)}")
+            return old_summary
 
-        # 1.1 兜底：如果模型加载失败或未配置，使用默认模型
         if llm is None:
-            try:
-                language_model_service = Injector().get(LanguageModelService)
-                llm = language_model_service.load_default_language_model()
-            except Exception as e:
-                logging.error(f"加载默认模型也失败: {str(e)}")
-                return old_summary
+            logging.warning("模型加载结果为None，跳过摘要生成")
+            return old_summary
 
         # 2.创建prompt
         prompt = ChatPromptTemplate.from_template(SUMMARIZER_TEMPLATE)
@@ -114,26 +110,24 @@ class ConversationService(BaseService):
         from internal.service.language_model_service import LanguageModelService
         from injector import Injector
 
-        # 1.加载模型
+        # 1.加载模型：如果未传入model_config，使用默认的tongyi配置（需要用户自己的API Key）
+        if not model_config:
+            model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
+
         llm = None
         try:
-            if model_config and account_id:
-                # 使用应用配置的模型
+            if account_id:
                 language_model_service = Injector().get(LanguageModelService)
                 llm = language_model_service.load_language_model(
                     model_config, account_id
                 )
         except Exception as e:
-            logging.warning(f"加载配置模型失败: {str(e)}")
+            logging.warning(f"加载模型失败: {str(e)}")
+            return "新的会话"
 
-        # 1.1 兜底：如果模型加载失败或未配置，使用默认模型
         if llm is None:
-            try:
-                language_model_service = Injector().get(LanguageModelService)
-                llm = language_model_service.load_default_language_model()
-            except Exception as e:
-                logging.error(f"加载默认模型也失败: {str(e)}")
-                return "新的会话"
+            logging.warning("模型加载结果为None，跳过会话命名")
+            return "新的会话"
 
         # 2.创建prompt
         prompt = ChatPromptTemplate.from_messages(
@@ -173,51 +167,69 @@ class ConversationService(BaseService):
         cls, histories: str, account_id: UUID = None, model_config: dict = None
     ) -> list[str]:
         """根据传递的历史信息生成最多不超过3个的建议问题"""
+        import json as json_module
         from internal.service.language_model_service import LanguageModelService
         from injector import Injector
 
         try:
-            # 1.加载模型
+            # 1.加载模型：如果未传入model_config，使用默认的tongyi配置（需要用户自己的API Key）
+            if not model_config:
+                model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
+
             llm = None
             try:
-                if model_config and account_id:
-                    # 使用应用配置的模型
+                if account_id:
                     language_model_service = Injector().get(LanguageModelService)
                     llm = language_model_service.load_language_model(
                         model_config, account_id
                     )
             except Exception as e:
-                logging.warning(f"加载配置模型失败: {str(e)}，使用默认模型")
+                logging.warning(f"加载模型失败: {str(e)}")
+                return []
 
-            # 1.1 兜底：如果模型加载失败或未配置，使用默认模型
             if llm is None:
-                try:
-                    language_model_service = Injector().get(LanguageModelService)
-                    llm = language_model_service.load_default_language_model()
-                except Exception as e:
-                    logging.error(f"加载默认模型也失败: {str(e)}")
-                    return []
+                logging.warning("模型加载结果为None，跳过建议问题生成")
+                return []
 
-            # 2.创建prompt
+            # 2.创建prompt（不使用with_structured_output，直接让模型输出JSON数组）
             prompt = ChatPromptTemplate.from_messages(
-                [("system", SUGGESTED_QUESTIONS_TEMPLATE), ("human", "{histories}")]
+                [
+                    (
+                        "system",
+                        "你是一个建议问题生成助手。请根据用户传递的对话历史，预测用户接下来最可能会问的3个问题。"
+                        "\n每个问题保持在50个字符以内。"
+                        "\n\n你必须严格按照以下JSON数组格式输出，不要输出任何其他内容："
+                        '\n["问题1", "问题2", "问题3"]',
+                    ),
+                    ("human", "{histories}"),
+                ]
             )
 
-            # 3.构建结构化输出
-            structured_llm = llm.with_structured_output(SuggestedQuestions)
+            # 3.构建链应用（使用StrOutputParser直接获取文本输出）
+            chain = prompt | llm | StrOutputParser()
 
-            # 4.构建链应用
-            chain = prompt | structured_llm
+            # 4.调用链并获取原始文本
+            raw_output = chain.invoke({"histories": histories})
 
-            # 5.调用链并获取建议问题列表
-            suggested_questions = chain.invoke({"histories": histories})
-
-            # 6.提取建议问题列表
+            # 5.解析JSON数组
             questions = []
-            if suggested_questions and hasattr(suggested_questions, "questions"):
-                questions = suggested_questions.questions
+            if raw_output:
+                # 去除可能的markdown代码块标记
+                text = raw_output.strip()
+                if text.startswith("```"):
+                    # 移除 ```json 或 ``` 开头和结尾
+                    lines = text.split("\n")
+                    lines = [l for l in lines if not l.strip().startswith("```")]
+                    text = "\n".join(lines).strip()
 
-            # 7.限制问题数量
+                try:
+                    parsed = json_module.loads(text)
+                    if isinstance(parsed, list):
+                        questions = [str(q) for q in parsed if isinstance(q, str)]
+                except json_module.JSONDecodeError:
+                    logging.warning(f"建议问题JSON解析失败, raw_output: {raw_output[:200]}")
+
+            # 6.限制问题数量
             if len(questions) > 3:
                 questions = questions[:3]
 

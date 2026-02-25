@@ -139,6 +139,8 @@ class RetrievalService(BaseService):
             """如果需要搜索扩展的知识库内容，当你觉得用户的提问超过你的知识范围时，可以尝试调用该工具，输入为搜索query语句，返回数据为检索内容字符串"""
             # 1.调用search_in_datasets检索得到LangChain文档列表
             with flask_app.app_context():
+                # 在新的应用上下文中初始化嵌入模型（设置g.embeddings_account_id）
+                self.vector_database_service.embeddings_service.initialize_embeddings(account_id)
                 documents = self.search_in_datasets(
                     dataset_ids=dataset_ids,
                     query=query,

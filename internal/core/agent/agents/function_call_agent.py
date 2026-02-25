@@ -244,7 +244,12 @@ class FunctionCallAgent(BaseAgent):
             and callable(getattr(llm, "bind_tools"))
             and len(self.agent_config.tools) > 0
         ):
-            llm = llm.bind_tools(self.agent_config.tools)
+            try:
+                llm = llm.bind_tools(self.agent_config.tools)
+            except NotImplementedError:
+                logging.warning(
+                    f"当前模型不支持bind_tools（function calling），将以不绑定工具的方式运行"
+                )
 
         # 4.流式调用LLM输出对应内容
         gathered = None

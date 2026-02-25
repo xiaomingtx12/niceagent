@@ -22,6 +22,7 @@ from .app_config_service import AppConfigService
 from .app_service import AppService
 from .base_service import BaseService
 from .conversation_service import ConversationService
+from .language_model_service import LanguageModelService
 from .retrieval_service import RetrievalService
 from ..core.language_model.entities.model_entity import ModelFeature
 
@@ -36,6 +37,7 @@ class OpenAPIService(BaseService):
     retrieval_service: RetrievalService
     app_config_service: AppConfigService
     conversation_service: ConversationService
+    language_model_service: LanguageModelService
 
     def chat(self, req: OpenAPIChatReq, account: Account):
         """根据传递的请求+账号信息发起聊天对话，返回数据为块内容或者生成器"""
@@ -98,9 +100,10 @@ class OpenAPIService(BaseService):
             },
         )
 
-        # 9.从语言模型中根据模型配置获取模型实例
+        # 9.从语言模型中根据模型配置获取模型实例（传入account_id以使用用户自己的API Key）
         llm = self.language_model_service.load_language_model(
-            app_config.get("model_config", {})
+            app_config.get("model_config", {}),
+            account_id=account.id,
         )
 
         # 10.实例化TokenBufferMemory用于提取短期记忆
@@ -216,7 +219,7 @@ class OpenAPIService(BaseService):
                         "message_id": str(message.id),
                         "task_id": str(agent_thought.task_id),
                     }
-                    yield f"event: {agent_thought.event}\ndata:{json.dumps(data)}\n\n"
+                    yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
 
                 # 22.将消息以及推理过程添加到数据库
                 self.conversation_service.save_agent_thoughts(
