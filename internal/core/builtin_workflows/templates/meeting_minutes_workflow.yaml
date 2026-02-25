@@ -1,0 +1,312 @@
+id: "wf-meeting-minutes-001"
+category: "content_generation"
+name: "会议纪要生成工作流"
+tool_call_name: "meeting_minutes_workflow"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/meeting_minutes_workflow.png"
+description: "智能会议纪要生成工作流，将会议记录自动整理为结构化纪要，通过代码预处理清洗文本、大模型提取决议和待办、模板格式化输出完整纪要和邮件摘要"
+nodes:
+  - id: "mm-0001-0001-0001-000000000001"
+    node_type: "start"
+    title: "开始"
+    description: "接收会议原始记录"
+    position:
+      x: 100
+      y: 300
+    inputs:
+      - name: "meeting_content"
+        type: "string"
+        required: true
+        description: "会议记录或语音转写文本"
+      - name: "meeting_title"
+        type: "string"
+        required: false
+        description: "会议主题"
+      - name: "participants"
+        type: "string"
+        required: false
+        description: "参会人员（逗号分隔）"
+
+  - id: "mm-0001-0001-0001-000000000002"
+    node_type: "code"
+    title: "文本预处理"
+    description: "清洗会议记录文本，去除冗余信息并提取基础统计"
+    position:
+      x: 350
+      y: 300
+    code: |
+      import re
+
+      def main(params: dict) -> dict:
+          text = params.get("meeting_content", "")
+
+          # 去除多余空行和空白
+          lines = [line.strip() for line in text.split("\n") if line.strip()]
+          cleaned = "\n".join(lines)
+
+          # 统计基础信息
+          char_count = len(cleaned)
+          line_count = len(lines)
+
+          # 尝试提取时间信息
+          time_patterns = re.findall(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}[\s]*\d{0,2}[:\d]*', text)
+          meeting_time = time_patterns[0] if time_patterns else "待补充"
+
+          # 尝试提取发言人
+          speaker_pattern = re.findall(r'^([^：:]{1,10})[：:]', cleaned, re.MULTILINE)
+          speakers = list(set(speaker_pattern))
+
+          return {
+              "cleaned_text": cleaned,
+              "char_count": str(char_count),
+              "line_count": str(line_count),
+              "meeting_time": meeting_time,
+              "detected_speakers": "、".join(speakers) if speakers else "未检测到"
+          }
+    inputs:
+      - name: "meeting_content"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000001"
+            ref_var_name: "meeting_content"
+    outputs:
+      - name: "cleaned_text"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "char_count"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "line_count"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "meeting_time"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "detected_speakers"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "mm-0001-0001-0001-000000000003"
+    node_type: "llm"
+    title: "提取决议与待办"
+    description: "从清洗后的会议记录中提取关键决议和待办事项"
+    position:
+      x: 600
+      y: 300
+    prompt: "请从以下会议记录中提取关键信息：\n\n{{ cleaned_text }}\n\n请严格按以下格式输出：\n\n【议题列表】\n（逐条列出讨论的议题及结论）\n\n【关键决议】\n（编号列出所有达成的决议）\n\n【待办事项】\n（格式：序号. 事项内容 | 负责人：XXX | 截止时间：XXX）\n如果原文未提及负责人或截止时间，标注\"待确认\"\n\n【遗留问题】\n（列出未解决的分歧或问题，如无则写\"无\"）\n\n注意：\n- 忽略寒暄和无关闲聊\n- 准确归纳，不要编造原文没有的内容\n- 待办事项必须具体可执行"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.2
+        max_tokens: 3000
+    inputs:
+      - name: "cleaned_text"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000002"
+            ref_var_name: "cleaned_text"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "mm-0001-0001-0001-000000000004"
+    node_type: "llm"
+    title: "生成邮件摘要"
+    description: "生成可直接发送的简洁邮件版本"
+    position:
+      x: 600
+      y: 500
+    prompt: "请根据以下会议提取结果，生成一份简洁的邮件摘要（300字以内）：\n\n{{ extracted_info }}\n\n要求：\n1. 开头一句话概括会议核心结论\n2. 列出最重要的3-5条决议\n3. 列出需要跟进的待办事项\n4. 语气正式简洁"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.3
+        max_tokens: 800
+    inputs:
+      - name: "extracted_info"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000003"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "mm-0001-0001-0001-000000000005"
+    node_type: "template_transform"
+    title: "格式化会议纪要"
+    description: "将所有信息整合为标准会议纪要格式"
+    position:
+      x: 900
+      y: 300
+    template: |
+      # 📋 会议纪要
+
+      ## 基本信息
+      - **会议主题**：{{ meeting_title }}
+      - **会议时间**：{{ meeting_time }}
+      - **参会人员**：{{ participants }}
+      - **记录中检测到的发言人**：{{ detected_speakers }}
+      - **原始记录**：共{{ char_count }}字 / {{ line_count }}行
+
+      ---
+
+      ## 会议内容
+
+      {{ extracted_info }}
+
+      ---
+
+      ## 📧 邮件摘要版本
+
+      {{ email_summary }}
+
+      ---
+      *本纪要由AI自动生成，请核实关键信息后分发*
+    inputs:
+      - name: "meeting_title"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000001"
+            ref_var_name: "meeting_title"
+      - name: "participants"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000001"
+            ref_var_name: "participants"
+      - name: "meeting_time"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000002"
+            ref_var_name: "meeting_time"
+      - name: "detected_speakers"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000002"
+            ref_var_name: "detected_speakers"
+      - name: "char_count"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000002"
+            ref_var_name: "char_count"
+      - name: "line_count"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000002"
+            ref_var_name: "line_count"
+      - name: "extracted_info"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000003"
+            ref_var_name: "output"
+      - name: "email_summary"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000004"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "mm-0001-0001-0001-000000000006"
+    node_type: "end"
+    title: "结束"
+    description: "输出完整会议纪要"
+    position:
+      x: 1150
+      y: 300
+    outputs:
+      - name: "result"
+        type: "string"
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "mm-0001-0001-0001-000000000005"
+            ref_var_name: "output"
+
+edges:
+  - id: "edge-001"
+    source: "mm-0001-0001-0001-000000000001"
+    target: "mm-0001-0001-0001-000000000002"
+    source_type: "start"
+    target_type: "code"
+  - id: "edge-002"
+    source: "mm-0001-0001-0001-000000000002"
+    target: "mm-0001-0001-0001-000000000003"
+    source_type: "code"
+    target_type: "llm"
+  - id: "edge-003"
+    source: "mm-0001-0001-0001-000000000003"
+    target: "mm-0001-0001-0001-000000000004"
+    source_type: "llm"
+    target_type: "llm"
+  - id: "edge-004"
+    source: "mm-0001-0001-0001-000000000003"
+    target: "mm-0001-0001-0001-000000000005"
+    source_type: "llm"
+    target_type: "template_transform"
+  - id: "edge-005"
+    source: "mm-0001-0001-0001-000000000004"
+    target: "mm-0001-0001-0001-000000000005"
+    source_type: "llm"
+    target_type: "template_transform"
+  - id: "edge-006"
+    source: "mm-0001-0001-0001-000000000005"
+    target: "mm-0001-0001-0001-000000000006"
+    source_type: "template_transform"
+    target_type: "end"
+
+created_at: 1740394800

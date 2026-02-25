@@ -1,0 +1,495 @@
+id: "wf-translation-001"
+category: "content_generation"
+name: "多语言翻译润色工作流"
+tool_call_name: "translation_workflow"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/translation_workflow.png"
+description: "专业多语言翻译工作流：意图识别自动判断翻译场景（技术文档/商务/日常），分别走专业知识库检索术语或直接翻译，代码节点统计翻译质量指标，最终模板整合输出"
+nodes:
+  - id: "tr-0001-0001-0001-000000000001"
+    node_type: "start"
+    title: "开始"
+    description: "接收翻译需求"
+    position:
+      x: 100
+      y: 300
+    inputs:
+      - name: "source_text"
+        type: "string"
+        required: true
+        description: "需要翻译的原文"
+      - name: "target_language"
+        type: "string"
+        required: true
+        description: "目标语言（如：英语、日语、韩语、中文）"
+
+  - id: "tr-0001-0001-0001-000000000002"
+    node_type: "intent_classifier"
+    title: "翻译场景识别"
+    description: "自动识别文本所属的专业领域，决定翻译策略"
+    position:
+      x: 350
+      y: 300
+    intents:
+      - name: "技术文档"
+        description: "技术文档、API文档、编程相关、软件工程、数据库、网络协议等技术领域内容，包含代码片段、技术术语"
+      - name: "商务公文"
+        description: "商务邮件、合同条款、企业公告、会议纪要、商业报告、法律文书等正式商务场景内容"
+      - name: "日常通用"
+        description: "日常对话、社交媒体、新闻资讯、生活类文章、个人博客、一般性描述等非专业领域内容"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.2
+        max_tokens: 500
+    inputs:
+      - name: "source_text"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "source_text"
+    outputs:
+      - name: "intent_name"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "confidence"
+        type: "float"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000003"
+    node_type: "dataset_retrieval"
+    title: "专业术语库检索"
+    description: "从术语知识库中检索相关专业术语的标准译法"
+    position:
+      x: 600
+      y: 150
+    dataset_ids: [ ]
+    retrieval_config:
+      retrieval_strategy: "semantic"
+      k: 5
+      score: 0.6
+    inputs:
+      - name: "query"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "source_text"
+    outputs:
+      - name: "combine_documents"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000004"
+    node_type: "dataset_retrieval"
+    title: "商务用语库检索"
+    description: "从商务用语知识库中检索标准商务表达和惯用译法"
+    position:
+      x: 600
+      y: 300
+    dataset_ids: [ ]
+    retrieval_config:
+      retrieval_strategy: "semantic"
+      k: 5
+      score: 0.6
+    inputs:
+      - name: "query"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "source_text"
+    outputs:
+      - name: "combine_documents"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000005"
+    node_type: "template_transform"
+    title: "日常翻译提示"
+    description: "日常通用场景的翻译风格提示"
+    position:
+      x: 600
+      y: 480
+    template: "翻译风格要求：自然流畅、口语化、贴近日常表达习惯。避免过于书面化的表达，优先使用简洁易懂的词汇。如有俚语或文化特定表达，请转换为目标语言中对等的自然说法。"
+    inputs: [ ]
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000006"
+    node_type: "llm"
+    title: "专业翻译"
+    description: "结合场景识别结果和参考资料进行高质量翻译"
+    position:
+      x: 900
+      y: 300
+    prompt: "你是一位资深的专业翻译，请将以下文本翻译为{{ target_language }}。\n\n【原文】\n{{ source_text }}\n\n【识别的文本场景】{{ scene }}（置信度：{{ confidence }}）\n\n{% if tech_terms and tech_terms|length > 0 %}【技术术语参考】\n{{ tech_terms }}\n{% endif %}\n{% if biz_terms and biz_terms|length > 0 %}【商务用语参考】\n{{ biz_terms }}\n{% endif %}\n{% if style_hint and style_hint|length > 0 %}【风格要求】\n{{ style_hint }}\n{% endif %}\n\n翻译要求：\n1. 忠实原文含义，表达地道自然\n2. 专业术语使用标准译法，首次出现时括号标注原文\n3. 保持原文段落结构和格式\n4. 根据识别的场景调整语言风格和正式程度\n5. 如遇歧义，选择该场景下最常见的理解\n\n请直接输出译文，不要添加解释。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.3
+        max_tokens: 4000
+    inputs:
+      - name: "source_text"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "source_text"
+      - name: "target_language"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "target_language"
+      - name: "scene"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000002"
+            ref_var_name: "intent_name"
+      - name: "confidence"
+        type: "float"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000002"
+            ref_var_name: "confidence"
+      - name: "tech_terms"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000003"
+            ref_var_name: "combine_documents"
+      - name: "biz_terms"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000004"
+            ref_var_name: "combine_documents"
+      - name: "style_hint"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000005"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000007"
+    node_type: "code"
+    title: "翻译质量统计"
+    description: "统计翻译结果的质量指标"
+    position:
+      x: 1150
+      y: 300
+    code: |
+      import re
+
+      def main(params: dict) -> dict:
+          source = params.get("source_text", "")
+          translation = params.get("translation", "")
+
+          # 原文统计
+          src_chars = len(source)
+          src_words = len(source.split())
+
+          # 译文统计
+          tgt_chars = len(translation)
+          tgt_words = len(translation.split())
+
+          # 计算膨胀率（译文/原文长度比）
+          expansion_ratio = round(tgt_chars / src_chars, 2) if src_chars > 0 else 0
+
+          # 检测是否保留了括号标注的原文术语
+          term_annotations = re.findall(r'[\(（][A-Za-z].*?[\)）]', translation)
+          term_count = len(term_annotations)
+
+          # 检测段落数是否一致
+          src_paragraphs = len([p for p in source.split("\n") if p.strip()])
+          tgt_paragraphs = len([p for p in translation.split("\n") if p.strip()])
+          structure_match = "一致" if src_paragraphs == tgt_paragraphs else "不一致（原文{}段，译文{}段）".format(src_paragraphs, tgt_paragraphs)
+
+          return {
+              "src_chars": str(src_chars),
+              "tgt_chars": str(tgt_chars),
+              "expansion_ratio": str(expansion_ratio),
+              "term_count": str(term_count),
+              "structure_match": structure_match
+          }
+    inputs:
+      - name: "source_text"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "source_text"
+      - name: "translation"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000006"
+            ref_var_name: "output"
+    outputs:
+      - name: "src_chars"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "tgt_chars"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "expansion_ratio"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "term_count"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "structure_match"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000008"
+    node_type: "template_transform"
+    title: "整合翻译报告"
+    description: "将翻译结果和质量统计整合为完整报告"
+    position:
+      x: 1400
+      y: 300
+    template: |
+      # 🌐 翻译结果
+
+      **识别场景**：{{ scene }} | **目标语言**：{{ target_language }}
+
+      ---
+
+      ## 译文
+
+      {{ translation }}
+
+      ---
+
+      ## 📊 翻译质量指标
+
+      | 指标 | 数值 |
+      |------|------|
+      | 原文字数 | {{ src_chars }} |
+      | 译文字数 | {{ tgt_chars }} |
+      | 膨胀率 | {{ expansion_ratio }} |
+      | 术语标注数 | {{ term_count }} |
+      | 段落结构 | {{ structure_match }} |
+
+      ---
+      *本翻译由AI自动完成，建议对专业术语和关键表述进行人工复核*
+    inputs:
+      - name: "scene"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000002"
+            ref_var_name: "intent_name"
+      - name: "target_language"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000001"
+            ref_var_name: "target_language"
+      - name: "translation"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000006"
+            ref_var_name: "output"
+      - name: "src_chars"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000007"
+            ref_var_name: "src_chars"
+      - name: "tgt_chars"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000007"
+            ref_var_name: "tgt_chars"
+      - name: "expansion_ratio"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000007"
+            ref_var_name: "expansion_ratio"
+      - name: "term_count"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000007"
+            ref_var_name: "term_count"
+      - name: "structure_match"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000007"
+            ref_var_name: "structure_match"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "tr-0001-0001-0001-000000000009"
+    node_type: "end"
+    title: "结束"
+    description: "输出翻译报告"
+    position:
+      x: 1650
+      y: 300
+    outputs:
+      - name: "result"
+        type: "string"
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "tr-0001-0001-0001-000000000008"
+            ref_var_name: "output"
+
+edges:
+  # Start -> 意图识别
+  - id: "edge-001"
+    source: "tr-0001-0001-0001-000000000001"
+    target: "tr-0001-0001-0001-000000000002"
+    source_type: "start"
+    target_type: "intent_classifier"
+
+  # 意图识别 -> 技术术语库（条件：技术文档）
+  - id: "edge-002"
+    source: "tr-0001-0001-0001-000000000002"
+    target: "tr-0001-0001-0001-000000000003"
+    source_type: "intent_classifier"
+    target_type: "dataset_retrieval"
+    condition: "技术文档"
+
+  # 意图识别 -> 商务用语库（条件：商务公文）
+  - id: "edge-003"
+    source: "tr-0001-0001-0001-000000000002"
+    target: "tr-0001-0001-0001-000000000004"
+    source_type: "intent_classifier"
+    target_type: "dataset_retrieval"
+    condition: "商务公文"
+
+  # 意图识别 -> 日常翻译提示（条件：日常通用）
+  - id: "edge-004"
+    source: "tr-0001-0001-0001-000000000002"
+    target: "tr-0001-0001-0001-000000000005"
+    source_type: "intent_classifier"
+    target_type: "template_transform"
+    condition: "日常通用"
+
+  # 技术术语库 -> LLM翻译
+  - id: "edge-005"
+    source: "tr-0001-0001-0001-000000000003"
+    target: "tr-0001-0001-0001-000000000006"
+    source_type: "dataset_retrieval"
+    target_type: "llm"
+
+  # 商务用语库 -> LLM翻译
+  - id: "edge-006"
+    source: "tr-0001-0001-0001-000000000004"
+    target: "tr-0001-0001-0001-000000000006"
+    source_type: "dataset_retrieval"
+    target_type: "llm"
+
+  # 日常翻译提示 -> LLM翻译
+  - id: "edge-007"
+    source: "tr-0001-0001-0001-000000000005"
+    target: "tr-0001-0001-0001-000000000006"
+    source_type: "template_transform"
+    target_type: "llm"
+
+  # LLM翻译 -> 代码统计
+  - id: "edge-008"
+    source: "tr-0001-0001-0001-000000000006"
+    target: "tr-0001-0001-0001-000000000007"
+    source_type: "llm"
+    target_type: "code"
+
+  # 代码统计 -> 模板整合
+  - id: "edge-009"
+    source: "tr-0001-0001-0001-000000000007"
+    target: "tr-0001-0001-0001-000000000008"
+    source_type: "code"
+    target_type: "template_transform"
+
+  # 模板整合 -> 结束
+  - id: "edge-010"
+    source: "tr-0001-0001-0001-000000000008"
+    target: "tr-0001-0001-0001-000000000009"
+    source_type: "template_transform"
+    target_type: "end"
+
+created_at: 1740394800

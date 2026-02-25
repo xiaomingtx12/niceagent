@@ -2,7 +2,7 @@ id: "wf-doc-qa-001"
 category: "knowledge_management"
 name: "文档问答工作流"
 tool_call_name: "document_qa_workflow"
-icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/doc-icon.png"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/document_qa_workflow.png"
 description: "基于知识库的文档问答工作流，支持检索增强生成(RAG)"
 nodes:
   - id: "d4e5f6a7-0004-0004-0004-000000000001"
@@ -17,7 +17,7 @@ nodes:
         type: "string"
         required: true
         description: "用户的问题"
-  
+
   - id: "d4e5f6a7-0004-0004-0004-000000000002"
     node_type: "dataset_retrieval"
     title: "知识库检索"
@@ -25,7 +25,7 @@ nodes:
     position:
       x: 350
       y: 200
-    dataset_ids: []
+    dataset_ids: [ ]
     retrieval_config:
       retrieval_strategy: "semantic"
       k: 5
@@ -45,7 +45,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "d4e5f6a7-0004-0004-0004-000000000003"
     node_type: "llm"
     title: "生成答案"
@@ -83,7 +83,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "d4e5f6a7-0004-0004-0004-000000000004"
     node_type: "llm"
     title: "答案优化"
@@ -113,7 +113,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "d4e5f6a7-0004-0004-0004-000000000005"
     node_type: "end"
     title: "结束"

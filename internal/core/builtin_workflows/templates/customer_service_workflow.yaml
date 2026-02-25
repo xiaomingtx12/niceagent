@@ -2,7 +2,7 @@ id: "wf-customer-service-001"
 category: "customer_service"
 name: "智能电商客服工作流"
 tool_call_name: "customer_service_workflow"
-icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/customer-service-icon.png"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/customer_service_workflow.png"
 description: "智能电商客服工作流：通过意图识别自动分流到售前知识库、售后知识库或固定话术，最后由AI汇总生成专业回复"
 nodes:
   - id: "start-001"
@@ -66,7 +66,7 @@ nodes:
     position:
       x: 650
       y: 150
-    dataset_ids: []
+    dataset_ids: [ ]
     retrieval_config:
       retrieval_strategy: "semantic"
       k: 3
@@ -94,7 +94,7 @@ nodes:
     position:
       x: 650
       y: 300
-    dataset_ids: []
+    dataset_ids: [ ]
     retrieval_config:
       retrieval_strategy: "semantic"
       k: 3

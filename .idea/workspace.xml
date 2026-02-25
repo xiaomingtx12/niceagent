@@ -4,42 +4,28 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="refactor(language-model): 统一并优化大语言模型接口及配置&#10;&#10;- 将多个语言模型提供商的聊天模型基类统一改为基于OpenAI兼容接口的ChatOpenAI类&#10;- 重新整理并更新语言模型提供商的模型配置文件，调整标签格式及参数名称&#10;- 删除已废弃或冗余的语言模型配置文件及模型定义&#10;- 清理并删除Ollama相关模型及资源文件&#10;- 修改language_model_service中的默认API Key参数名统一为&quot;api_key&quot;&#10;- 修复AI服务中无model_config时使用默认通义模型配置（需要用户自备API Key）&#10;- 更新模型供应商列表，新增多个国内大模型提供商及其模型&#10;- 配置MySQL连接池增加pool_pre_ping以增强连接稳定性&#10;- 新增IntentClassifier节点导入及数据类引用">
       <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/deepseek/_asset/icon.png" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/ZHIPU_AI_INTEGRATION.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/ZHIPU_AI_QUICKSTART.md" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/chat.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2-0905.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2-0905.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2-instruct.yaml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2.5.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2.5.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-128k.yaml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-32k.yaml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-8k.yaml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/_asset/icon.svg" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/chat.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/positions.yaml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/qwen2.5-7b.yaml" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/chat.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/positions.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-max.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-max.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-plus.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-plus.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/chat.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-128k.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-128k.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-8k.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-8k.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-4.0-8k.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-4.0-8k.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/positions.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/chat.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/glm-4.7-flash.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/glm-4.7-flash.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/positions.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/ai_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/ai_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/code_reviewer.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/code_reviewer.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/content_writer.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/ecommerce_consultant.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/fitness_coach.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/hr_interviewer.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/legal_advisor.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/travel_assistant.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/api_integration_workflow.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/code_review_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/code_review_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/comprehensive_research_workflow.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/content_generation_workflow.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/customer_service_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/customer_service_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/data_analysis_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/data_analysis_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/document_qa_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/document_qa_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/doubao/_asset/icon.png" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/doubao/_asset/icon.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/minimax/_asset/icon.png" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/minimax/_asset/icon.png" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/_asset/icon.png" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/_asset/icon.png" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -166,11 +152,11 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\spring_project\py\my-dify\internal\core\language_model\providers\deepseek\_asset" />
       <recent name="D:\spring_project\py\my-dify\storage" />
       <recent name="D:\spring_project\py\my-dify\internal\core\language_model\providers\zhipu\_asset" />
       <recent name="D:\spring_project\py\my-dify\internal\core" />
       <recent name="D:\spring_project\py\my-dify\internal\core\tools\builtin_tools\providers\bing" />
-      <recent name="D:\spring_project\py\my-dify\internal\handler" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\server" />
@@ -422,7 +408,7 @@
       <workItem from="1771741610174" duration="5830000" />
       <workItem from="1771938891502" duration="13976000" />
       <workItem from="1772006197419" duration="5811000" />
-      <workItem from="1772013051299" duration="12884000" />
+      <workItem from="1772013051299" duration="16012000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -608,7 +594,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772029324556</updated>
     </task>
-    <option name="localTasksCounter" value="24" />
+    <task id="LOCAL-00024" summary="refactor(language-model): 统一并优化大语言模型接口及配置&#10;&#10;- 将多个语言模型提供商的聊天模型基类统一改为基于OpenAI兼容接口的ChatOpenAI类&#10;- 重新整理并更新语言模型提供商的模型配置文件，调整标签格式及参数名称&#10;- 删除已废弃或冗余的语言模型配置文件及模型定义&#10;- 清理并删除Ollama相关模型及资源文件&#10;- 修改language_model_service中的默认API Key参数名统一为&quot;api_key&quot;&#10;- 修复AI服务中无model_config时使用默认通义模型配置（需要用户自备API Key）&#10;- 更新模型供应商列表，新增多个国内大模型提供商及其模型&#10;- 配置MySQL连接池增加pool_pre_ping以增强连接稳定性&#10;- 新增IntentClassifier节点导入及数据类引用">
+      <option name="closed" value="true" />
+      <created>1772030125498</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1772030125498</updated>
+    </task>
+    <option name="localTasksCounter" value="25" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -650,7 +644,8 @@
     <MESSAGE value="feat(workflow): 新增内置工作流模板及相关支持&#10;&#10;- 新增BuiltinWorkflowHandler和BuiltinWorkflowService模块支持内置工作流功能&#10;- 在router中注册内置工作流相关路由，支持分类列表、工作流列表、详情及基于模板创建&#10;- builtin_app_entity新增workflows字段，支持关联工作流数据&#10;- 修正function_call_agent中消息发布时避免重复包含完整答案&#10;- 将部分内置应用模型从openai替换为tongyi及qwen-plus模型&#10;- 新增数据库表provider_api_key用于管理第三方API密钥&#10;- 删除废弃的system_model_config表结构及相关迁移文件&#10;- 添加api_integration_workflow工作流模板，支持API数据请求与解析处理&#10;- 统一导入ProviderApiKey支持多用户API密钥管理，增强系统安全及配置灵活性" />
     <MESSAGE value="feat(workflow): 增加意图识别节点及智能客服工作流支持&#10;&#10;- 新增IntentClassifier节点类型及相关实体、数据结构定义&#10;- 在工作流解析逻辑中支持意图识别节点及条件分支边的处理&#10;- 修改workflow_graph构建，区分普通边和条件分支边，支持条件分支汇聚处理&#10;- 实现意图识别节点执行逻辑，基于LLM解析用户意图并输出置信度&#10;- 新增智能电商客服工作流模板，包含意图分类、售前售后知识库检索和固定话术&#10;- 优化会话服务中模型加载逻辑，添加默认模型兜底机制避免加载失败&#10;- 工作流服务添加错误日志记录及异常通过SSE事件返回前端&#10;- categories.yaml中新增customer_service分类及相关配置" />
     <MESSAGE value="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key" />
-    <option name="LAST_COMMIT_MESSAGE" value="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key" />
+    <MESSAGE value="refactor(language-model): 统一并优化大语言模型接口及配置&#10;&#10;- 将多个语言模型提供商的聊天模型基类统一改为基于OpenAI兼容接口的ChatOpenAI类&#10;- 重新整理并更新语言模型提供商的模型配置文件，调整标签格式及参数名称&#10;- 删除已废弃或冗余的语言模型配置文件及模型定义&#10;- 清理并删除Ollama相关模型及资源文件&#10;- 修改language_model_service中的默认API Key参数名统一为&quot;api_key&quot;&#10;- 修复AI服务中无model_config时使用默认通义模型配置（需要用户自备API Key）&#10;- 更新模型供应商列表，新增多个国内大模型提供商及其模型&#10;- 配置MySQL连接池增加pool_pre_ping以增强连接稳定性&#10;- 新增IntentClassifier节点导入及数据类引用" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor(language-model): 统一并优化大语言模型接口及配置&#10;&#10;- 将多个语言模型提供商的聊天模型基类统一改为基于OpenAI兼容接口的ChatOpenAI类&#10;- 重新整理并更新语言模型提供商的模型配置文件，调整标签格式及参数名称&#10;- 删除已废弃或冗余的语言模型配置文件及模型定义&#10;- 清理并删除Ollama相关模型及资源文件&#10;- 修改language_model_service中的默认API Key参数名统一为&quot;api_key&quot;&#10;- 修复AI服务中无model_config时使用默认通义模型配置（需要用户自备API Key）&#10;- 更新模型供应商列表，新增多个国内大模型提供商及其模型&#10;- 配置MySQL连接池增加pool_pre_ping以增强连接稳定性&#10;- 新增IntentClassifier节点导入及数据类引用" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -665,7 +660,7 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772028600208" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772033585749" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

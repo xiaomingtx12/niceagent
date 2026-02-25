@@ -1,7 +1,7 @@
 id: "a1b2c3d4-e5f6-4a5b-8c9d-1e2f3a4b5c6d"
 category: "assistant"
 name: "代码审查助手"
-icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/code-review-icon.png"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/code_reviewer.png"
 description: "专业的代码审查助手，帮助开发者发现代码中的问题、优化代码质量、提供最佳实践建议"
 model_config:
   provider: "tongyi"

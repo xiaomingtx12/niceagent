@@ -2,7 +2,7 @@ id: "wf-data-analysis-001"
 category: "data_processing"
 name: "数据分析工作流"
 tool_call_name: "data_analysis_workflow"
-icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/data-icon.png"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/data_analysis_workflow.png"
 description: "数据分析工作流，包含数据清洗、统计分析和可视化建议"
 nodes:
   - id: "c3d4e5f6-0003-0003-0003-000000000001"
@@ -21,7 +21,7 @@ nodes:
         type: "string"
         required: true
         description: "分析目标"
-  
+
   - id: "c3d4e5f6-0003-0003-0003-000000000002"
     node_type: "llm"
     title: "数据理解"
@@ -59,7 +59,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "c3d4e5f6-0003-0003-0003-000000000003"
     node_type: "llm"
     title: "分析方法建议"
@@ -97,7 +97,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "c3d4e5f6-0003-0003-0003-000000000004"
     node_type: "llm"
     title: "生成分析代码"
@@ -127,7 +127,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "c3d4e5f6-0003-0003-0003-000000000005"
     node_type: "template_transform"
     title: "生成分析报告"
@@ -175,7 +175,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "c3d4e5f6-0003-0003-0003-000000000006"
     node_type: "end"
     title: "结束"

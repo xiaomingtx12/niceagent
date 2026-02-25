@@ -2,7 +2,7 @@ id: "wf-code-review-001"
 category: "code_analysis"
 name: "代码审查工作流"
 tool_call_name: "code_review_workflow"
-icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/code-review-icon.png"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/code_review_workflow.png"
 description: "系统化的代码审查工作流，包含静态分析、逻辑审查、安全检查和综合评估"
 nodes:
   - id: "a1b2c3d4-0001-0001-0001-000000000001"
@@ -21,7 +21,7 @@ nodes:
         type: "string"
         required: false
         description: "编程语言类型（如Python、Java、JavaScript等）"
-  
+
   - id: "a1b2c3d4-0001-0001-0001-000000000002"
     node_type: "llm"
     title: "静态分析"
@@ -59,7 +59,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "a1b2c3d4-0001-0001-0001-000000000003"
     node_type: "llm"
     title: "逻辑与性能分析"
@@ -89,7 +89,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "a1b2c3d4-0001-0001-0001-000000000004"
     node_type: "llm"
     title: "安全检查"
@@ -119,7 +119,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "a1b2c3d4-0001-0001-0001-000000000005"
     node_type: "template_transform"
     title: "生成审查报告"
@@ -167,7 +167,7 @@ nodes:
         value:
           type: "generated"
           content: ""
-  
+
   - id: "a1b2c3d4-0001-0001-0001-000000000006"
     node_type: "end"
     title: "结束"

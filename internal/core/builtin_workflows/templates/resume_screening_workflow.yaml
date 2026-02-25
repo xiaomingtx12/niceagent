@@ -1,0 +1,525 @@
+id: "wf-resume-screening-001"
+category: "business_automation"
+name: "简历智能筛选工作流"
+tool_call_name: "resume_screening_workflow"
+icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/resume_screening_workflow.png"
+description: "智能简历筛选工作流：知识库检索岗位标准、大模型解析简历和评估匹配度、代码节点计算加权评分、HTTP回调通知、模板整合生成完整筛选报告"
+nodes:
+  - id: "rs-0001-0001-0001-000000000001"
+    node_type: "start"
+    title: "开始"
+    description: "接收简历和岗位要求"
+    position:
+      x: 100
+      y: 300
+    inputs:
+      - name: "resume_content"
+        type: "string"
+        required: true
+        description: "候选人简历内容"
+      - name: "job_description"
+        type: "string"
+        required: true
+        description: "岗位JD/职位要求"
+      - name: "callback_url"
+        type: "string"
+        required: false
+        description: "筛选结果回调通知URL（可选）"
+
+  - id: "rs-0001-0001-0001-000000000002"
+    node_type: "dataset_retrieval"
+    title: "岗位标准库检索"
+    description: "从知识库中检索该岗位的历史招聘标准和面试题库"
+    position:
+      x: 350
+      y: 150
+    dataset_ids: [ ]
+    retrieval_config:
+      retrieval_strategy: "semantic"
+      k: 5
+      score: 0.5
+    inputs:
+      - name: "query"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000001"
+            ref_var_name: "job_description"
+    outputs:
+      - name: "combine_documents"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "rs-0001-0001-0001-000000000003"
+    node_type: "llm"
+    title: "简历结构化解析"
+    description: "将简历内容解析为结构化JSON数据"
+    position:
+      x: 350
+      y: 450
+    prompt: "请将以下简历内容解析为结构化JSON格式：\n\n{{ resume_content }}\n\n请严格按以下JSON格式输出（不要输出其他内容）：\n```json\n{\n  \"name\": \"姓名\",\n  \"education\": {\n    \"degree\": \"最高学历\",\n    \"school\": \"毕业院校\",\n    \"major\": \"专业\"\n  },\n  \"total_years\": 工作年限数字,\n  \"skills\": [\"技能1\", \"技能2\"],\n  \"work_experience\": [\n    {\n      \"company\": \"公司名\",\n      \"position\": \"职位\",\n      \"duration\": \"时间段\",\n      \"highlights\": [\"成果1\", \"成果2\"]\n    }\n  ],\n  \"projects\": [\n    {\n      \"name\": \"项目名\",\n      \"role\": \"角色\",\n      \"tech_stack\": [\"技术1\"],\n      \"achievement\": \"核心成果\"\n    }\n  ],\n  \"certifications\": [\"证书1\"],\n  \"summary\": \"一句话概括候选人核心竞争力\"\n}\n```\n如果某项信息简历中未提及，对应字段填空字符串或空数组。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.1
+        max_tokens: 2500
+    inputs:
+      - name: "resume_content"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000001"
+            ref_var_name: "resume_content"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "rs-0001-0001-0001-000000000004"
+    node_type: "llm"
+    title: "匹配度评估"
+    description: "对比JD要求和简历信息，输出各维度评分"
+    position:
+      x: 650
+      y: 300
+    prompt: "请根据岗位要求和简历信息进行匹配度评估。\n\n【岗位要求】\n{{ job_description }}\n\n{% if job_standards and job_standards|length > 0 %}【岗位历史招聘标准参考】\n{{ job_standards }}\n{% endif %}\n\n【简历解析结果】\n{{ parsed_resume }}\n\n请严格按以下JSON格式输出评分（不要输出其他内容）：\n```json\n{\n  \"skill_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"experience_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"education_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"project_relevance\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"growth_potential\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"strengths\": [\"优势1\", \"优势2\"],\n  \"concerns\": [\"顾虑1\", \"顾虑2\"],\n  \"interview_questions\": [\n    {\"question\": \"面试问题1\", \"purpose\": \"考察目的\"},\n    {\"question\": \"面试问题2\", \"purpose\": \"考察目的\"},\n    {\"question\": \"面试问题3\", \"purpose\": \"考察目的\"}\n  ]\n}\n```\n评分标准：1-3分不匹配，4-6分部分匹配，7-8分良好匹配，9-10分完美匹配。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.2
+        max_tokens: 3000
+    inputs:
+      - name: "job_description"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000001"
+            ref_var_name: "job_description"
+      - name: "job_standards"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000002"
+            ref_var_name: "combine_documents"
+      - name: "parsed_resume"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000003"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "rs-0001-0001-0001-000000000005"
+    node_type: "code"
+    title: "加权评分计算"
+    description: "根据各维度评分计算加权总分并生成筛选结论"
+    position:
+      x: 900
+      y: 300
+    code: |
+      import json
+      import re
+
+      def main(params: dict) -> dict:
+          raw = params.get("evaluation", "")
+
+          # 尝试从LLM输出中提取JSON
+          json_match = re.search(r'\{[\s\S]*\}', raw)
+          if not json_match:
+              return {
+                  "total_score": "0",
+                  "grade": "解析失败",
+                  "recommendation": "评估数据解析失败，请重试",
+                  "score_detail": raw
+              }
+
+          try:
+              data = json.loads(json_match.group())
+          except json.JSONDecodeError:
+              return {
+                  "total_score": "0",
+                  "grade": "解析失败",
+                  "recommendation": "评估数据解析失败，请重试",
+                  "score_detail": raw
+              }
+
+          # 权重配置
+          weights = {
+              "skill_match": 0.30,
+              "experience_match": 0.25,
+              "education_match": 0.15,
+              "project_relevance": 0.20,
+              "growth_potential": 0.10
+          }
+
+          # 计算加权总分
+          total = 0
+          details = []
+          for key, weight in weights.items():
+              item = data.get(key, {})
+              score = item.get("score", 0) if isinstance(item, dict) else 0
+              reason = item.get("reason", "") if isinstance(item, dict) else ""
+              weighted = round(score * weight, 2)
+              total += weighted
+              label = {"skill_match": "技能匹配", "experience_match": "经验匹配", "education_match": "教育背景", "project_relevance": "项目相关性", "growth_potential": "成长潜力"}
+              details.append("{}：{}/10（权重{}%）- {}".format(label.get(key, key), score, int(weight*100), reason))
+
+          total = round(total, 1)
+
+          # 生成等级和建议
+          if total >= 8:
+              grade = "A - 强烈推荐"
+              recommendation = "候选人与岗位高度匹配，建议优先安排面试"
+          elif total >= 6:
+              grade = "B - 建议面试"
+              recommendation = "候选人基本符合要求，建议安排面试进一步了解"
+          elif total >= 4:
+              grade = "C - 待定"
+              recommendation = "候选人部分条件匹配，建议与用人部门沟通后决定"
+          else:
+              grade = "D - 不推荐"
+              recommendation = "候选人与岗位要求差距较大，暂不建议面试"
+
+          # 提取优势、顾虑和面试问题
+          strengths = "、".join(data.get("strengths", []))
+          concerns = "、".join(data.get("concerns", []))
+          questions = data.get("interview_questions", [])
+          questions_text = "\n".join(["{}. {} （考察：{}）".format(i+1, q.get("question",""), q.get("purpose","")) for i, q in enumerate(questions)])
+
+          return {
+              "total_score": str(total),
+              "grade": grade,
+              "recommendation": recommendation,
+              "score_detail": "\n".join(details),
+              "strengths": strengths,
+              "concerns": concerns,
+              "interview_questions": questions_text
+          }
+    inputs:
+      - name: "evaluation"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000004"
+            ref_var_name: "output"
+    outputs:
+      - name: "total_score"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "grade"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "recommendation"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "score_detail"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "strengths"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "concerns"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "interview_questions"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "rs-0001-0001-0001-000000000006"
+    node_type: "http_request"
+    title: "结果回调通知"
+    description: "将筛选结果通过HTTP回调通知招聘系统"
+    position:
+      x: 1150
+      y: 450
+    url: ""
+    method: "post"
+    inputs:
+      - name: "url"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000001"
+            ref_var_name: "callback_url"
+        meta:
+          type: "params"
+      - name: "score"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "total_score"
+        meta:
+          type: "body"
+      - name: "grade"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "grade"
+        meta:
+          type: "body"
+      - name: "recommendation"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "recommendation"
+        meta:
+          type: "body"
+    outputs:
+      - name: "status_code"
+        type: "int"
+        value:
+          type: "generated"
+          content: 0
+      - name: "text"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "rs-0001-0001-0001-000000000007"
+    node_type: "template_transform"
+    title: "生成筛选报告"
+    description: "整合所有分析结果生成完整的筛选报告"
+    position:
+      x: 1150
+      y: 200
+    template: |
+      # 📋 简历智能筛选报告
+
+      ## 筛选结论
+
+      | 项目 | 结果 |
+      |------|------|
+      | 综合评分 | **{{ total_score }} / 10** |
+      | 评级 | **{{ grade }}** |
+      | 建议 | {{ recommendation }} |
+
+      ---
+
+      ## 各维度评分明细
+
+      {{ score_detail }}
+
+      ---
+
+      ## 候选人分析
+
+      **核心优势**：{{ strengths }}
+
+      **潜在顾虑**：{{ concerns }}
+
+      ---
+
+      ## 建议面试问题
+
+      {{ interview_questions }}
+
+      ---
+
+      ## 简历结构化数据
+
+      {{ parsed_resume }}
+
+      ---
+      *本报告由AI自动生成，评分仅供参考，最终录用决策请结合面试表现综合判断*
+    inputs:
+      - name: "total_score"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "total_score"
+      - name: "grade"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "grade"
+      - name: "recommendation"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "recommendation"
+      - name: "score_detail"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "score_detail"
+      - name: "strengths"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "strengths"
+      - name: "concerns"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "concerns"
+      - name: "interview_questions"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000005"
+            ref_var_name: "interview_questions"
+      - name: "parsed_resume"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000003"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "rs-0001-0001-0001-000000000008"
+    node_type: "end"
+    title: "结束"
+    description: "输出筛选报告"
+    position:
+      x: 1400
+      y: 300
+    outputs:
+      - name: "report"
+        type: "string"
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "rs-0001-0001-0001-000000000007"
+            ref_var_name: "output"
+
+edges:
+  # Start -> 岗位标准库检索（并行）
+  - id: "edge-001"
+    source: "rs-0001-0001-0001-000000000001"
+    target: "rs-0001-0001-0001-000000000002"
+    source_type: "start"
+    target_type: "dataset_retrieval"
+
+  # Start -> 简历解析（并行）
+  - id: "edge-002"
+    source: "rs-0001-0001-0001-000000000001"
+    target: "rs-0001-0001-0001-000000000003"
+    source_type: "start"
+    target_type: "llm"
+
+  # 岗位标准库 -> 匹配度评估
+  - id: "edge-003"
+    source: "rs-0001-0001-0001-000000000002"
+    target: "rs-0001-0001-0001-000000000004"
+    source_type: "dataset_retrieval"
+    target_type: "llm"
+
+  # 简历解析 -> 匹配度评估
+  - id: "edge-004"
+    source: "rs-0001-0001-0001-000000000003"
+    target: "rs-0001-0001-0001-000000000004"
+    source_type: "llm"
+    target_type: "llm"
+
+  # 匹配度评估 -> 加权评分计算
+  - id: "edge-005"
+    source: "rs-0001-0001-0001-000000000004"
+    target: "rs-0001-0001-0001-000000000005"
+    source_type: "llm"
+    target_type: "code"
+
+  # 加权评分 -> HTTP回调通知（并行）
+  - id: "edge-006"
+    source: "rs-0001-0001-0001-000000000005"
+    target: "rs-0001-0001-0001-000000000006"
+    source_type: "code"
+    target_type: "http_request"
+
+  # 加权评分 -> 生成报告（并行）
+  - id: "edge-007"
+    source: "rs-0001-0001-0001-000000000005"
+    target: "rs-0001-0001-0001-000000000007"
+    source_type: "code"
+    target_type: "template_transform"
+
+  # HTTP回调 -> 结束
+  - id: "edge-008"
+    source: "rs-0001-0001-0001-000000000006"
+    target: "rs-0001-0001-0001-000000000008"
+    source_type: "http_request"
+    target_type: "end"
+
+  # 生成报告 -> 结束
+  - id: "edge-009"
+    source: "rs-0001-0001-0001-000000000007"
+    target: "rs-0001-0001-0001-000000000008"
+    source_type: "template_transform"
+    target_type: "end"
+
+created_at: 1740394800
