@@ -81,6 +81,7 @@ class WorkflowConfig(BaseModel):
             StartNodeData,
             TemplateTransformNodeData,
             ToolNodeData,
+            IntentClassifierNodeData,
         )
 
         node_data_classes = {
@@ -92,6 +93,7 @@ class WorkflowConfig(BaseModel):
             NodeType.CODE: CodeNodeData,
             NodeType.TOOL: ToolNodeData,
             NodeType.HTTP_REQUEST: HttpRequestNodeData,
+            NodeType.INTENT_CLASSIFIER: IntentClassifierNodeData,
         }
 
         # 5.循环遍历所有节点
@@ -399,3 +401,4 @@ class WorkflowState(TypedDict):
         dict[str, Any], _process_dict
     ]  # 工作流的最终输出结果，也就是工具输出
     node_results: Annotated[list[NodeResult], _process_node_results]  # 各节点的运行结果
+    intent_condition: str  # 意图识别节点的条件分支标识

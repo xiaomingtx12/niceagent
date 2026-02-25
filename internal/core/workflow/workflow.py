@@ -20,6 +20,7 @@ from .nodes import (
     CodeNode,
     ToolNode,
     HttpRequestNode,
+    IntentClassifierNode,
     EndNode,
 )
 
@@ -33,6 +34,7 @@ NodeClasses = {
     NodeType.CODE: CodeNode,
     NodeType.TOOL: ToolNode,
     NodeType.HTTP_REQUEST: HttpRequestNode,
+    NodeType.INTENT_CLASSIFIER: IntentClassifierNode,
 }
 
 
@@ -139,6 +141,14 @@ class Workflow(BaseTool):
                     node_flag,
                     NodeClasses[NodeType.HTTP_REQUEST](node_data=node),
                 )
+            elif node.node_type == NodeType.INTENT_CLASSIFIER:
+                graph.add_node(
+                    node_flag,
+                    NodeClasses[NodeType.INTENT_CLASSIFIER](
+                        node_data=node,
+                        account_id=self._workflow_config.account_id
+                    ),
+                )
             elif node.node_type == NodeType.END:
                 graph.add_node(
                     node_flag,
@@ -147,34 +157,101 @@ class Workflow(BaseTool):
             else:
                 raise ValidateErrorException("工作流节点类型错误，请核实后重试")
 
-        # 4.循环遍历edges信息添加边
-        parallel_edges = {}  # key:终点，value:起点列表
+        # 4.分类边：普通边和条件边
+        normal_edges = []
+        conditional_edges_map = {}  # key: source_node, value: list of edges
+        conditional_target_nodes = set()  # 条件边的目标节点集合
+        
+        for edge in edges:
+            if edge.condition:
+                # 条件边
+                source_node = f"{edge.source_type.value}_{edge.source}"
+                if source_node not in conditional_edges_map:
+                    conditional_edges_map[source_node] = []
+                conditional_edges_map[source_node].append(edge)
+                # 记录条件边的目标节点
+                conditional_target_nodes.add(f"{edge.target_type.value}_{edge.target}")
+            else:
+                # 普通边
+                normal_edges.append(edge)
+
+        # 5.处理普通边，区分真正的并行汇聚边和条件分支后的汇聚边
         start_node = ""
         end_node = ""
-        for edge in edges:
-            # 5.计算并获取并行边
+        # 按目标节点分组
+        edges_by_target = {}  # key:终点, value:起点列表
+        
+        for edge in normal_edges:
             source_node = f"{edge.source_type.value}_{edge.source}"
             target_node = f"{edge.target_type.value}_{edge.target}"
-            if target_node not in parallel_edges:
-                parallel_edges[target_node] = [source_node]
+            
+            if target_node not in edges_by_target:
+                edges_by_target[target_node] = [source_node]
             else:
-                parallel_edges[target_node].append(source_node)
+                edges_by_target[target_node].append(source_node)
 
-            # 6.检测特殊节点（开始节点、结束节点），需要写成两个if的格式，避免只有一条边的情况识别失败
+            # 检测特殊节点
             if edge.source_type == NodeType.START:
-                start_node = f"{edge.source_type.value}_{edge.source}"
+                start_node = source_node
             if edge.target_type == NodeType.END:
-                end_node = f"{edge.target_type.value}_{edge.target}"
+                end_node = target_node
+
+        # 6.处理条件边
+        for source_node, cond_edges in conditional_edges_map.items():
+            # 创建条件函数，返回条件字符串（condition_map的key）
+            def create_condition_func(edges_list):
+                def condition_func(state: WorkflowState) -> str:
+                    """根据意图识别结果返回对应的条件分支标识"""
+                    intent = state.get("intent_condition", "")
+                    # 查找匹配的条件
+                    for edge in edges_list:
+                        if edge.condition == intent:
+                            return edge.condition
+                    # 如果没有匹配，返回第一个条件（默认分支）
+                    if edges_list:
+                        return edges_list[0].condition
+                    return "__end__"
+                return condition_func
+            
+            # 构建条件映射：条件字符串 -> 目标节点名
+            condition_map = {}
+            for edge in cond_edges:
+                target_node = f"{edge.target_type.value}_{edge.target}"
+                condition_map[edge.condition] = target_node
+                
+                # 检测特殊节点
+                if edge.target_type == NodeType.END:
+                    end_node = target_node
+            
+            # 添加条件边
+            graph.add_conditional_edges(
+                source_node,
+                create_condition_func(cond_edges),
+                condition_map
+            )
 
         # 7.设置开始和终点
         graph.set_entry_point(start_node)
         graph.set_finish_point(end_node)
 
-        # 8.循环遍历合并边
-        for target_node, source_nodes in parallel_edges.items():
-            graph.add_edge(source_nodes, target_node)
+        # 8.添加普通边，区分条件分支汇聚和真正的并行汇聚
+        for target_node, source_nodes in edges_by_target.items():
+            # 判断源节点是否来自条件分支的目标节点
+            # 如果源节点中有任何一个是条件边的目标，说明这是条件分支后的汇聚
+            # 此时应该添加独立边（任一分支完成即可触发），而非fan-in边（等待所有分支完成）
+            has_conditional_source = any(
+                src in conditional_target_nodes for src in source_nodes
+            )
+            
+            if has_conditional_source or len(source_nodes) == 1:
+                # 条件分支汇聚或单一来源：添加独立边
+                for source_node in source_nodes:
+                    graph.add_edge(source_node, target_node)
+            else:
+                # 真正的并行汇聚：使用fan-in边（等待所有源节点完成）
+                graph.add_edge(source_nodes, target_node)
 
-        # 7.构建图程序并编译
+        # 9.构建图程序并编译
         return graph.compile()
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

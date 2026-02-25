@@ -19,6 +19,7 @@ from internal.core.workflow.nodes import (
     DatasetRetrievalNodeData,
     EndNodeData,
     HttpRequestNodeData,
+    IntentClassifierNodeData,
     LLMNodeData,
     StartNodeData,
     TemplateTransformNodeData,
@@ -420,6 +421,8 @@ class WorkflowService(BaseService):
                 debug_success = True
 
             except Exception as e:
+                import logging
+                logging.error(f"工作流调试执行失败: {str(e)}", exc_info=True)
                 self.update(
                     workflow_result,
                     **{
@@ -428,6 +431,12 @@ class WorkflowService(BaseService):
                         "latency": (time.perf_counter() - start_at),
                     },
                 )
+                # 将错误信息通过SSE事件返回给前端
+                error_data = {
+                    "id": str(uuid.uuid4()),
+                    "error": str(e),
+                }
+                yield f"event: error\ndata: {json.dumps(error_data)}\n\n"
 
         # 12.执行生成器
         generator = handle_stream()
@@ -523,6 +532,7 @@ class WorkflowService(BaseService):
             NodeType.CODE: CodeNodeData,
             NodeType.TOOL: ToolNodeData,
             NodeType.HTTP_REQUEST: HttpRequestNodeData,
+            NodeType.INTENT_CLASSIFIER: IntentClassifierNodeData,
         }
 
         # 3.循环校验nodes中各个节点对应的数据

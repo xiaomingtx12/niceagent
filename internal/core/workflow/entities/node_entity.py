@@ -15,6 +15,7 @@ class NodeType(str, Enum):
     DATASET_RETRIEVAL = "dataset_retrieval"
     HTTP_REQUEST = "http_request"
     TEMPLATE_TRANSFORM = "template_transform"
+    INTENT_CLASSIFIER = "intent_classifier"
     END = "end"
 
 

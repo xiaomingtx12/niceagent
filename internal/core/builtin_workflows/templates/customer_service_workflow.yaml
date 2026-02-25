@@ -1,0 +1,280 @@
+id: "wf-customer-service-001"
+category: "customer_service"
+name: "智能电商客服工作流"
+tool_call_name: "customer_service_workflow"
+icon: "https://imooc-llmops-1304251364.cos.ap-guangzhou.myqcloud.com/2024/12/06/customer-service-icon.png"
+description: "智能电商客服工作流：通过意图识别自动分流到售前知识库、售后知识库或固定话术，最后由AI汇总生成专业回复"
+nodes:
+  - id: "start-001"
+    node_type: "start"
+    title: "开始"
+    description: "接收用户问题"
+    position:
+      x: 100
+      y: 300
+    inputs:
+      - name: "user_question"
+        type: "string"
+        required: true
+        description: "用户提出的问题"
+
+  - id: "intent-001"
+    node_type: "intent_classifier"
+    title: "意图识别"
+    description: "识别用户问题属于售前、售后还是其他咨询"
+    position:
+      x: 350
+      y: 300
+    intents:
+      - name: "售前咨询"
+        description: "用户询问产品信息、功能介绍、价格优惠、购买建议、产品对比、使用场景等售前相关问题"
+      - name: "售后服务"
+        description: "用户咨询退换货、维修保养、质量问题、订单查询、物流跟踪、发票开具等售后相关问题"
+      - name: "其他咨询"
+        description: "一般性问候、闲聊、不明确的问题或其他未分类的咨询"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.3
+        max_tokens: 500
+    inputs:
+      - name: "user_question"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "start-001"
+            ref_var_name: "user_question"
+    outputs:
+      - name: "intent_name"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+      - name: "confidence"
+        type: "float"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "dataset-presale"
+    node_type: "dataset_retrieval"
+    title: "售前知识库"
+    description: "检索售前相关知识"
+    position:
+      x: 650
+      y: 150
+    dataset_ids: []
+    retrieval_config:
+      retrieval_strategy: "semantic"
+      k: 3
+      score: 0.7
+    inputs:
+      - name: "query"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "start-001"
+            ref_var_name: "user_question"
+    outputs:
+      - name: "combine_documents"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "dataset-aftersale"
+    node_type: "dataset_retrieval"
+    title: "售后知识库"
+    description: "检索售后相关知识"
+    position:
+      x: 650
+      y: 300
+    dataset_ids: []
+    retrieval_config:
+      retrieval_strategy: "semantic"
+      k: 3
+      score: 0.7
+    inputs:
+      - name: "query"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "start-001"
+            ref_var_name: "user_question"
+    outputs:
+      - name: "combine_documents"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "template-general"
+    node_type: "template_transform"
+    title: "固定话术"
+    description: "其他咨询的固定回复话术"
+    position:
+      x: 650
+      y: 450
+    template: "您好！感谢您的咨询。😊\n\n我是智能客服助手，很高兴为您服务。\n\n如果您有以下需求，我可以为您提供专业帮助：\n\n📦 售前咨询\n• 产品功能介绍\n• 价格优惠信息\n• 购买建议推荐\n• 产品对比分析\n\n🔧 售后服务\n• 订单查询跟踪\n• 退换货办理\n• 维修保养咨询\n• 质量问题处理\n\n请您详细描述您的需求，我会为您提供更准确的帮助。\n\n如需人工客服，请回复\"人工客服\"。\n工作时间：周一至周日 9:00-21:00\n客服热线：400-XXX-XXXX\n\n期待为您服务！💼"
+    inputs:
+      - name: "user_question"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "start-001"
+            ref_var_name: "user_question"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "llm-summary"
+    node_type: "llm"
+    title: "AI智能回复"
+    description: "基于知识库或话术生成最终回复"
+    position:
+      x: 950
+      y: 300
+    prompt: "你是一个专业的电商客服，需要根据用户问题和提供的参考信息，生成一个专业、友好、准确的回复。\n\n【核心规则 - 严格遵守】\n- 严禁编造或虚构任何产品信息、价格、功能、型号、规格等内容\n- 只能基于下方「参考信息」中实际提供的内容进行回复\n- 如果参考信息显示「知识库内没有检索到对应内容」、为空、或不包含用户所问的具体信息，必须如实告知用户暂无相关信息\n- 绝对不允许自行列举商品清单、推荐产品列表或编造任何不存在于参考信息中的内容\n\n用户问题：{{ user_question }}\n\n识别的意图：{{ intent_name }}（置信度：{{ confidence }}）\n\n参考信息：\n{% if presale_info and presale_info|length > 0 %}\n【售前知识库】\n{{ presale_info }}\n{% endif %}\n{% if aftersale_info and aftersale_info|length > 0 %}\n【售后知识库】\n{{ aftersale_info }}\n{% endif %}\n{% if general_info and general_info|length > 0 %}\n【固定话术】\n{{ general_info }}\n{% endif %}\n\n请根据以上信息，生成一个专业的客服回复。要求：\n\n1. 回复风格\n   - 语气友好、专业、耐心\n   - 称呼用户为\"您\"\n   - 使用礼貌用语\n\n2. 回复内容\n   - 直接回答用户问题\n   - 只能基于参考信息提供准确答案，严禁编造\n   - 如果参考信息不足或未检索到相关内容，请回复：\"非常抱歉，目前暂未找到与您问题相关的信息。建议您提供更具体的需求描述，或联系人工客服获取帮助。\"\n   - 适当使用emoji增加亲和力（但不要过度）\n\n3. 回复结构\n   - 开头：简短问候\n   - 主体：基于参考信息详细解答（无信息时如实告知）\n   - 结尾：询问是否还有其他问题\n\n4. 特殊情况处理\n   - 售前咨询：仅基于知识库中的实际产品信息回复，无信息时引导用户描述具体需求或联系人工客服\n   - 售后服务：表达理解，基于知识库提供解决方案\n   - 其他咨询：引导用户明确需求\n\n请直接输出回复内容，不要包含\"回复：\"等前缀。"
+    model_config:
+      provider: "tongyi"
+      model: "qwen-plus"
+      parameters:
+        temperature: 0.7
+        max_tokens: 2000
+    inputs:
+      - name: "user_question"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "start-001"
+            ref_var_name: "user_question"
+      - name: "intent_name"
+        type: "string"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "intent-001"
+            ref_var_name: "intent_name"
+      - name: "confidence"
+        type: "float"
+        required: true
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "intent-001"
+            ref_var_name: "confidence"
+      - name: "presale_info"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "dataset-presale"
+            ref_var_name: "combine_documents"
+      - name: "aftersale_info"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "dataset-aftersale"
+            ref_var_name: "combine_documents"
+      - name: "general_info"
+        type: "string"
+        required: false
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "template-general"
+            ref_var_name: "output"
+    outputs:
+      - name: "output"
+        type: "string"
+        value:
+          type: "generated"
+          content: ""
+
+  - id: "end-001"
+    node_type: "end"
+    title: "结束"
+    description: "输出最终回复"
+    position:
+      x: 1250
+      y: 300
+    outputs:
+      - name: "result"
+        type: "string"
+        value:
+          type: "ref"
+          content:
+            ref_node_id: "llm-summary"
+            ref_var_name: "output"
+
+edges:
+  - id: "edge-001"
+    source: "start-001"
+    target: "intent-001"
+    source_type: "start"
+    target_type: "intent_classifier"
+
+  - id: "edge-002"
+    source: "intent-001"
+    target: "dataset-presale"
+    source_type: "intent_classifier"
+    target_type: "dataset_retrieval"
+    condition: "售前咨询"
+
+  - id: "edge-003"
+    source: "intent-001"
+    target: "dataset-aftersale"
+    source_type: "intent_classifier"
+    target_type: "dataset_retrieval"
+    condition: "售后服务"
+
+  - id: "edge-004"
+    source: "intent-001"
+    target: "template-general"
+    source_type: "intent_classifier"
+    target_type: "template_transform"
+    condition: "其他咨询"
+
+  - id: "edge-005"
+    source: "dataset-presale"
+    target: "llm-summary"
+    source_type: "dataset_retrieval"
+    target_type: "llm"
+
+  - id: "edge-006"
+    source: "dataset-aftersale"
+    target: "llm-summary"
+    source_type: "dataset_retrieval"
+    target_type: "llm"
+
+  - id: "edge-007"
+    source: "template-general"
+    target: "llm-summary"
+    source_type: "template_transform"
+    target_type: "llm"
+
+  - id: "edge-008"
+    source: "llm-summary"
+    target: "end-001"
+    source_type: "llm"
+    target_type: "end"
+
+created_at: 1740394800

@@ -81,6 +81,15 @@ class ConversationService(BaseService):
         except Exception as e:
             logging.warning(f"加载配置模型失败: {str(e)}")
 
+        # 1.1 兜底：如果模型加载失败或未配置，使用默认模型
+        if llm is None:
+            try:
+                language_model_service = Injector().get(LanguageModelService)
+                llm = language_model_service.load_default_language_model()
+            except Exception as e:
+                logging.error(f"加载默认模型也失败: {str(e)}")
+                return old_summary
+
         # 2.创建prompt
         prompt = ChatPromptTemplate.from_template(SUMMARIZER_TEMPLATE)
 
@@ -116,6 +125,15 @@ class ConversationService(BaseService):
                 )
         except Exception as e:
             logging.warning(f"加载配置模型失败: {str(e)}")
+
+        # 1.1 兜底：如果模型加载失败或未配置，使用默认模型
+        if llm is None:
+            try:
+                language_model_service = Injector().get(LanguageModelService)
+                llm = language_model_service.load_default_language_model()
+            except Exception as e:
+                logging.error(f"加载默认模型也失败: {str(e)}")
+                return "新的会话"
 
         # 2.创建prompt
         prompt = ChatPromptTemplate.from_messages(
@@ -170,6 +188,15 @@ class ConversationService(BaseService):
                     )
             except Exception as e:
                 logging.warning(f"加载配置模型失败: {str(e)}，使用默认模型")
+
+            # 1.1 兜底：如果模型加载失败或未配置，使用默认模型
+            if llm is None:
+                try:
+                    language_model_service = Injector().get(LanguageModelService)
+                    llm = language_model_service.load_default_language_model()
+                except Exception as e:
+                    logging.error(f"加载默认模型也失败: {str(e)}")
+                    return []
 
             # 2.创建prompt
             prompt = ChatPromptTemplate.from_messages(
