@@ -19,6 +19,10 @@ from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.model import Account, Message
 from internal.schema.assistant_agent_schema import GetAssistantAgentMessagesWithPageReq
 from internal.task.app_task import auto_create_app
+from internal.task.workflow_task import (
+    auto_generate_workflow,
+    auto_generate_app_with_workflow,
+)
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
@@ -88,6 +92,8 @@ class AssistantAgentService(BaseService):
         tools = [
             self.faiss_service.convert_faiss_to_tool(),
             self.convert_create_app_to_tool(account.id),
+            self.convert_workflow_generator_to_tool(account),
+            self.convert_app_with_workflow_generator_to_tool(account),
         ]
 
         # 8.构建Agent智能体，使用FunctionCallAgent
@@ -163,7 +169,7 @@ class AssistantAgentService(BaseService):
                 "message_id": str(message.id),
                 "task_id": str(agent_thought.task_id),
             }
-            yield f"event: {agent_thought.event}\ndata:{json.dumps(data)}\n\n"
+            yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
 
         # 22.将消息以及推理过程添加到数据库
         self.conversation_service.save_agent_thoughts(
@@ -231,9 +237,121 @@ class AssistantAgentService(BaseService):
         def create_app(name: str, description: str) -> str:
             """如果用户提出了需要创建一个Agent/应用，你可以调用此工具，参数的输入是应用的名称+描述，返回的数据是创建后的成功提示"""
             # 1.调用celery异步任务在后端创建应用
-            auto_create_app.delay(name, description, account_id)
+            auto_create_app.delay(name, description, str(account_id))
 
             # 2.返回成功提示
             return f"已调用后端异步任务创建Agent应用。\n应用名称: {name}\n应用描述: {description}"
 
         return create_app
+
+
+    @classmethod
+    def convert_workflow_generator_to_tool(cls, account: Account) -> BaseTool:
+        """将工作流生成功能转换为LangChain工具"""
+        
+        # 提前获取account_id字符串，避免在闭包中访问account对象
+        account_id_str = str(account.id)
+
+        class WorkflowGeneratorInput(BaseModel):
+            """工作流生成输入结构"""
+
+            name: str = Field(description="工作流名称，简洁明了，不超过50个字符")
+            description: str = Field(description="工作流描述，概括工作流的功能")
+            requirements: str = Field(
+                description="详细的工作流需求说明，包括需要的功能、处理流程、节点类型等"
+            )
+            node_types: str = Field(
+                default="",
+                description="可选，指定需要使用的节点类型，多个类型用逗号分隔，如：start,llm,template_transform,end。留空则自动选择",
+            )
+
+        @tool("workflow_generator", args_schema=WorkflowGeneratorInput)
+        def workflow_generator(
+            name: str, description: str, requirements: str, node_types: str = ""
+        ) -> str:
+            """当用户需要创建工作流时调用此工具。根据用户需求自动生成工作流配置，包括节点和边的定义。返回创建成功的工作流信息。"""
+            # 1. 解析节点类型
+            node_types_list = None
+            if node_types and node_types.strip():
+                node_types_list = [nt.strip() for nt in node_types.split(",")]
+
+            # 2. 调用Celery异步任务在后端生成工作流（使用预先获取的account_id字符串）
+            auto_generate_workflow.delay(
+                name, description, requirements, account_id_str, node_types_list
+            )
+
+            # 3. 返回成功提示
+            return f"""已调用后端异步任务生成工作流。
+
+工作流信息：
+- 名称：{name}
+- 描述：{description}
+- 需求：{requirements}
+
+工作流正在后台生成中，预计需要10-30秒。
+生成完成后，您可以在工作流管理页面查看和编辑此工作流。"""
+
+        return workflow_generator
+
+    @classmethod
+    def convert_app_with_workflow_generator_to_tool(
+        cls, account: Account
+    ) -> BaseTool:
+        """将Agent应用+工作流生成功能转换为LangChain工具"""
+        
+        # 提前获取account_id字符串，避免在闭包中访问account对象
+        account_id_str = str(account.id)
+
+        class AppWithWorkflowGeneratorInput(BaseModel):
+            """Agent应用+工作流生成输入结构"""
+
+            app_name: str = Field(description="Agent应用名称，简洁明了，不超过50个字符")
+            app_description: str = Field(description="Agent应用描述，概括应用的功能")
+            preset_prompt: str = Field(
+                description="Agent的预设提示词，定义Agent的人设、角色和回复逻辑"
+            )
+            workflow_requirements: str = Field(
+                description="需要生成的工作流的详细需求说明，包括功能、处理流程等"
+            )
+            auto_publish: bool = Field(
+                default=False, description="是否自动发布应用和工作流，默认为False（保存为草稿）"
+            )
+
+        @tool(
+            "app_with_workflow_generator", args_schema=AppWithWorkflowGeneratorInput
+        )
+        def app_with_workflow_generator(
+            app_name: str,
+            app_description: str,
+            preset_prompt: str,
+            workflow_requirements: str,
+            auto_publish: bool = False,
+        ) -> str:
+            """当用户需要创建一个完整的Agent应用并配套工作流时调用此工具。一键创建Agent应用并自动生成关联的工作流。返回创建成功的应用和工作流信息。"""
+            # 1. 调用Celery异步任务在后端创建应用和工作流（使用预先获取的account_id字符串）
+            auto_generate_app_with_workflow.delay(
+                app_name,
+                app_description,
+                preset_prompt,
+                workflow_requirements,
+                account_id_str,
+                auto_publish,
+            )
+
+            # 2. 返回成功提示
+            publish_status = "并自动发布" if auto_publish else "（保存为草稿）"
+            return f"""已调用后端异步任务创建Agent应用和工作流。
+
+应用信息：
+- 应用名称：{app_name}
+- 应用描述：{app_description}
+- 预设提示词：{preset_prompt[:100]}...
+
+工作流信息：
+- 工作流名称：{app_name}_workflow
+- 工作流需求：{workflow_requirements}
+
+应用和工作流正在后台生成中，预计需要20-40秒。
+生成完成后{publish_status}，您可以在应用管理页面和工作流管理页面查看。"""
+
+        return app_with_workflow_generator
