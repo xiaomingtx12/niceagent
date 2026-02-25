@@ -58,7 +58,7 @@ DEFAULT_APP_CONFIG = {
     },
     "text_to_speech": {
         "enable": False,
-        "voice": "echo",
+        "voice": "xiaoxiao",
         "auto_play": False,
     },
     "review_config": {

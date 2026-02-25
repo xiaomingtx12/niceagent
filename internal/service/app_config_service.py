@@ -445,6 +445,9 @@ class AppConfigService(BaseService):
         # 15.完成数据校验，赋值parameters参数
         model_config["parameters"] = parameters
 
+        # 16.将模型支持的features添加到model_config中，便于前端判断模型能力
+        model_config["features"] = [f.value for f in model_entity.features]
+
         return model_config
 
     def _process_and_validate_workflows(

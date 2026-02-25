@@ -552,7 +552,7 @@ class AppService(BaseService):
 
         return app
 
-    def debug_chat(self, app_id: UUID, query: str, account: Account) -> Generator:
+    def debug_chat(self, app_id: UUID, query: str, image_urls: list, account: Account) -> Generator:
         """根据传递的应用id+提问query向特定的应用发起会话调试"""
         # 1.获取应用信息并校验权限
         app = self.get_app(app_id, account)
@@ -571,6 +571,7 @@ class AppService(BaseService):
             invoke_from=InvokeFrom.DEBUGGER,
             created_by=account.id,
             query=query,
+            image_urls=image_urls if image_urls else [],
             status=MessageStatus.NORMAL,
         )
 
@@ -634,7 +635,7 @@ class AppService(BaseService):
             ),
         )
         # 12.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
-        all_messages = history + [HumanMessage(query)]
+        all_messages = history + [llm.convert_to_human_message(query, image_urls)]
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {

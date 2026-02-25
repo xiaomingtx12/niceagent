@@ -1,14 +1,15 @@
+import asyncio
 import base64
 import json
 import logging
-import os
+import threading
 from dataclasses import dataclass
-from io import BytesIO
 from typing import Generator, Union
 from uuid import UUID
 
+import edge_tts
+from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
 from injector import inject
-from openai import OpenAI
 from werkzeug.datastructures import FileStorage
 
 from internal.exception import NotFoundException, FailException
@@ -18,42 +19,94 @@ from pkg.sqlalchemy import SQLAlchemy
 from .app_service import AppService
 from .base_service import BaseService
 from ..entity.app_entity import AppStatus
+from ..entity.audio_entity import EDGE_TTS_VOICE_MAP
 from ..entity.conversation_entity import InvokeFrom
+
+
+class _RecognitionCallback(RecognitionCallback):
+    """DashScope实时语音识别回调，用于收集识别结果"""
+
+    def __init__(self):
+        self.texts = []
+        self.error = None
+        self.done = threading.Event()
+
+    def on_complete(self) -> None:
+        self.done.set()
+
+    def on_error(self, result: RecognitionResult) -> None:
+        self.error = result
+        self.done.set()
+
+    def on_event(self, result: RecognitionResult) -> None:
+        sentence = result.get_sentence()
+        if (
+            sentence
+            and sentence.get("text")
+            and RecognitionResult.is_sentence_end(sentence)
+        ):
+            self.texts.append(sentence["text"])
+
+    def on_close(self) -> None:
+        self.done.set()
 
 
 @inject
 @dataclass
 class AudioService(BaseService):
-    """语音服务，涵盖语音转文本、消息流式输出语音"""
+    """语音服务，涵盖语音转文本（DashScope Paraformer）、消息流式输出语音（Edge-TTS）"""
 
     db: SQLAlchemy
     app_service: AppService
 
     def audio_to_text(self, audio: FileStorage, account: Account) -> str:
-        """将传递的语音转换成文本"""
-        # 1.获取用户配置的 OpenAI API Key
+        """使用DashScope Paraformer将语音转换成文本"""
+        # 1.获取用户配置的通义API Key（复用已有的tongyi key）
         try:
-            api_key = get_api_key_for_provider("openai", account.id)
+            api_key = get_api_key_for_provider("tongyi", account.id)
         except Exception as e:
             raise FailException(f"语音转文本失败: {str(e)}")
 
-        # 2.提取音频文件，并将音频文件转换成FileContent类型
+        # 2.提取音频文件内容
         file_content = audio.stream.read()
-        audio_file = BytesIO(file_content)
-        audio_file.name = "recording.wav"
 
-        # 3.创建OpenAI客户端，并调用whisper服务将音频转换成文字
-        client = self._get_openai_client(api_key)
-        transcription = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-        )
+        # 3.使用Recognition实时识别（通过callback收集结果）
+        try:
+            callback = _RecognitionCallback()
+            recognition = Recognition(
+                model="paraformer-realtime-v2",
+                format="wav",
+                sample_rate=16000,
+                callback=callback,
+                api_key=api_key,
+            )
+            recognition.start()
 
-        # 4.返回识别的文字内容
-        return transcription.text
+            # 4.分块发送音频数据
+            chunk_size = 3200  # 每次发送3200字节（100ms的16kHz 16bit音频）
+            for i in range(0, len(file_content), chunk_size):
+                chunk = file_content[i : i + chunk_size]
+                recognition.send_audio_frame(chunk)
+
+            recognition.stop()
+
+            # 5.等待识别完成
+            callback.done.wait(timeout=30)
+
+            if callback.error:
+                raise FailException(f"语音识别失败: {callback.error}")
+
+            # 6.返回识别结果
+            text = "".join(callback.texts)
+            return text if text else ""
+        except FailException:
+            raise
+        except Exception as e:
+            logging.error("语音转文本失败: %(error)s", {"error": e}, exc_info=True)
+            raise FailException(f"语音转文本失败: {str(e)}")
 
     def message_to_audio(self, message_id: UUID, account: Account) -> Generator:
-        """将消息转换成流式时间输出语音"""
+        """使用Edge-TTS将消息转换成流式输出语音"""
         # 1.根据传递的消息id获取消息并校验权限
         message = self.get(Message, message_id)
         if (
@@ -73,82 +126,100 @@ class AudioService(BaseService):
         ):
             raise NotFoundException("该消息会话不存在，请核实后重试")
 
-        # 3.定义文本转语音启动配置、音色，默认为开启+echo音色
+        # 3.定义文本转语音启动配置、音色，默认为开启+xiaoxiao音色
         enable = True
-        voice = "echo"
+        voice = "xiaobei"
 
         # 4.根据会话信息获取会话归属的应用
         if message.invoke_from in [InvokeFrom.WEB_APP, InvokeFrom.DEBUGGER]:
             app = self.get(App, conversation.app_id)
-            if not app:
-                raise NotFoundException(
-                    "该消息会话归属应用不存在或校验失败，请核实后重试"
-                )
-            if (
-                message.invoke_from == InvokeFrom.DEBUGGER is True
-                and app.account_id != account.id
-            ):
-                raise NotFoundException(
-                    "该消息会话归属的应用不存在或校验失败，请核实后重试"
-                )
-            if (
-                message.invoke_from == InvokeFrom.WEB_APP is False
-                and app.status != AppStatus.PUBLISHED
-            ):
-                raise NotFoundException("该消息会话归属的应用未发布，请核实后重试")
+            if app:
+                # 4.1 应用存在，校验权限
+                if (
+                    message.invoke_from == InvokeFrom.DEBUGGER
+                    and app.account_id != account.id
+                ):
+                    raise NotFoundException(
+                        "该消息会话归属的应用不存在或校验失败，请核实后重试"
+                    )
+                if (
+                    message.invoke_from == InvokeFrom.WEB_APP
+                    and app.status != AppStatus.PUBLISHED
+                ):
+                    raise NotFoundException("该消息会话归属的应用未发布，请核实后重试")
 
-            app_config: Union[AppConfig, AppConfigVersion] = (
-                app.draft_app_config
-                if message.invoke_from == InvokeFrom.DEBUGGER
-                else app.app_config
-            )
-            text_to_speech = app_config.text_to_speech
-            enable = text_to_speech.get("enable", False)
-            voice = text_to_speech.get("voice", "echo")
+                app_config: Union[AppConfig, AppConfigVersion] = (
+                    app.draft_app_config
+                    if message.invoke_from == InvokeFrom.DEBUGGER
+                    else app.app_config
+                )
+                text_to_speech = app_config.text_to_speech
+                enable = text_to_speech.get("enable", False)
+                voice = text_to_speech.get("voice", "xiaoxiao")
+            # 4.2 应用不存在（如辅助Agent），使用默认配置直接播放
         elif message.invoke_from == InvokeFrom.SERVICE_API:
             raise NotFoundException("开放API消息不支持文本转语音服务")
 
-        # 5.根据状态获取不同的配置并判断是否开启文字转语音
+        # 5.根据状态判断是否开启文字转语音
         if enable is False:
             raise FailException("该应用未开启文字转语音功能，请核实后重试")
 
-        # 6.调用tts服务将消息answer转换成流式事件输出语音
+        # 6.将音色名映射为Edge-TTS的完整voice名称
+        edge_voice = EDGE_TTS_VOICE_MAP.get(voice, "zh-CN-XiaoxiaoNeural")
+
+        # 7.使用Edge-TTS生成语音数据
         try:
-
-            # 获取用户配置的 OpenAI API Key
-            api_key = get_api_key_for_provider("openai", account.id)
-
-            client = self._get_openai_client(api_key)
-            response = client.audio.speech.with_streaming_response.create(
-                model="tts-1",
-                voice=voice,
-                response_format="mp3",
-                input=message.answer.strip(),
+            audio_data = self._edge_tts_synthesize(
+                text=message.answer.strip(),
+                voice=edge_voice,
             )
         except Exception as error:
             logging.error("文字转语音失败: %(error)s", {"error": error}, exc_info=True)
             raise FailException("文字转语音失败，请稍后重试")
 
-        # 6.定义内部函数实现流式事件输出
+        # 8.定义内部函数实现流式事件输出
         def tts() -> Generator:
-            """内部函数，从response中获取音频流式事件输出数据"""
+            """从音频数据中分块输出流式事件"""
             common_data = {
                 "conversation_id": str(conversation.id),
                 "message_id": str(message.id),
                 "audio": "",
             }
-            for chunk in response.__enter__().iter_bytes(1024):
-                data = {**common_data, "audio": base64.b64encode(chunk).decode("utf-8")}
+            # 按1024字节分块输出
+            for i in range(0, len(audio_data), 1024):
+                chunk = audio_data[i : i + 1024]
+                data = {
+                    **common_data,
+                    "audio": base64.b64encode(chunk).decode("utf-8"),
+                }
                 yield f"event: tts_message\ndata: {json.dumps(data)}\n\n"
             yield f"event: tts_end\ndata: {json.dumps(common_data)}\n\n"
 
-        # 7.调用tts函数流式事件输出语音数据
+        # 9.调用tts函数流式事件输出语音数据
         return tts()
 
-    @classmethod
-    def _get_openai_client(cls, api_key: str) -> OpenAI:
-        """获取OpenAI客户端"""
-        return OpenAI(
-            api_key=api_key,
-            base_url=os.environ.get("OPENAI_API_BASE"),
-        )
+    @staticmethod
+    def _edge_tts_synthesize(text: str, voice: str) -> bytes:
+        """调用Edge-TTS合成语音，返回mp3字节数据"""
+
+        async def _synthesize() -> bytes:
+            communicate = edge_tts.Communicate(text, voice)
+            audio_chunks = []
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_chunks.append(chunk["data"])
+            return b"".join(audio_chunks)
+
+        # 在同步上下文中运行异步函数
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, _synthesize())
+                    return future.result(timeout=30)
+            else:
+                return loop.run_until_complete(_synthesize())
+        except RuntimeError:
+            return asyncio.run(_synthesize())
