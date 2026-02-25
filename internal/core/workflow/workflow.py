@@ -43,6 +43,7 @@ class Workflow(BaseTool):
 
     _workflow_config: WorkflowConfig = PrivateAttr(None)
     _workflow: CompiledStateGraph = PrivateAttr(None)
+    _flask_app: Any = PrivateAttr(None)
 
     def __init__(self, workflow_config: WorkflowConfig, **kwargs: Any):
         """构造函数，完成工作流函数的初始化"""
@@ -56,6 +57,7 @@ class Workflow(BaseTool):
 
         # 2.完善工作流配置与工作流图结构程序的初始化
         self._workflow_config = workflow_config
+        self._flask_app = current_app._get_current_object()
         self._workflow = self._build_workflow()
 
     @classmethod
@@ -109,7 +111,8 @@ class Workflow(BaseTool):
                     node_flag,
                     NodeClasses[NodeType.LLM](
                         node_data=node,
-                        account_id=self._workflow_config.account_id
+                        account_id=self._workflow_config.account_id,
+                        flask_app=self._flask_app,
                     ),
                 )
             elif node.node_type == NodeType.TEMPLATE_TRANSFORM:
@@ -146,7 +149,8 @@ class Workflow(BaseTool):
                     node_flag,
                     NodeClasses[NodeType.INTENT_CLASSIFIER](
                         node_data=node,
-                        account_id=self._workflow_config.account_id
+                        account_id=self._workflow_config.account_id,
+                        flask_app=self._flask_app,
                     ),
                 )
             elif node.node_type == NodeType.END:
@@ -256,7 +260,9 @@ class Workflow(BaseTool):
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         """工作流组件基础run方法"""
-        return self._workflow.invoke({"inputs": kwargs})
+        result = self._workflow.invoke({"inputs": kwargs})
+        # 提取结束节点的输出，返回可序列化的结果
+        return result.get("outputs", {})
 
     def stream(
         self,

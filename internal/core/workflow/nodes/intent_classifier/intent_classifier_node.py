@@ -1,15 +1,17 @@
 import json
 import time
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID
 
+from flask import Flask
 from jinja2 import Template
 from langchain_core.runnables import RunnableConfig
+from pydantic import PrivateAttr
 
 from internal.core.workflow.entities.node_entity import NodeResult, NodeStatus
 from internal.core.workflow.entities.workflow_entity import WorkflowState
 from internal.core.workflow.nodes import BaseNode
-from internal.core.workflow.utils.helper import extract_variables_from_state
+from internal.core.workflow.utils.helper import extract_variables_from_state, strip_think_tags
 from .intent_classifier_entity import IntentClassifierNodeData
 
 INTENT_CLASSIFICATION_PROMPT = """你是一个意图识别助手。请根据用户的输入，判断用户的意图属于以下哪一类。
@@ -42,16 +44,19 @@ class IntentClassifierNode(BaseNode):
 
     node_data: IntentClassifierNodeData
     account_id: Optional[UUID] = None
+    _flask_app: Flask = PrivateAttr(None)
 
     def __init__(
         self,
         node_data: IntentClassifierNodeData,
         account_id: Optional[UUID] = None,
+        flask_app: Flask = None,
         **kwargs
     ):
         """初始化意图识别节点"""
         super().__init__(node_data=node_data, **kwargs)
         self.account_id = account_id
+        self._flask_app = flask_app
 
     def invoke(
         self, state: WorkflowState, config: Optional[RunnableConfig] = None
@@ -74,15 +79,17 @@ class IntentClassifierNode(BaseNode):
         from app.http.module import injector
         from internal.service import LanguageModelService
 
-        language_model_service = injector.get(LanguageModelService)
-        llm = language_model_service.load_language_model(
-            self.node_data.language_model_config, account_id=self.account_id
-        )
+        with self._flask_app.app_context():
+            language_model_service = injector.get(LanguageModelService)
+            llm = language_model_service.load_language_model(
+                self.node_data.language_model_config, account_id=self.account_id
+            )
 
-        # 5.使用stream来代替invoke，避免接口长时间未响应超时
-        content = ""
-        for chunk in llm.stream(prompt):
-            content += chunk.content
+            # 5.使用stream来代替invoke，避免接口长时间未响应超时
+            content = ""
+            for chunk in llm.stream(prompt):
+                content += chunk.content
+            content = strip_think_tags(content)
 
         # 6.解析LLM返回的JSON结果
         intent_name, confidence = self._parse_llm_response(content)

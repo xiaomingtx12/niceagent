@@ -26,7 +26,10 @@ END OF EXAMPLE
 新的总结:"""
 
 # 会话名字提示模板
-CONVERSATION_NAME_TEMPLATE = "请从用户传递的内容中提取出对应的主题"
+CONVERSATION_NAME_TEMPLATE = (
+    "请分析用户的输入，判断语言类型，并提取主题。"
+    "你必须以json格式返回，包含以下字段：language_type（语言类型声明）、reasoning（推理过程）、subject（主题总结）。"
+)
 
 
 class ConversationInfo(BaseModel):

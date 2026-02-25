@@ -91,7 +91,7 @@ nodes:
     position:
       x: 650
       y: 300
-    prompt: "请根据岗位要求和简历信息进行匹配度评估。\n\n【岗位要求】\n{{ job_description }}\n\n{% if job_standards and job_standards|length > 0 %}【岗位历史招聘标准参考】\n{{ job_standards }}\n{% endif %}\n\n【简历解析结果】\n{{ parsed_resume }}\n\n请严格按以下JSON格式输出评分（不要输出其他内容）：\n```json\n{\n  \"skill_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"experience_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"education_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"project_relevance\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"growth_potential\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"strengths\": [\"优势1\", \"优势2\"],\n  \"concerns\": [\"顾虑1\", \"顾虑2\"],\n  \"interview_questions\": [\n    {\"question\": \"面试问题1\", \"purpose\": \"考察目的\"},\n    {\"question\": \"面试问题2\", \"purpose\": \"考察目的\"},\n    {\"question\": \"面试问题3\", \"purpose\": \"考察目的\"}\n  ]\n}\n```\n评分标准：1-3分不匹配，4-6分部分匹配，7-8分良好匹配，9-10分完美匹配。"
+    prompt: "请根据岗位要求和简历信息进行匹配度评估。\n\n【岗位要求】\n{{ job_description }}\n\n{{ reference_info }}\n\n【简历解析结果】\n{{ parsed_resume }}\n\n请严格按以下JSON格式输出评分（不要输出其他内容）：\n```json\n{\n  \"skill_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"experience_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"education_match\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"project_relevance\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"growth_potential\": {\"score\": 1到10的整数, \"reason\": \"评分理由\"},\n  \"strengths\": [\"优势1\", \"优势2\"],\n  \"concerns\": [\"顾虑1\", \"顾虑2\"],\n  \"interview_questions\": [\n    {\"question\": \"面试问题1\", \"purpose\": \"考察目的\"},\n    {\"question\": \"面试问题2\", \"purpose\": \"考察目的\"},\n    {\"question\": \"面试问题3\", \"purpose\": \"考察目的\"}\n  ]\n}\n```\n评分标准：1-3分不匹配，4-6分部分匹配，7-8分良好匹配，9-10分完美匹配。"
     model_config:
       provider: "tongyi"
       model: "qwen-plus"
@@ -115,6 +115,9 @@ nodes:
           content:
             ref_node_id: "rs-0001-0001-0001-000000000002"
             ref_var_name: "combine_documents"
+        meta:
+          is_knowledge: true
+          label: "岗位历史招聘标准参考"
       - name: "parsed_resume"
         type: "string"
         required: true

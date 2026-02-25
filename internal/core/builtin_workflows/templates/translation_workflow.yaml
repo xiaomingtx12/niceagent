@@ -142,7 +142,7 @@ nodes:
     position:
       x: 900
       y: 300
-    prompt: "你是一位资深的专业翻译，请将以下文本翻译为{{ target_language }}。\n\n【原文】\n{{ source_text }}\n\n【识别的文本场景】{{ scene }}（置信度：{{ confidence }}）\n\n{% if tech_terms and tech_terms|length > 0 %}【技术术语参考】\n{{ tech_terms }}\n{% endif %}\n{% if biz_terms and biz_terms|length > 0 %}【商务用语参考】\n{{ biz_terms }}\n{% endif %}\n{% if style_hint and style_hint|length > 0 %}【风格要求】\n{{ style_hint }}\n{% endif %}\n\n翻译要求：\n1. 忠实原文含义，表达地道自然\n2. 专业术语使用标准译法，首次出现时括号标注原文\n3. 保持原文段落结构和格式\n4. 根据识别的场景调整语言风格和正式程度\n5. 如遇歧义，选择该场景下最常见的理解\n\n请直接输出译文，不要添加解释。"
+    prompt: "你是一位资深的专业翻译，请将以下文本翻译为{{ target_language }}。\n\n【原文】\n{{ source_text }}\n\n【识别的文本场景】{{ scene }}（置信度：{{ confidence }}）\n\n{{ reference_info }}\n\n翻译要求：\n1. 忠实原文含义，表达地道自然\n2. 专业术语使用标准译法，首次出现时括号标注原文\n3. 保持原文段落结构和格式\n4. 根据识别的场景调整语言风格和正式程度\n5. 如遇歧义，选择该场景下最常见的理解\n\n请直接输出译文，不要添加解释。"
     model_config:
       provider: "tongyi"
       model: "qwen-plus"
@@ -190,6 +190,9 @@ nodes:
           content:
             ref_node_id: "tr-0001-0001-0001-000000000003"
             ref_var_name: "combine_documents"
+        meta:
+          is_knowledge: true
+          label: "技术术语参考"
       - name: "biz_terms"
         type: "string"
         required: false
@@ -198,6 +201,9 @@ nodes:
           content:
             ref_node_id: "tr-0001-0001-0001-000000000004"
             ref_var_name: "combine_documents"
+        meta:
+          is_knowledge: true
+          label: "商务用语参考"
       - name: "style_hint"
         type: "string"
         required: false
@@ -206,6 +212,9 @@ nodes:
           content:
             ref_node_id: "tr-0001-0001-0001-000000000005"
             ref_var_name: "output"
+        meta:
+          is_knowledge: true
+          label: "风格要求"
     outputs:
       - name: "output"
         type: "string"

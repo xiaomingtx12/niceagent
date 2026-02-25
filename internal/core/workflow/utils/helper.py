@@ -36,3 +36,11 @@ def extract_variables_from_state(
                         )
                     )
     return variables_dict
+
+
+import re
+
+
+def strip_think_tags(text: str) -> str:
+    """移除LLM输出中的<think>...</think>思考标签及其内容"""
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()

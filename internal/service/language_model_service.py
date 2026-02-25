@@ -1,3 +1,4 @@
+import logging
 import mimetypes
 import os
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from internal.lib.helper import convert_model_to_dict
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from ..lib.api_key_helper import get_api_key_for_provider
+
+logger = logging.getLogger(__name__)
 
 
 @inject
@@ -134,7 +137,7 @@ class LanguageModelService(BaseService):
             )
         except Exception as e:
             # 记录错误日志
-            current_app.logger.error(f"加载语言模型失败: {str(e)}")
+            logger.error(f"加载语言模型失败: {str(e)}")
             # 重新抛出异常，不再降级
             raise
 
