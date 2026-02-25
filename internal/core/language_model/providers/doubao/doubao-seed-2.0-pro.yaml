@@ -1,21 +1,21 @@
-model: moonshot-v1-128k
-label: moonshot-v1-128k
+model: doubao-seed-2.0-pro
+label: Doubao-Seed-2.0-Pro (最新旗舰)
 model_type: chat
 features:
   - tool_call
   - agent_thought
   - image_input
-context_window: 131072
-max_output_tokens: 131072
+context_window: 262144
+max_output_tokens: 16384
 attributes:
-  model: moonshot-v1-128k
+  model: doubao-seed-2.0-pro
 parameters:
   - name: temperature
     use_template: temperature
-    max: 1
-    default: 0.85
+    default: 0.7
   - name: top_p
     use_template: top_p
+    default: 0.7
   - name: presence_penalty
     use_template: presence_penalty
   - name: frequency_penalty
@@ -23,3 +23,4 @@ parameters:
   - name: max_tokens
     use_template: max_tokens
     default: 4096
+    max: 16384

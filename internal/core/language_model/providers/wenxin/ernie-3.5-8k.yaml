@@ -1,5 +1,5 @@
 model: ernie-3.5-8k
-label: ernie-3.5-8k
+label: ERNIE-3.5-8K
 model_type: chat
 features:
   - tool_call
@@ -7,7 +7,7 @@ features:
 context_window: 8192
 max_output_tokens: 2048
 attributes:
-  model: ERNIE-3.5-8K
+  model: ernie-3.5-8k
 parameters:
   - name: temperature
     use_template: temperature
@@ -19,13 +19,7 @@ parameters:
     use_template: presence_penalty
   - name: frequency_penalty
     use_template: frequency_penalty
-  - name: max_output_tokens
+  - name: max_tokens
     use_template: max_tokens
     default: 2048
     max: 2048
-  - name: disable_search
-    label: 禁用搜索
-    type: boolean
-    help: 禁用模型自行进行外部搜索。
-    required: false
-    default: false

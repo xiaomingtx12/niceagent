@@ -67,6 +67,10 @@ class AIService(BaseService):
             if draft_config and draft_config.model_config:
                 model_config = draft_config.model_config
 
+        # 如果model_config为None，使用默认的tongyi配置（需要用户自己的API Key）
+        if not model_config:
+            model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
+
         llm = self.language_model_service.load_language_model(model_config, account.id)
 
         # 2.构建优化prompt的提示词模板

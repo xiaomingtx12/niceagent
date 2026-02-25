@@ -1,9 +1,9 @@
-from langchain_community.chat_models.baidu_qianfan_endpoint import QianfanChatEndpoint
+from langchain_openai import ChatOpenAI
 
 from internal.core.language_model.entities.model_entity import BaseLanguageModel
 
 
-class Chat(QianfanChatEndpoint, BaseLanguageModel):
-    """百度千帆聊天模型"""
+class Chat(ChatOpenAI, BaseLanguageModel):
+    """百度文心聊天模型（基于OpenAI兼容接口）"""
 
-    pass
+    openai_api_base: str = "https://qianfan.baidubce.com/v2"

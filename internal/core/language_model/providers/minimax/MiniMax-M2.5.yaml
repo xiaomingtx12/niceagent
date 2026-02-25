@@ -1,26 +1,25 @@
-model: kimi-k2-instruct
-label: Kimi K2 Instruct
+model: MiniMax-M2.5
+label: MiniMax-M2.5 (最新旗舰)
 model_type: chat
 features:
   - tool_call
   - agent_thought
-  - image_input
-context_window: 131072
-max_output_tokens: 8192
+context_window: 204800
+max_output_tokens: 131072
 attributes:
-  model: kimi-k2-instruct
+  model: MiniMax-M2.5
 parameters:
   - name: temperature
     use_template: temperature
-    max: 1
-    default: 0.85
+    default: 0.7
   - name: top_p
     use_template: top_p
+    default: 0.95
   - name: presence_penalty
     use_template: presence_penalty
   - name: frequency_penalty
     use_template: frequency_penalty
   - name: max_tokens
     use_template: max_tokens
-    default: 4096
-    max: 8192
+    default: 8192
+    max: 131072

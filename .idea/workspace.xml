@@ -4,15 +4,42 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 支持多用户嵌入模型和Faiss向量库初始化&#10;&#10;- EmbeddingsService新增用户级别初始化方法，支持基于请求上下文缓存用户嵌入模型实例  &#10;- FaissService改为延迟初始化模式，利用用户上下文中的嵌入模型初始化对应Faiss数据库  &#10;- 添加对当前请求上下文用户ID的校验，确保嵌入和Faiss服务可用性  &#10;- AIService、ConversationService、LanguageModelService等服务中集成用户API Key管理，支持加载用户配置模型  &#10;- AIHandler及相关服务支持传入用户账号及应用ID，优化prompt生成和建议问题生成以适配用户模型  &#10;- AssistantAgentService在会话创建时获取用户API Key，支持多用户独立的智能体会话实例  &#10;- AudioService中语音转文本相关调用，新增用户API Key传递以支持个性化请求  &#10;- 完成ProviderApiKey相关模块注册与导出，统一API Key获取接口增强安全性和配置灵活性  &#10;- 高德天气工具支持API Key参数注入，优先使用传入Key，兼容环境变量配置  &#10;- LLM节点和Workflow支持传入用户ID进行模型加载，提高定制化能力和隔离性  &#10;- 修正嵌入模型Token计算逻辑，移除环境变量依赖，确保用户密钥安全  &#10;- 增加异常捕获与日志，优化模型加载失败回退机制及错误提示信息  &#10;- 文档及Handler导入统一ProviderApiKey类，增强代码模块解耦和可维护性">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key">
+      <change afterPath="$PROJECT_DIR$/internal/core/language_model/providers/deepseek/_asset/icon.png" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/travel_assistant.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/travel_assistant.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/entities/builtin_app_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/entities/builtin_app_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/ZHIPU_AI_INTEGRATION.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/ZHIPU_AI_QUICKSTART.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/chat.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2-0905.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2-0905.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2-instruct.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2.5.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/kimi-k2.5.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-128k.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-32k.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/moonshot-v1-8k.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/moonshot/positions.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/__init__.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/_asset/icon.svg" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/chat.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/positions.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/ollama/qwen2.5-7b.yaml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/providers.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/chat.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/positions.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-max.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-max.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-plus.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/tongyi/qwen-plus.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/chat.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-128k.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-128k.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-8k.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-3.5-8k.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-4.0-8k.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/ernie-4.0-8k.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/wenxin/positions.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/chat.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/chat.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/glm-4.7-flash.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/glm-4.7-flash.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/positions.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/providers/zhipu/positions.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/ai_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/ai_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -96,47 +123,47 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Flask 服务器.Flask (app/http/app.py).executor&quot;: &quot;Run&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Notification.DisplayName-DoNotAsk-Black action on save file ignored&quot;: &quot;Black action on save file ignored&quot;,
-    &quot;Notification.DoNotAsk-Black action on save file ignored&quot;: &quot;true&quot;,
-    &quot;Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor&quot;: &quot;Run&quot;,
-    &quot;Python.import_knowledge_to_faiss.executor&quot;: &quot;Run&quot;,
-    &quot;Python.import_to_faiss.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;Shell Script.celery.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
-    &quot;aidebugger.tracer.lastRunConfigName&quot;: &quot;import_to_faiss&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;workflow&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/storage&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder&quot;,
-    &quot;typescript.add.unambiguous.imports.on.the.fly&quot;: &quot;true&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Flask 服务器.Flask (app/http/app.py).executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
+    "Notification.DoNotAsk-Black action on save file ignored": "true",
+    "Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor": "Run",
+    "Python.import_knowledge_to_faiss.executor": "Run",
+    "Python.import_to_faiss.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.test.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "Shell Script.celery.executor": "Run",
+    "Shell Script.db migrate.executor": "Run",
+    "Shell Script.db upgrade.executor": "Run",
+    "Shell Script.pipreqs.executor": "Run",
+    "aidebugger.tracer.lastRunConfigName": "import_to_faiss",
+    "git-widget-placeholder": "workflow",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "模块",
+    "project.structure.proportion": "0.15332031",
+    "project.structure.side.proportion": "0.41965318",
+    "settings.editor.selected.configurable": "Qoder",
+    "typescript.add.unambiguous.imports.on.the.fly": "true",
+    "vue.rearranger.settings.migration": "true"
   },
-  &quot;keyToStringList&quot;: {
-    &quot;DatabaseDriversLRU&quot;: [
-      &quot;redis&quot;,
-      &quot;postgresql&quot;
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "redis",
+      "postgresql"
     ]
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\storage" />
@@ -155,7 +182,7 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
+  <component name="RunManager" selected="Shell Script.celery">
     <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -393,7 +420,9 @@
       <workItem from="1771597423350" duration="13928000" />
       <workItem from="1771667564550" duration="31123000" />
       <workItem from="1771741610174" duration="5830000" />
-      <workItem from="1771938891502" duration="8414000" />
+      <workItem from="1771938891502" duration="13976000" />
+      <workItem from="1772006197419" duration="5811000" />
+      <workItem from="1772013051299" duration="12884000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -555,7 +584,31 @@
       <option name="project" value="LOCAL" />
       <updated>1771746569654</updated>
     </task>
-    <option name="localTasksCounter" value="21" />
+    <task id="LOCAL-00021" summary="feat(workflow): 新增内置工作流模板及相关支持&#10;&#10;- 新增BuiltinWorkflowHandler和BuiltinWorkflowService模块支持内置工作流功能&#10;- 在router中注册内置工作流相关路由，支持分类列表、工作流列表、详情及基于模板创建&#10;- builtin_app_entity新增workflows字段，支持关联工作流数据&#10;- 修正function_call_agent中消息发布时避免重复包含完整答案&#10;- 将部分内置应用模型从openai替换为tongyi及qwen-plus模型&#10;- 新增数据库表provider_api_key用于管理第三方API密钥&#10;- 删除废弃的system_model_config表结构及相关迁移文件&#10;- 添加api_integration_workflow工作流模板，支持API数据请求与解析处理&#10;- 统一导入ProviderApiKey支持多用户API密钥管理，增强系统安全及配置灵活性">
+      <option name="closed" value="true" />
+      <created>1771951525096</created>
+      <option name="number" value="00021" />
+      <option name="presentableId" value="LOCAL-00021" />
+      <option name="project" value="LOCAL" />
+      <updated>1771951525096</updated>
+    </task>
+    <task id="LOCAL-00022" summary="feat(workflow): 增加意图识别节点及智能客服工作流支持&#10;&#10;- 新增IntentClassifier节点类型及相关实体、数据结构定义&#10;- 在工作流解析逻辑中支持意图识别节点及条件分支边的处理&#10;- 修改workflow_graph构建，区分普通边和条件分支边，支持条件分支汇聚处理&#10;- 实现意图识别节点执行逻辑，基于LLM解析用户意图并输出置信度&#10;- 新增智能电商客服工作流模板，包含意图分类、售前售后知识库检索和固定话术&#10;- 优化会话服务中模型加载逻辑，添加默认模型兜底机制避免加载失败&#10;- 工作流服务添加错误日志记录及异常通过SSE事件返回前端&#10;- categories.yaml中新增customer_service分类及相关配置">
+      <option name="closed" value="true" />
+      <created>1772019530975</created>
+      <option name="number" value="00022" />
+      <option name="presentableId" value="LOCAL-00022" />
+      <option name="project" value="LOCAL" />
+      <updated>1772019530975</updated>
+    </task>
+    <task id="LOCAL-00023" summary="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key">
+      <option name="closed" value="true" />
+      <created>1772029324556</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1772029324556</updated>
+    </task>
+    <option name="localTasksCounter" value="24" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -566,19 +619,7 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State>
-              <option name="FILTERS">
-                <map>
-                  <entry key="branch">
-                    <value>
-                      <list>
-                        <option value="HEAD" />
-                      </list>
-                    </value>
-                  </entry>
-                </map>
-              </option>
-            </State>
+            <State />
           </value>
         </entry>
       </map>
@@ -606,7 +647,10 @@
     <MESSAGE value="feat(app): 替换icon生成模型为通义千问&#10;&#10;- 修改icon描述提示词模板，适配通义千问AI绘画&#10;- 替换app_service.py中DallEAPIWrapper为qwen_image_generation接口&#10;- 更新生成icon链调用方法，使用qwen_image_wrapper._run&#10;- 新增dashscope依赖至requirements.txt&#10;- 在providers.yaml中新增dashscope提供者配置&#10;- 配置文件新增Celery和Redis连接重试及连接池参数&#10;- 调整.idea/workspace.xml，新增Python测试配置和部分环境设置" />
     <MESSAGE value="feat(dashscope): 新增通义千问图像生成工具&#10;&#10;- 添加QwenImageGenerationTool类，实现基于DashScope API的图像生成功能&#10;- 支持输入文本提示，调用qwen-image-max模型生成指定尺寸的图像&#10;- 提供参数模型QwenImageGenerationArgsSchema，定义输入参数格式&#10;- 实现API调用错误处理及响应结果解析，返回生成图像URL或错误信息&#10;- 添加工具注册配置文件positions.yaml及工具描述配置文件qwen_image_generation.yaml&#10;- 支持多种图片尺寸选择，默认1664x928，支持环境变量API密钥配置" />
     <MESSAGE value="feat(core): 支持多用户嵌入模型和Faiss向量库初始化&#10;&#10;- EmbeddingsService新增用户级别初始化方法，支持基于请求上下文缓存用户嵌入模型实例  &#10;- FaissService改为延迟初始化模式，利用用户上下文中的嵌入模型初始化对应Faiss数据库  &#10;- 添加对当前请求上下文用户ID的校验，确保嵌入和Faiss服务可用性  &#10;- AIService、ConversationService、LanguageModelService等服务中集成用户API Key管理，支持加载用户配置模型  &#10;- AIHandler及相关服务支持传入用户账号及应用ID，优化prompt生成和建议问题生成以适配用户模型  &#10;- AssistantAgentService在会话创建时获取用户API Key，支持多用户独立的智能体会话实例  &#10;- AudioService中语音转文本相关调用，新增用户API Key传递以支持个性化请求  &#10;- 完成ProviderApiKey相关模块注册与导出，统一API Key获取接口增强安全性和配置灵活性  &#10;- 高德天气工具支持API Key参数注入，优先使用传入Key，兼容环境变量配置  &#10;- LLM节点和Workflow支持传入用户ID进行模型加载，提高定制化能力和隔离性  &#10;- 修正嵌入模型Token计算逻辑，移除环境变量依赖，确保用户密钥安全  &#10;- 增加异常捕获与日志，优化模型加载失败回退机制及错误提示信息  &#10;- 文档及Handler导入统一ProviderApiKey类，增强代码模块解耦和可维护性" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 支持多用户嵌入模型和Faiss向量库初始化&#10;&#10;- EmbeddingsService新增用户级别初始化方法，支持基于请求上下文缓存用户嵌入模型实例  &#10;- FaissService改为延迟初始化模式，利用用户上下文中的嵌入模型初始化对应Faiss数据库  &#10;- 添加对当前请求上下文用户ID的校验，确保嵌入和Faiss服务可用性  &#10;- AIService、ConversationService、LanguageModelService等服务中集成用户API Key管理，支持加载用户配置模型  &#10;- AIHandler及相关服务支持传入用户账号及应用ID，优化prompt生成和建议问题生成以适配用户模型  &#10;- AssistantAgentService在会话创建时获取用户API Key，支持多用户独立的智能体会话实例  &#10;- AudioService中语音转文本相关调用，新增用户API Key传递以支持个性化请求  &#10;- 完成ProviderApiKey相关模块注册与导出，统一API Key获取接口增强安全性和配置灵活性  &#10;- 高德天气工具支持API Key参数注入，优先使用传入Key，兼容环境变量配置  &#10;- LLM节点和Workflow支持传入用户ID进行模型加载，提高定制化能力和隔离性  &#10;- 修正嵌入模型Token计算逻辑，移除环境变量依赖，确保用户密钥安全  &#10;- 增加异常捕获与日志，优化模型加载失败回退机制及错误提示信息  &#10;- 文档及Handler导入统一ProviderApiKey类，增强代码模块解耦和可维护性" />
+    <MESSAGE value="feat(workflow): 新增内置工作流模板及相关支持&#10;&#10;- 新增BuiltinWorkflowHandler和BuiltinWorkflowService模块支持内置工作流功能&#10;- 在router中注册内置工作流相关路由，支持分类列表、工作流列表、详情及基于模板创建&#10;- builtin_app_entity新增workflows字段，支持关联工作流数据&#10;- 修正function_call_agent中消息发布时避免重复包含完整答案&#10;- 将部分内置应用模型从openai替换为tongyi及qwen-plus模型&#10;- 新增数据库表provider_api_key用于管理第三方API密钥&#10;- 删除废弃的system_model_config表结构及相关迁移文件&#10;- 添加api_integration_workflow工作流模板，支持API数据请求与解析处理&#10;- 统一导入ProviderApiKey支持多用户API密钥管理，增强系统安全及配置灵活性" />
+    <MESSAGE value="feat(workflow): 增加意图识别节点及智能客服工作流支持&#10;&#10;- 新增IntentClassifier节点类型及相关实体、数据结构定义&#10;- 在工作流解析逻辑中支持意图识别节点及条件分支边的处理&#10;- 修改workflow_graph构建，区分普通边和条件分支边，支持条件分支汇聚处理&#10;- 实现意图识别节点执行逻辑，基于LLM解析用户意图并输出置信度&#10;- 新增智能电商客服工作流模板，包含意图分类、售前售后知识库检索和固定话术&#10;- 优化会话服务中模型加载逻辑，添加默认模型兜底机制避免加载失败&#10;- 工作流服务添加错误日志记录及异常通过SSE事件返回前端&#10;- categories.yaml中新增customer_service分类及相关配置" />
+    <MESSAGE value="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key" />
+    <option name="LAST_COMMIT_MESSAGE" value="fix(service): 修正模型加载及事件流输出逻辑&#10;&#10;- 统一事件流中事件类型输出为枚举的value值，避免类型错误&#10;- auto_create_app中调整account_id类型为str并转换为UUID，提升接口兼容性&#10;- conversation_service中默认模型配置采用“tongyi”提供的“qwen-plus”&#10;- 模型加载失败时改为直接返回默认值，避免异常抛出影响业务流程&#10;- 建议问题生成逻辑优化，改为解析JSON数组文本，解析失败时记录警告日志&#10;- 调整function_call_agent绑定工具时加入异常捕获，兼容不支持此功能的模型&#10;- retrieval_service中在新上下文中初始化嵌入模型，确保账号ID正确传递&#10;- openapi_service及wechat_service调用语言模型加载时，确保传入account_id以使用用户API Key" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -621,7 +665,7 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1771950429655" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772028600208" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

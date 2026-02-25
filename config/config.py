@@ -25,6 +25,7 @@ class Config:
         self.SQLALCHEMY_ENGINE_OPTIONS = {
             "pool_size": int(_get_env("SQLALCHEMY_POOL_SIZE")),
             "pool_recycle": int(_get_env("SQLALCHEMY_POOL_RECYCLE")),
+            "pool_pre_ping": True,
         }
         self.SQLALCHEMY_ECHO = _get_bool_env("SQLALCHEMY_ECHO")
 

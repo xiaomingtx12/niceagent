@@ -1,5 +1,5 @@
 model: kimi-k2.5
-label: Kimi K2.5
+label: Kimi K2.5 (最新旗舰)
 model_type: chat
 features:
   - tool_call

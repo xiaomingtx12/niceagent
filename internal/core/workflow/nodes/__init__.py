@@ -6,6 +6,10 @@ from .dataset_retrieval.dataset_retrieval_node import (
 )
 from .end.end_node import EndNode, EndNodeData
 from .http_request.http_request_node import HttpRequestNode, HttpRequestNodeData
+from .intent_classifier.intent_classifier_node import (
+    IntentClassifierNode,
+    IntentClassifierNodeData,
+)
 from .llm.llm_node import LLMNode, LLMNodeData
 from .start.start_node import StartNode, StartNodeData
 from .template_transform.template_transform_node import (
@@ -30,6 +34,8 @@ __all__ = [
     "ToolNodeData",
     "HttpRequestNode",
     "HttpRequestNodeData",
+    "IntentClassifierNode",
+    "IntentClassifierNodeData",
     "EndNode",
     "EndNodeData",
 ]

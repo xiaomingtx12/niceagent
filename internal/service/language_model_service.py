@@ -139,31 +139,6 @@ class LanguageModelService(BaseService):
             raise
 
     def _get_api_key_param_name(self, provider_name: str) -> str:
-        """根据提供商名称返回对应的 API Key 参数名"""
-        api_key_mapping = {
-            "tongyi": "dashscope_api_key",
-            "openai": "api_key",
-            "moonshot": "api_key",
-            "zhipuai": "api_key",
-            "zhipu": "api_key",
-        }
-        return api_key_mapping.get(provider_name, "api_key")
+        """根据提供商名称返回对应的 API Key 参数名（所有提供商统一使用OpenAI兼容接口，参数名均为api_key）"""
+        return "api_key"
 
-    def load_default_language_model(self) -> BaseLanguageModel:
-        """加载默认的大语言模型，在模型管理器中获取不到模型或者出错时使用默认模型进行兜底"""
-        # 1.获取openai服务提供者与模型类
-        provider = self.language_model_manager.get_provider("openai")
-        model_entity = provider.get_model_entity("gpt-4o-mini")
-        model_class = provider.get_model_class(model_entity.model_type)
-
-        # bug:原先写法使用的是LangChain封装的LLM类，需要替换成自定义封装的类，否则会识别到模型不存在features
-        # return ChatOpenAI(model="gpt-4o-mini", temperature=1, max_tokens=8192)
-
-        # 2.实例化模型并返回
-        return model_class(
-            **model_entity.attributes,
-            temperature=1,
-            max_tokens=8192,
-            features=model_entity.features,
-            metadata=model_entity.metadata,
-        )

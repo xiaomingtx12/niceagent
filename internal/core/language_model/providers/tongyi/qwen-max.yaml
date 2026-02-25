@@ -1,5 +1,5 @@
 model: qwen-max
-label: qwen-max
+label: Qwen-Max
 model_type: chat
 features:
   - tool_call

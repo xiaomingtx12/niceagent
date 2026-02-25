@@ -1,9 +1,9 @@
-from langchain_community.chat_models.tongyi import ChatTongyi
+from langchain_openai import ChatOpenAI
 
 from internal.core.language_model.entities.model_entity import BaseLanguageModel
 
 
-class Chat(ChatTongyi, BaseLanguageModel):
-    """通义千问聊天模型"""
+class Chat(ChatOpenAI, BaseLanguageModel):
+    """通义千问聊天模型（基于OpenAI兼容接口）"""
 
-    pass
+    openai_api_base: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
