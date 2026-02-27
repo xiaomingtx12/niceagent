@@ -230,8 +230,6 @@ nodes:
       x: 1150
       y: 300
     code: |
-      import re
-
       def main(params: dict) -> dict:
           source = params.get("source_text", "")
           translation = params.get("translation", "")
@@ -247,9 +245,18 @@ nodes:
           # 计算膨胀率（译文/原文长度比）
           expansion_ratio = round(tgt_chars / src_chars, 2) if src_chars > 0 else 0
 
-          # 检测是否保留了括号标注的原文术语
-          term_annotations = re.findall(r'[\(（][A-Za-z].*?[\)）]', translation)
-          term_count = len(term_annotations)
+          # 检测是否保留了括号标注的原文术语（不使用正则）
+          term_count = 0
+          for i in range(len(translation) - 1):
+              if translation[i] in ['(', '（']:
+                  # 查找对应的右括号
+                  for j in range(i + 1, min(i + 50, len(translation))):
+                      if translation[j] in [')', '）']:
+                          # 检查括号内是否包含英文字母
+                          content = translation[i+1:j]
+                          if any(c.isalpha() and ord(c) < 128 for c in content):
+                              term_count += 1
+                          break
 
           # 检测段落数是否一致
           src_paragraphs = len([p for p in source.split("\n") if p.strip()])

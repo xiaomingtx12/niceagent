@@ -38,6 +38,7 @@ class RetrievalService(BaseService):
         k: int = 4,
         score: float = 0,
         retrival_source: str = RetrievalSource.HIT_TESTING,
+        source_app_id: UUID = None,
     ) -> list[LCDocument]:
         """根据传递的query+知识库列表执行检索，并返回检索的文档+得分数据（如果检索策略为全文检索，则得分为0）"""
 
@@ -94,8 +95,7 @@ class RetrievalService(BaseService):
                 dataset_id=dataset_id,
                 query=query,
                 source=retrival_source,
-                # todo:等待APP配置模块完成后进行调整
-                source_app_id=None,
+                source_app_id=source_app_id,
                 created_by=account_id,
             )
 
@@ -126,6 +126,7 @@ class RetrievalService(BaseService):
         k: int = 4,
         score: float = 0,
         retrival_source: str = RetrievalSource.HIT_TESTING,
+        source_app_id: UUID = None,
     ) -> BaseTool:
         """根据传递的参数构建一个LangChain知识库搜索工具"""
 
@@ -149,6 +150,7 @@ class RetrievalService(BaseService):
                     k=k,
                     score=score,
                     retrival_source=retrival_source,
+                    source_app_id=source_app_id,
                 )
 
             # 2.将LangChain文档列表转换成字符串后返回

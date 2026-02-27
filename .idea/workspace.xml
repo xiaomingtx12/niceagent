@@ -4,12 +4,17 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
       <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/provider_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/provider_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/meeting_minutes_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/meeting_minutes_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/openapi_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/retrieval_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/retrieval_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/web_app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/web_app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/wechat_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/wechat_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -154,7 +159,7 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Python.test">
+  <component name="RunManager" selected="Shell Script.celery">
     <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -421,7 +426,7 @@
       <workItem from="1772006197419" duration="5811000" />
       <workItem from="1772013051299" duration="26226000" />
       <workItem from="1772089619225" duration="3752000" />
-      <workItem from="1772178931784" duration="15578000" />
+      <workItem from="1772178931784" duration="19815000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -663,7 +668,23 @@
       <option name="project" value="LOCAL" />
       <updated>1772198307259</updated>
     </task>
-    <option name="localTasksCounter" value="31" />
+    <task id="LOCAL-00031" summary="feat(core): 优化智能体流式输出处理性能&#10;&#10;- 提前提取ID避免生成器中访问已分离SQLAlchemy对象错误&#10;- 使用预先转换的字符串ID替代重复调用str提高效率&#10;- 解决智能体流式输出中ID获取的潜在异常风险&#10;- 统一处理流式输出数据，提高代码健壮性和可维护性">
+      <option name="closed" value="true" />
+      <created>1772200841974</created>
+      <option name="number" value="00031" />
+      <option name="presentableId" value="LOCAL-00031" />
+      <option name="project" value="LOCAL" />
+      <updated>1772200841974</updated>
+    </task>
+    <task id="LOCAL-00032" summary="feat(provider): 添加可用性标识以支持国内可用状态&#10;&#10;- 在Provider实体中新增available字段，表示是否在国内可用，默认值为True&#10;- 在providers.yaml中为每个提供商条目添加available属性，设置其国内可用状态&#10;- 更新配置使得工具和提供商的可用性信息更加明确&#10;- 支持基于可用性属性实现不同地区的访问控制和显示逻辑">
+      <option name="closed" value="true" />
+      <created>1772201779267</created>
+      <option name="number" value="00032" />
+      <option name="presentableId" value="LOCAL-00032" />
+      <option name="project" value="LOCAL" />
+      <updated>1772201779267</updated>
+    </task>
+    <option name="localTasksCounter" value="33" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -681,8 +702,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
-    <MESSAGE value="feat(app): 重构应用模块，新增配置版本历史及调试会话支持&#10;&#10;- 在App模型中新增草稿配置和调试会话字段及相关属性方法&#10;- 新增AppConfig与AppConfigVersion模型，实现应用配置版本管理&#10;- 新增AppDatasetJoin模型用于应用与知识库的关联&#10;- 添加应用状态、配置类型枚举类及默认应用配置常量&#10;- 重构AppService，完善创建、获取、更新、发布及回退配置逻辑&#10;- 实现应用调试会话的创建、获取、更新和清空操作&#10;- 优化草稿配置中工具和知识库的校验及同步机制&#10;- 重构AppHandler控制器，支持应用创建、获取、配置管理及调试会话接口&#10;- 改进AgentQueueManager，实现基于task_id的多队列管理及消息发布订阅&#10;- 增强AgentState状态类，添加任务id和迭代次数字段&#10;- 扩展内部模型导入，支持新增实体的注册和统一管理&#10;- 提升接口请求参数校验，新增多个请求体和响应体的Schema定义" />
     <MESSAGE value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
     <MESSAGE value="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性" />
     <MESSAGE value="feat(auth): 完成账号权限校验及多处服务传参优化&#10;&#10;- Account模型继承UserMixin，完善用户认证支持&#10;- API工具相关接口及服务方法均增加current_user参数进行权限校验&#10;- App模型新增token字段及token_with_default属性，支持应用凭证管理&#10;- 应用服务新增分页查询、拷贝、更新、删除功能，均基于当前登录账号权限&#10;- 添加对工作流配置的处理校验逻辑，确保数据有效性和一致性&#10;- 调整COS文件上传服务，接收当前登录账号参数执行账号权限检查&#10;- 修复BaseService获取数据时数据库连接异常处理，增强系统稳定性&#10;- Dataset相关接口及服务方法均添加current_user参数，实现权限控制&#10;- App调试接口中DebugChatReq支持校验上传图片URL的格式及数量限制&#10;- BaseAgent类构造函数新增name参数，方便智能体实例命名&#10;- 代码结构优化，多处函数参数调整，确保业务逻辑基于当前登录账号安全执行" />
@@ -706,7 +725,9 @@
     <MESSAGE value="feat(workflow): 优化工作流中大语言模型节点与意图识别节点&#10;&#10;- LLM节点支持自动整合知识库输入，合并带标签的参考信息注入prompt上下文&#10;- 意图识别节点与LLM节点新增Flask应用上下文支持，避免长时阻塞超时&#10;- 新增strip_think_tags函数，移除LLM输出中&lt;think&gt;标签及内容，提升结果清洁度&#10;- 工作流运行期间传递Flask上下文，确保语言模型加载和调用的环境完整&#10;- 优化客服、翻译、简历筛选等内置工作流模板，统一使用reference_info变量引用知识库内容&#10;- 语言模型服务日志调整，使用统一logger记录加载异常信息&#10;- 会话实体中的会话主题提取提示模板增强，新增语言类型及推理过程字段要求&#10;- 工作流回传结果改为直接返回可序列化的输出数据，提升接口调用体验" />
     <MESSAGE value="feat(oauth): 集成对接Gitee OAuth认证支持&#10;&#10;- 导入并导出GiteeOAuth，加强OAuth模块能力&#10;- 在OAuth服务中新增Gitee OAuth客户端配置&#10;- 更新返回的OAuth客户端字典，包含Gitee项&#10;- 调整requirements.txt依赖版本及修正包名错误&#10;- 移除已废弃的测试脚本，保持代码清洁" />
     <MESSAGE value="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验" />
+    <MESSAGE value="feat(core): 优化智能体流式输出处理性能&#10;&#10;- 提前提取ID避免生成器中访问已分离SQLAlchemy对象错误&#10;- 使用预先转换的字符串ID替代重复调用str提高效率&#10;- 解决智能体流式输出中ID获取的潜在异常风险&#10;- 统一处理流式输出数据，提高代码健壮性和可维护性" />
+    <MESSAGE value="feat(provider): 添加可用性标识以支持国内可用状态&#10;&#10;- 在Provider实体中新增available字段，表示是否在国内可用，默认值为True&#10;- 在providers.yaml中为每个提供商条目添加available属性，设置其国内可用状态&#10;- 更新配置使得工具和提供商的可用性信息更加明确&#10;- 支持基于可用性属性实现不同地区的访问控制和显示逻辑" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(provider): 添加可用性标识以支持国内可用状态&#10;&#10;- 在Provider实体中新增available字段，表示是否在国内可用，默认值为True&#10;- 在providers.yaml中为每个提供商条目添加available属性，设置其国内可用状态&#10;- 更新配置使得工具和提供商的可用性信息更加明确&#10;- 支持基于可用性属性实现不同地区的访问控制和显示逻辑" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -722,7 +743,7 @@
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/my_dify$test.coverage" NAME="test 覆盖结果" MODIFIED="1772199059780" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772197001857" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772204320403" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

@@ -34,8 +34,6 @@ nodes:
       x: 350
       y: 300
     code: |
-      import re
-
       def main(params: dict) -> dict:
           text = params.get("meeting_content", "")
 
@@ -47,13 +45,58 @@ nodes:
           char_count = len(cleaned)
           line_count = len(lines)
 
-          # 尝试提取时间信息
-          time_patterns = re.findall(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}[\s]*\d{0,2}[:\d]*', text)
-          meeting_time = time_patterns[0] if time_patterns else "待补充"
+          # 尝试提取时间信息（不使用正则）
+          meeting_time = "待补充"
+          for line in text.split("\n"):
+              line_stripped = line.strip()
+              # 查找包含日期格式的内容
+              if any(c.isdigit() for c in line_stripped):
+                  # 尝试找到日期格式 YYYY-MM-DD 或 YYYY/MM/DD
+                  for i in range(len(line_stripped) - 9):
+                      substr = line_stripped[i:i+10]
+                      # 检查是否符合日期格式
+                      if (len(substr) == 10 and 
+                          substr[4] in ['-', '/'] and 
+                          substr[7] in ['-', '/'] and
+                          substr[:4].isdigit() and
+                          substr[5:7].isdigit() and
+                          substr[8:10].isdigit()):
+                          meeting_time = substr
+                          # 尝试提取时间部分
+                          time_start = i + 10
+                          if time_start < len(line_stripped):
+                              time_part = line_stripped[time_start:time_start+20].strip()
+                              if time_part and len(time_part) >= 2 and time_part[0:2].isdigit():
+                                  time_words = time_part.split()
+                                  meeting_time = substr + " " + time_words[0] if time_words else substr
+                          break
+                  if meeting_time != "待补充":
+                      break
 
-          # 尝试提取发言人
-          speaker_pattern = re.findall(r'^([^：:]{1,10})[：:]', cleaned, re.MULTILINE)
-          speakers = list(set(speaker_pattern))
+          # 尝试提取发言人（不使用正则）
+          speakers = []
+          seen_speakers = set()
+          
+          for line in cleaned.split("\n"):
+              # 查找包含中文冒号或英文冒号的行
+              colon_pos = -1
+              if "：" in line:
+                  colon_pos = line.index("：")
+              elif ":" in line:
+                  colon_pos = line.index(":")
+              
+              if colon_pos > 0:
+                  # 提取冒号前的内容作为可能的发言人
+                  speaker = line[:colon_pos].strip()
+                  
+                  # 验证发言人名字的合理性
+                  if (len(speaker) >= 1 and 
+                      len(speaker) <= 10 and 
+                      speaker and 
+                      not any(c.isdigit() for c in speaker) and  # 不包含数字
+                      speaker not in seen_speakers):
+                      speakers.append(speaker)
+                      seen_speakers.add(speaker)
 
           return {
               "cleaned_text": cleaned,

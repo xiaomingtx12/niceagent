@@ -130,6 +130,7 @@ class OpenAPIService(BaseService):
                     dataset_ids=[dataset["id"] for dataset in app_config["datasets"]],
                     account_id=account.id,
                     retrival_source=RetrievalSource.APP,
+                    source_app_id=app.id,
                     **app_config["retrieval_config"],
                 )
             )

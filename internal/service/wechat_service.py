@@ -248,6 +248,7 @@ class WechatService(BaseService):
                         ],
                         account_id=app.account_id,
                         retrival_source=RetrievalSource.APP,
+                        source_app_id=app.id,
                         **app_config["retrieval_config"],
                     )
                 )

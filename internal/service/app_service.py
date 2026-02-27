@@ -605,6 +605,7 @@ class AppService(BaseService):
                     ],
                     account_id=account.id,
                     retrival_source=RetrievalSource.APP,
+                    source_app_id=app.id,
                     **draft_app_config["retrieval_config"],
                 )
             )
