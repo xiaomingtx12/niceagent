@@ -166,6 +166,11 @@ class OpenAPIService(BaseService):
         # 17.根据stream类型差异执行不同的代码
         if req.stream.data is True:
             agent_thoughts_dict = {}
+            
+            # 提前提取ID，避免在生成器中访问已分离的SQLAlchemy对象
+            end_user_id = str(end_user.id)
+            conversation_id = str(conversation.id)
+            message_id = str(message.id)
 
             def handle_stream() -> Generator:
                 """流式事件处理器，在Python只要在函数内部使用了yield关键字，那么这个函数的返回值类型肯定是生成器"""
@@ -214,9 +219,9 @@ class OpenAPIService(BaseService):
                             }
                         ),
                         "id": event_id,
-                        "end_user_id": str(end_user.id),
-                        "conversation_id": str(conversation.id),
-                        "message_id": str(message.id),
+                        "end_user_id": end_user_id,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
                         "task_id": str(agent_thought.task_id),
                     }
                     yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"

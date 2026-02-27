@@ -4,14 +4,12 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(oauth): 集成对接Gitee OAuth认证支持&#10;&#10;- 导入并导出GiteeOAuth，加强OAuth模块能力&#10;- 在OAuth服务中新增Gitee OAuth客户端配置&#10;- 更新返回的OAuth客户端字典，包含Gitee项&#10;- 调整requirements.txt依赖版本及修正包名错误&#10;- 移除已废弃的测试脚本，保持代码清洁">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验">
+      <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/jieba_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/jieba_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/provider_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/entities/provider_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/tools/builtin_tools/providers/providers.yaml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/openapi_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -97,47 +95,47 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;Flask 服务器.Flask (app/http/app.py).executor&quot;: &quot;Run&quot;,
-    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
-    &quot;Notification.DisplayName-DoNotAsk-Black action on save file ignored&quot;: &quot;Black action on save file ignored&quot;,
-    &quot;Notification.DoNotAsk-Black action on save file ignored&quot;: &quot;true&quot;,
-    &quot;Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor&quot;: &quot;Run&quot;,
-    &quot;Python.import_knowledge_to_faiss.executor&quot;: &quot;Run&quot;,
-    &quot;Python.import_to_faiss.executor&quot;: &quot;Run&quot;,
-    &quot;Python.main.executor&quot;: &quot;Run&quot;,
-    &quot;Python.test.executor&quot;: &quot;Run&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
-    &quot;Shell Script.celery.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
-    &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
-    &quot;aidebugger.tracer.lastRunConfigName&quot;: &quot;import_to_faiss&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;workflow&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
-    &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
-    &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder&quot;,
-    &quot;typescript.add.unambiguous.imports.on.the.fly&quot;: &quot;true&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Flask 服务器.Flask (app/http/app.py).executor": "Run",
+    "ModuleVcsDetector.initialDetectionPerformed": "true",
+    "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
+    "Notification.DoNotAsk-Black action on save file ignored": "true",
+    "Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor": "Run",
+    "Python.import_knowledge_to_faiss.executor": "Run",
+    "Python.import_to_faiss.executor": "Run",
+    "Python.main.executor": "Run",
+    "Python.test.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "Shell Script.celery.executor": "Run",
+    "Shell Script.db migrate.executor": "Run",
+    "Shell Script.db upgrade.executor": "Run",
+    "Shell Script.pipreqs.executor": "Run",
+    "aidebugger.tracer.lastRunConfigName": "test",
+    "git-widget-placeholder": "workflow",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "project.structure.last.edited": "模块",
+    "project.structure.proportion": "0.15332031",
+    "project.structure.side.proportion": "0.41965318",
+    "settings.editor.selected.configurable": "Qoder",
+    "typescript.add.unambiguous.imports.on.the.fly": "true",
+    "vue.rearranger.settings.migration": "true"
   },
-  &quot;keyToStringList&quot;: {
-    &quot;DatabaseDriversLRU&quot;: [
-      &quot;redis&quot;,
-      &quot;postgresql&quot;
+  "keyToStringList": {
+    "DatabaseDriversLRU": [
+      "redis",
+      "postgresql"
     ]
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\core\language_model\providers\deepseek\_asset" />
@@ -156,7 +154,7 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
+  <component name="RunManager" selected="Python.test">
     <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -218,6 +216,29 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="test" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="my-dify" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/test.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -304,6 +325,7 @@
     </configuration>
     <list>
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
+      <item itemvalue="Python.test" />
       <item itemvalue="Python.import_knowledge_to_faiss" />
       <item itemvalue="Python.import_to_faiss" />
       <item itemvalue="Python.main" />
@@ -315,6 +337,7 @@
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python.test" />
         <item itemvalue="Python.import_to_faiss" />
         <item itemvalue="Python.import_knowledge_to_faiss" />
         <item itemvalue="Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试" />
@@ -398,7 +421,7 @@
       <workItem from="1772006197419" duration="5811000" />
       <workItem from="1772013051299" duration="26226000" />
       <workItem from="1772089619225" duration="3752000" />
-      <workItem from="1772178931784" duration="13579000" />
+      <workItem from="1772178931784" duration="15578000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -632,7 +655,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772186664295</updated>
     </task>
-    <option name="localTasksCounter" value="30" />
+    <task id="LOCAL-00030" summary="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验">
+      <option name="closed" value="true" />
+      <created>1772198307259</created>
+      <option name="number" value="00030" />
+      <option name="presentableId" value="LOCAL-00030" />
+      <option name="project" value="LOCAL" />
+      <updated>1772198307259</updated>
+    </task>
+    <option name="localTasksCounter" value="31" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -650,7 +681,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(agent): 新增智能体基础结构及函数调用智能体实现&#10;&#10;- 新增AgentConfig和AgentState数据模型，支持智能体配置管理和状态跟踪&#10;- 实现BaseAgent抽象基类，定义智能体通用接口&#10;- 实现FunctionCallAgent，基于函数调用的智能体运行流程和状态图编译&#10;- 添加AgentQueueManager，管理智能体任务队列及Redis缓存标记&#10;- 定义智能体队列事件模型及事件类型枚举&#10;- 修正document_schema中process_type字段的默认值拼写错误&#10;- 更新requirements.txt，引入新依赖及版本升级，支持LangChain及相关组件&#10;- 新增agents包__init__.py，统一导出基础智能体和函数调用智能体接口" />
     <MESSAGE value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
     <MESSAGE value="feat(app): 重构应用模块，新增配置版本历史及调试会话支持&#10;&#10;- 在App模型中新增草稿配置和调试会话字段及相关属性方法&#10;- 新增AppConfig与AppConfigVersion模型，实现应用配置版本管理&#10;- 新增AppDatasetJoin模型用于应用与知识库的关联&#10;- 添加应用状态、配置类型枚举类及默认应用配置常量&#10;- 重构AppService，完善创建、获取、更新、发布及回退配置逻辑&#10;- 实现应用调试会话的创建、获取、更新和清空操作&#10;- 优化草稿配置中工具和知识库的校验及同步机制&#10;- 重构AppHandler控制器，支持应用创建、获取、配置管理及调试会话接口&#10;- 改进AgentQueueManager，实现基于task_id的多队列管理及消息发布订阅&#10;- 增强AgentState状态类，添加任务id和迭代次数字段&#10;- 扩展内部模型导入，支持新增实体的注册和统一管理&#10;- 提升接口请求参数校验，新增多个请求体和响应体的Schema定义" />
     <MESSAGE value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
@@ -675,7 +705,8 @@
     <MESSAGE value="feat(assistant_agent): 新增工作流与应用工作流生成工具&#10;&#10;-新增convert_workflow_generator_to_tool方法，实现基于LangChain的工作流生成工具&#10;-新增convert_app_with_workflow_generator_to_tool方法，实现Agent应用和工作流一键生成工具&#10;- 工具内部调用Celery异步任务自动生成工作流与Agent应用，支持后台异步处理&#10;- 调整辅助Agent工具列表，新增工作流生成相关工具&#10;- SSE事件发送修改为使用枚举实际值，修复前端流式消息接收事件类型错误" />
     <MESSAGE value="feat(workflow): 优化工作流中大语言模型节点与意图识别节点&#10;&#10;- LLM节点支持自动整合知识库输入，合并带标签的参考信息注入prompt上下文&#10;- 意图识别节点与LLM节点新增Flask应用上下文支持，避免长时阻塞超时&#10;- 新增strip_think_tags函数，移除LLM输出中&lt;think&gt;标签及内容，提升结果清洁度&#10;- 工作流运行期间传递Flask上下文，确保语言模型加载和调用的环境完整&#10;- 优化客服、翻译、简历筛选等内置工作流模板，统一使用reference_info变量引用知识库内容&#10;- 语言模型服务日志调整，使用统一logger记录加载异常信息&#10;- 会话实体中的会话主题提取提示模板增强，新增语言类型及推理过程字段要求&#10;- 工作流回传结果改为直接返回可序列化的输出数据，提升接口调用体验" />
     <MESSAGE value="feat(oauth): 集成对接Gitee OAuth认证支持&#10;&#10;- 导入并导出GiteeOAuth，加强OAuth模块能力&#10;- 在OAuth服务中新增Gitee OAuth客户端配置&#10;- 更新返回的OAuth客户端字典，包含Gitee项&#10;- 调整requirements.txt依赖版本及修正包名错误&#10;- 移除已废弃的测试脚本，保持代码清洁" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(oauth): 集成对接Gitee OAuth认证支持&#10;&#10;- 导入并导出GiteeOAuth，加强OAuth模块能力&#10;- 在OAuth服务中新增Gitee OAuth客户端配置&#10;- 更新返回的OAuth客户端字典，包含Gitee项&#10;- 调整requirements.txt依赖版本及修正包名错误&#10;- 移除已废弃的测试脚本，保持代码清洁" />
+    <MESSAGE value="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -689,6 +720,7 @@
     </breakpoint-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
+    <SUITE FILE_PATH="coverage/my_dify$test.coverage" NAME="test 覆盖结果" MODIFIED="1772199059780" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
     <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772197001857" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
