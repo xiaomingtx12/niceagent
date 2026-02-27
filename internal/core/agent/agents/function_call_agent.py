@@ -253,56 +253,56 @@ class FunctionCallAgent(BaseAgent):
 
         # 4.流式调用LLM输出对应内容
         gathered = None
-        is_first_chunk = True
         generation_type = ""
         accumulated_answer = ""  # 累积完整答案
 
         try:
             for chunk in llm.stream(ordered_messages):  # 使用重新排序的消息
-                if is_first_chunk:
+                # 累积完整响应
+                if gathered is None:
                     gathered = chunk
-                    is_first_chunk = False
                 else:
                     gathered += chunk
-                    # 5.检测生成类型是工具参数还是文本生成
-                    if not generation_type:
-                        if chunk.tool_calls:
-                            generation_type = "thought"
-                        elif chunk.content:
-                            generation_type = "message"
+                
+                # 5.检测生成类型是工具参数还是文本生成（只需判断一次）
+                if not generation_type:
+                    if chunk.tool_calls:
+                        generation_type = "thought"
+                    elif chunk.content:
+                        generation_type = "message"
 
-                    # 6.如果生成的是消息则提交智能体消息事件
-                    if generation_type == "message":
-                        # 7.提取片段内容并检测是否开启输出审核
-                        review_config = self.agent_config.review_config
-                        content = chunk.content
-                        if (
-                            review_config["enable"]
-                            and review_config["outputs_config"]["enable"]
-                        ):
-                            for keyword in review_config["keywords"]:
-                                content = re.sub(
-                                    re.escape(keyword),
-                                    "**",
-                                    content,
-                                    flags=re.IGNORECASE,
-                                )
+                # 6.如果生成的是消息则提交智能体消息事件
+                if generation_type == "message" and chunk.content:
+                    # 7.提取片段内容并检测是否开启输出审核
+                    review_config = self.agent_config.review_config
+                    content = chunk.content
+                    if (
+                        review_config["enable"]
+                        and review_config["outputs_config"]["enable"]
+                    ):
+                        for keyword in review_config["keywords"]:
+                            content = re.sub(
+                                re.escape(keyword),
+                                "**",
+                                content,
+                                flags=re.IGNORECASE,
+                            )
 
-                        # 累积答案内容
-                        accumulated_answer += content
+                    # 累积答案内容
+                    accumulated_answer += content
 
-                        self.agent_queue_manager.publish(
-                            state["task_id"],
-                            AgentThought(
-                                id=id,
-                                task_id=state["task_id"],
-                                event=QueueEvent.AGENT_MESSAGE,
-                                thought=content,
-                                message=messages_to_dict(state["messages"]),
-                                answer=content,
-                                latency=(time.perf_counter() - start_at),
-                            ),
-                        )
+                    self.agent_queue_manager.publish(
+                        state["task_id"],
+                        AgentThought(
+                            id=id,
+                            task_id=state["task_id"],
+                            event=QueueEvent.AGENT_MESSAGE,
+                            thought=content,
+                            message=messages_to_dict(state["messages"]),
+                            answer=content,
+                            latency=(time.perf_counter() - start_at),
+                        ),
+                    )
         except Exception as e:
             logging.exception(f"LLM节点发生错误, 错误信息: {str(e)}")
             self.agent_queue_manager.publish_error(

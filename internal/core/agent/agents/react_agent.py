@@ -164,22 +164,29 @@ class ReACTAgent(FunctionCallAgent):
 
         # 4.定义变量存储流式输出内容
         gathered = None
-        is_first_chunk = True
         generation_type = ""
         accumulated_answer = ""  # 累积完整答案
 
         # 5.流式输出调用LLM，并判断输出内容是否以"```json"为开头，用于区分工具调用和文本生成
         for chunk in llm.stream(ordered_messages):  # 使用重新排序的消息
             # 6.处理流式输出内容块叠加
-            if is_first_chunk:
+            if gathered is None:
                 gathered = chunk
-                is_first_chunk = False
             else:
                 gathered += chunk
 
-            # 7.如果生成的是消息则提交智能体消息事件
-            if generation_type == "message":
-                # 8.提取片段内容并校测是否开启输出审核
+            # 7.检测生成的类型是工具调用还是文本生成
+            if not generation_type:
+                # 8.当生成内容的长度大于等于7(```json)长度时才可以判断出类型是什么
+                if len(gathered.content.strip()) >= 7:
+                    if gathered.content.strip().startswith("```json"):
+                        generation_type = "thought"
+                    else:
+                        generation_type = "message"
+
+            # 9.如果生成的是消息则提交智能体消息事件
+            if generation_type == "message" and chunk.content:
+                # 10.提取片段内容并校测是否开启输出审核
                 review_config = self.agent_config.review_config
                 content = chunk.content
                 if (
@@ -206,30 +213,6 @@ class ReACTAgent(FunctionCallAgent):
                         latency=(time.perf_counter() - start_at),
                     ),
                 )
-
-            # 9.检测生成的类型是工具调用还是文本生成，同时赋值
-            if not generation_type:
-                # 10.当生成内容的长度大于等于7(```json)长度时才可以判断出类型是什么
-                if len(gathered.content.strip()) >= 7:
-                    if gathered.content.strip().startswith("```json"):
-                        generation_type = "thought"
-                    else:
-                        generation_type = "message"
-                        # 累积初始内容
-                        accumulated_answer = gathered.content
-                        # 11.添加发布事件，避免前几个字符遗漏
-                        self.agent_queue_manager.publish(
-                            state["task_id"],
-                            AgentThought(
-                                id=id,
-                                task_id=state["task_id"],
-                                event=QueueEvent.AGENT_MESSAGE,
-                                thought=gathered.content,
-                                message=messages_to_dict(state["messages"]),
-                                answer=gathered.content,
-                                latency=(time.perf_counter() - start_at),
-                            ),
-                        )
         # 8.计算LLM的输入+输出token总数（使用精确计数）
         model_name = TokenCounter.get_model_name_from_llm(self.llm)
         input_token_count = TokenCounter.count_messages_tokens(state["messages"], model_name)

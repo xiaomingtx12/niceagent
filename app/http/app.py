@@ -1,3 +1,17 @@
+"""
+应用启动入口
+在导入任何模块之前先配置警告过滤器
+"""
+import warnings
+import sys
+
+# 必须在导入任何第三方库之前设置警告过滤
+warnings.filterwarnings('ignore', category=UserWarning, module='jieba')
+warnings.filterwarnings('ignore', category=ResourceWarning, module='jieba')
+warnings.filterwarnings('ignore', message='pkg_resources is deprecated')
+warnings.filterwarnings('ignore', message="Support for class-based `config` is deprecated")
+warnings.filterwarnings('ignore', message="The 'default' argument to fields is deprecated")
+
 import dotenv
 from flask_login import LoginManager
 from flask_migrate import Migrate

@@ -7,7 +7,7 @@ from langchain_core.language_models import BaseLanguageModel
 from langchain_core.load import Serializable
 from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
-from pydantic import PrivateAttr
+from pydantic import ConfigDict, PrivateAttr
 
 from internal.core.agent.entities.agent_entity import AgentConfig, AgentState
 from internal.exception import FailException
@@ -23,9 +23,10 @@ class BaseAgent(Serializable, Runnable):
     _agent: CompiledStateGraph = PrivateAttr(None)
     _agent_queue_manager: AgentQueueManager = PrivateAttr(None)
 
-    class Config:
+    model_config = ConfigDict(
         # 字段允许接收任意类型，且不需要校验器
-        arbitrary_types_allowed = True
+        arbitrary_types_allowed=True
+    )
 
     name: str = "base_agent"
 

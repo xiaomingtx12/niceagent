@@ -1,10 +1,27 @@
 from dataclasses import dataclass
 from typing import List
+import os
+import warnings
+
+# 在导入 jieba 之前抑制警告
+warnings.filterwarnings('ignore', category=UserWarning, module='jieba')
+warnings.filterwarnings('ignore', category=ResourceWarning, module='jieba')
 
 from injector import inject
-from jieba.analyse.tfidf import TFIDF
+
+# 延迟导入 jieba，避免在模块加载时触发警告
+_jieba_analyse = None
 
 from internal.entity.jieba_entity import STOPWORD_SET
+
+
+def _get_jieba_analyse():
+    """延迟加载 jieba.analyse 模块"""
+    global _jieba_analyse
+    if _jieba_analyse is None:
+        import jieba.analyse
+        _jieba_analyse = jieba.analyse
+    return _jieba_analyse
 
 
 @inject
@@ -12,17 +29,37 @@ from internal.entity.jieba_entity import STOPWORD_SET
 class JiebaService:
     """结巴分词服务"""
 
-    # 初始化 TFIDF 实例，避免全局修改
-    _tfidf: TFIDF = None
+    # 停用词文件路径
+    _stopwords_file: str = None
+    _initialized: bool = False
 
     @classmethod
-    def _init_tfidf(cls):
-        """初始化 TFIDF 实例并设置停用词（懒加载）"""
-        if cls._tfidf is None:
-            cls._tfidf = TFIDF()
-            # 正确设置停用词：合并默认停用词 + 自定义停用词
-            cls._tfidf.stop_words.update(STOPWORD_SET)
-
+    def _init_stopwords(cls):
+        """初始化停用词文件（懒加载）"""
+        if not cls._initialized:
+            jieba_analyse = _get_jieba_analyse()
+            
+            # 获取当前文件所在目录
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # 构建停用词文件路径
+            stopwords_path = os.path.join(
+                current_dir, 
+                '../core/embeddings/stopwords.txt'
+            )
+            stopwords_path = os.path.normpath(stopwords_path)
+            
+            # 如果文件不存在，创建它
+            if not os.path.exists(stopwords_path):
+                os.makedirs(os.path.dirname(stopwords_path), exist_ok=True)
+                with open(stopwords_path, 'w', encoding='utf-8') as f:
+                    for word in STOPWORD_SET:
+                        f.write(f"{word}\n")
+            
+            # 设置停用词文件
+            jieba_analyse.set_stop_words(stopwords_path)
+            cls._stopwords_file = stopwords_path
+            cls._initialized = True
+            
     @classmethod
     def extract_keywords(
         cls, text: str, max_keyword_pre_chunk: int = 10
@@ -33,13 +70,16 @@ class JiebaService:
         :param max_keyword_pre_chunk: 提取的关键词数量上限
         :return: 关键词列表
         """
-        # 懒加载初始化 TFIDF（确保停用词生效）
-        cls._init_tfidf()
-
-        # 使用独立的 TFIDF 实例提取关键词，避免全局污染
-        # 直接使用TFIDF实例的extract_tags方法
-        return cls._tfidf.extract_tags(
+        # 懒加载初始化停用词
+        cls._init_stopwords()
+        
+        jieba_analyse = _get_jieba_analyse()
+        
+        # 使用 jieba.analyse.extract_tags 提取关键词
+        # 这个方法内部会正确管理文件资源
+        return jieba_analyse.extract_tags(
             sentence=text,
             topK=max_keyword_pre_chunk,
-            withFlag=False,  # 不返回词性标注
+            withWeight=False,  # 不返回权重
+            allowPOS=()  # 允许所有词性
         )
