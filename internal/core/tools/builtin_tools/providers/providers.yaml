@@ -5,6 +5,7 @@
   background: "#E5E7EB"
   category: search
   created_at: 1722498386
+  available: true
 - name: google
   label: Google
   description: 谷歌服务提供商，涵盖了谷歌搜索等工具。
@@ -12,6 +13,7 @@
   background: "#E5E7EB"
   category: search
   created_at: 1722498386
+  available: false
 - name: time
   label: 时间
   description: 一个用于获取当前时间的工具
@@ -19,6 +21,7 @@
   background: "#E5E7EB"
   category: tool
   created_at: 1722498386
+  available: true
 - name: duckduckgo
   label: DuckDuckGo
   description: 一个注重隐私的搜索引擎。
@@ -26,6 +29,7 @@
   background: "#FFFFFF"
   category: search
   created_at: 1722498386
+  available: true
 - name: dalle
   label: DALLE
   description: DALLE是一个文生图工具。
@@ -33,6 +37,7 @@
   background: "#E5E7EB"
   category: image
   created_at: 1722498386
+  available: false
 - name: tongyi
   label: 阿里云通义千问
   description: 阿里云通义千问是一个AI绘画创作大模型，支持文生图功能。
@@ -40,6 +45,7 @@
   background: "#FF6A00"
   category: image
   created_at: 1740132000
+  available: true
 - name: gaode
   label: 高德工具包
   description: 内置了高德天气预报和ip查询功能。
@@ -47,6 +53,7 @@
   background: "#E5E7EB"
   category: tool
   created_at: 1722498386
+  available: false
 - name: wikipedia
   label: 维基百科
   description: 维基百科是一个由全世界的志愿者创建和编辑的免费在线百科全书。
@@ -54,3 +61,4 @@
   background: "#FFFFFF"
   category: other
   created_at: 1722498386
+  available: false
