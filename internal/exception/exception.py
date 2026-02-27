@@ -45,3 +45,13 @@ class ValidateErrorException(CustomException):
     """数据验证异常"""
 
     code = HttpCode.VALIDATE_ERROR
+
+
+class TooManyRequestsException(CustomException):
+    """请求过于频繁异常 (429)"""
+
+    code = HttpCode.TOO_MANY_REQUESTS
+
+    def __init__(self, message: str = "请求过于频繁，请稍后重试", data: Any = None, retry_after: int = None):
+        super().__init__(message, data)
+        self.retry_after = retry_after

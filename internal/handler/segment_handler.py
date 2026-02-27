@@ -5,6 +5,7 @@ from flask import request
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.segment_schema import (
     GetSegmentsWithPageReq,
     GetSegmentsWithPageResp,
@@ -25,6 +26,7 @@ class SegmentHandler:
 
     segment_service: SegmentService
 
+    @rate_limit(config_key="user")
     @login_required
     def create_segment(self, dataset_id: UUID, document_id: UUID):
         """根据传递的信息创建知识库文档片段"""
@@ -38,6 +40,7 @@ class SegmentHandler:
 
         return success_message("新增文档片段成功")
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_segments_with_page(self, dataset_id: UUID, document_id: UUID):
         """获取指定知识库文档的片段列表信息"""
@@ -56,6 +59,7 @@ class SegmentHandler:
 
         return success_json(PageModel(list=resp.dump(segments), paginator=paginator))
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_segment(self, dataset_id: UUID, document_id: UUID, segment_id: UUID):
         """获取指定的文档片段信息详情"""
@@ -65,6 +69,7 @@ class SegmentHandler:
         resp = GetSegmentResp()
         return success_json(resp.dump(segment))
 
+    @rate_limit(config_key="user")
     @login_required
     def update_segment_enabled(
         self, dataset_id: UUID, document_id: UUID, segment_id: UUID
@@ -82,12 +87,14 @@ class SegmentHandler:
 
         return success_message("修改片段状态成功")
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_segment(self, dataset_id: UUID, document_id: UUID, segment_id: UUID):
         """根据传递的信息删除指定的文档片段信息"""
         self.segment_service.delete_segment(dataset_id, document_id, segment_id)
         return success_message("删除文档片段成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_segment(self, dataset_id: UUID, document_id: UUID, segment_id: UUID):
         """根据传递的信息更新文档片段信息"""

@@ -7,6 +7,7 @@ from flask_login import login_required
 from injector import inject
 
 from internal.core.file_extractor import FileExtractor
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.dataset_schema import (
     CreateDatasetReq,
     GetDatasetResp,
@@ -39,6 +40,7 @@ class DatasetHandler:
     db: SQLAlchemy
     vector_database_service: VectorDatabaseService
 
+    @rate_limit(config_key="retrieval")
     @login_required
     def hit(self, dataset_id: UUID):
         """根据传递的知识库id+检索参数执行召回测试"""
@@ -52,6 +54,7 @@ class DatasetHandler:
 
         return success_json(hit_result)
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_dataset_queries(self, dataset_id: UUID):
         """根据传递的知识库id获取最近的10条查询记录"""
@@ -61,6 +64,7 @@ class DatasetHandler:
         resp = GetDatasetQueriesResp(many=True)
         return success_json(resp.dump(dataset_queries))
 
+    @rate_limit(config_key="user")
     @login_required
     def create_dataset(self):
         """创建知识库"""
@@ -75,6 +79,7 @@ class DatasetHandler:
         # 3.返回成功调用提示
         return success_message("创建知识库成功")
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_dataset(self, dataset_id: UUID):
         """根据传递的知识库id获取详情"""
@@ -83,6 +88,7 @@ class DatasetHandler:
 
         return success_json(resp.dump(dataset))
 
+    @rate_limit(config_key="user")
     @login_required
     def update_dataset(self, dataset_id: UUID):
         """根据传递的知识库id+信息更新知识库"""
@@ -97,6 +103,7 @@ class DatasetHandler:
         # 3.返回成功调用提示
         return success_message("更新知识库成功")
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_datasets_with_page(self):
         """获取知识库分页+搜索列表数据"""
@@ -115,6 +122,7 @@ class DatasetHandler:
 
         return success_json(PageModel(list=resp.dump(datasets), paginator=paginator))
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_dataset(self, dataset_id: UUID):
         """根据传递的知识库id删除知识库"""

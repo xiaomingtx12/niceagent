@@ -4,16 +4,29 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 优化云函数代码执行节点及工作流模板实现&#10;&#10;- 将代码执行节点改为基于腾讯云云函数的安全隔离执行环境&#10;- 本地验证Python代码格式，避免无效或错误代码提交&#10;- 云函数执行结果强制要求返回字典，增强类型安全检查&#10;- 配置文件添加腾讯云云函数相关密钥及环境参数支持&#10;- 会议纪要工作流中用正则表达式替代原字符串查找提升时间和发言人提取准确性&#10;- 简历筛选工作流改用正则表达式解析JSON替换原字符串截取，增强容错性&#10;- 翻译质量统计工作流使用正则表达式替代手动字符串遍历检测括号术语&#10;- 多个工作流模板中移除部分re模块依赖，改为非正则实现，降低复杂度&#10;- 检索及相关服务新增source_app_id参数，追踪应用来源&#10;- 应用服务统一新增source_app_id传入，完善调用链和数据准确性保障">
       <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/default_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/meeting_minutes_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/meeting_minutes_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/code/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/code/code_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/code_node.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/exception/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/exception/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/exception/exception.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/exception/exception.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/account_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/account_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/analysis_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/analysis_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/api_key_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/api_key_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/audio_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/audio_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/conversation_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/conversation_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/dataset_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/dataset_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/document_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/document_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/language_model_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/language_model_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/provider_api_key_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/provider_api_key_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/segment_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/segment_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/upload_file_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/web_app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/web_app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/workflow_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/workflow_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/response/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/response/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/response/http_code.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/response/http_code.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/response/response.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/response/response.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -427,7 +440,7 @@
       <workItem from="1772006197419" duration="5811000" />
       <workItem from="1772013051299" duration="26226000" />
       <workItem from="1772089619225" duration="3752000" />
-      <workItem from="1772178931784" duration="23811000" />
+      <workItem from="1772178931784" duration="29099000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -693,7 +706,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772205460394</updated>
     </task>
-    <option name="localTasksCounter" value="34" />
+    <task id="LOCAL-00034" summary="feat(core): 优化云函数代码执行节点及工作流模板实现&#10;&#10;- 将代码执行节点改为基于腾讯云云函数的安全隔离执行环境&#10;- 本地验证Python代码格式，避免无效或错误代码提交&#10;- 云函数执行结果强制要求返回字典，增强类型安全检查&#10;- 配置文件添加腾讯云云函数相关密钥及环境参数支持&#10;- 会议纪要工作流中用正则表达式替代原字符串查找提升时间和发言人提取准确性&#10;- 简历筛选工作流改用正则表达式解析JSON替换原字符串截取，增强容错性&#10;- 翻译质量统计工作流使用正则表达式替代手动字符串遍历检测括号术语&#10;- 多个工作流模板中移除部分re模块依赖，改为非正则实现，降低复杂度&#10;- 检索及相关服务新增source_app_id参数，追踪应用来源&#10;- 应用服务统一新增source_app_id传入，完善调用链和数据准确性保障">
+      <option name="closed" value="true" />
+      <created>1772215116387</created>
+      <option name="number" value="00034" />
+      <option name="presentableId" value="LOCAL-00034" />
+      <option name="project" value="LOCAL" />
+      <updated>1772215116387</updated>
+    </task>
+    <option name="localTasksCounter" value="35" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -711,7 +732,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性" />
     <MESSAGE value="feat(auth): 完成账号权限校验及多处服务传参优化&#10;&#10;- Account模型继承UserMixin，完善用户认证支持&#10;- API工具相关接口及服务方法均增加current_user参数进行权限校验&#10;- App模型新增token字段及token_with_default属性，支持应用凭证管理&#10;- 应用服务新增分页查询、拷贝、更新、删除功能，均基于当前登录账号权限&#10;- 添加对工作流配置的处理校验逻辑，确保数据有效性和一致性&#10;- 调整COS文件上传服务，接收当前登录账号参数执行账号权限检查&#10;- 修复BaseService获取数据时数据库连接异常处理，增强系统稳定性&#10;- Dataset相关接口及服务方法均添加current_user参数，实现权限控制&#10;- App调试接口中DebugChatReq支持校验上传图片URL的格式及数量限制&#10;- BaseAgent类构造函数新增name参数，方便智能体实例命名&#10;- 代码结构优化，多处函数参数调整，确保业务逻辑基于当前登录账号安全执行" />
     <MESSAGE value="feat(model): 为多个模型添加数据库索引优化查询性能&#10;&#10;- 在Account模型中添加email索引，加快基于email的查询&#10;- 在AccountOAuth模型中添加account_id及openid-provider组合索引&#10;- 为APIKey模型添加account_id和api_key索引提升API密钥检索效率&#10;- 在APIToolProvider和APITool模型中添加相关字段索引优化关联查询&#10;- 为AppConfig、AppConfigVersion及AppDatasetJoin模型添加app_id相关索引&#10;- 为Conversation及Message模型添加app_id、created_by等索引提升消息和会话检索速度&#10;- 在MessageAgentThought模型添加app_id、conversation_id和message_id索引&#10;- 为Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule模型继续添加多字段组合索引&#10;- 在EndUser和UploadFile模型添加账号相关索引强化权限控制的数据访问速度&#10;- 工作流模型Workflow和WorkflowResult均添加账号、应用及工作流相关索引&#10;- Conversation和Message模型中新增多处关联属性提高ORM查询便捷性和代码清晰度" />
     <MESSAGE value="feat(app): 添加应用调试会话与发布配置相关接口&#10;&#10;- 新增获取应用调试会话分页消息列表接口及服务方法&#10;- 实现根据应用ID和任务ID停止调试会话功能&#10;- 增加获取应用发布配置接口及重新生成WebApp凭证功能&#10;- 在Agent模块中注册ReACTAgent，支持多Agent模型选择&#10;- 应用配置校验逻辑完善，支持模型配置严格校验和工作流验证&#10;- 优化Agent推理消息结构，支持更多统计字段记录&#10;- 路由中增加调试会话、发布配置及令牌管理相关路由绑定&#10;- 增加AudioEntity语音音色允许列表，扩展文本转语音配置&#10;- 依赖注入新增LoginManager，支持登录权限验证机制" />
@@ -736,7 +756,8 @@
     <MESSAGE value="feat(core): 优化智能体流式输出处理性能&#10;&#10;- 提前提取ID避免生成器中访问已分离SQLAlchemy对象错误&#10;- 使用预先转换的字符串ID替代重复调用str提高效率&#10;- 解决智能体流式输出中ID获取的潜在异常风险&#10;- 统一处理流式输出数据，提高代码健壮性和可维护性" />
     <MESSAGE value="feat(provider): 添加可用性标识以支持国内可用状态&#10;&#10;- 在Provider实体中新增available字段，表示是否在国内可用，默认值为True&#10;- 在providers.yaml中为每个提供商条目添加available属性，设置其国内可用状态&#10;- 更新配置使得工具和提供商的可用性信息更加明确&#10;- 支持基于可用性属性实现不同地区的访问控制和显示逻辑" />
     <MESSAGE value="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性" />
+    <MESSAGE value="feat(core): 优化云函数代码执行节点及工作流模板实现&#10;&#10;- 将代码执行节点改为基于腾讯云云函数的安全隔离执行环境&#10;- 本地验证Python代码格式，避免无效或错误代码提交&#10;- 云函数执行结果强制要求返回字典，增强类型安全检查&#10;- 配置文件添加腾讯云云函数相关密钥及环境参数支持&#10;- 会议纪要工作流中用正则表达式替代原字符串查找提升时间和发言人提取准确性&#10;- 简历筛选工作流改用正则表达式解析JSON替换原字符串截取，增强容错性&#10;- 翻译质量统计工作流使用正则表达式替代手动字符串遍历检测括号术语&#10;- 多个工作流模板中移除部分re模块依赖，改为非正则实现，降低复杂度&#10;- 检索及相关服务新增source_app_id参数，追踪应用来源&#10;- 应用服务统一新增source_app_id传入，完善调用链和数据准确性保障" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 优化云函数代码执行节点及工作流模板实现&#10;&#10;- 将代码执行节点改为基于腾讯云云函数的安全隔离执行环境&#10;- 本地验证Python代码格式，避免无效或错误代码提交&#10;- 云函数执行结果强制要求返回字典，增强类型安全检查&#10;- 配置文件添加腾讯云云函数相关密钥及环境参数支持&#10;- 会议纪要工作流中用正则表达式替代原字符串查找提升时间和发言人提取准确性&#10;- 简历筛选工作流改用正则表达式解析JSON替换原字符串截取，增强容错性&#10;- 翻译质量统计工作流使用正则表达式替代手动字符串遍历检测括号术语&#10;- 多个工作流模板中移除部分re模块依赖，改为非正则实现，降低复杂度&#10;- 检索及相关服务新增source_app_id参数，追踪应用来源&#10;- 应用服务统一新增source_app_id传入，完善调用链和数据准确性保障" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -753,7 +774,7 @@
     <SUITE FILE_PATH="coverage/my_dify$test.coverage" NAME="test 覆盖结果" MODIFIED="1772199059780" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$deploy_scf_function.coverage" NAME="deploy_scf_function 覆盖结果" MODIFIED="1772211694844" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772212822915" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772220860966" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

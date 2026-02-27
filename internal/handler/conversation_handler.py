@@ -5,6 +5,7 @@ from flask import request
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.conversation_schema import (
     GetConversationMessagesWithPageReq,
     GetConversationMessagesWithPageResp,
@@ -23,6 +24,7 @@ class ConversationHandler:
 
     conversation_service: ConversationService
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_conversation_messages_with_page(self, conversation_id: UUID):
         """根据传递的会话id获取该会话的消息列表分页数据"""
@@ -43,6 +45,7 @@ class ConversationHandler:
 
         return success_json(PageModel(list=resp.dump(messages), paginator=paginator))
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_conversation(self, conversation_id: UUID):
         """根据传递的会话id删除指定的会话"""
@@ -50,6 +53,7 @@ class ConversationHandler:
 
         return success_message("删除会话成功")
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_message(self, conversation_id: UUID, message_id: UUID):
         """根据传递的会话id+消息id删除指定的消息"""
@@ -59,6 +63,7 @@ class ConversationHandler:
 
         return success_message("删除会话消息成功")
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_conversation_name(self, conversation_id: UUID):
         """根据传递的会话id获取指定会话的名字"""
@@ -70,6 +75,7 @@ class ConversationHandler:
         # 2.构建响应结构并返回
         return success_json({"name": conversation.name})
 
+    @rate_limit(config_key="user")
     @login_required
     def update_conversation_name(self, conversation_id: UUID):
         """根据传递的会话id+name更新会话名字"""
@@ -85,6 +91,7 @@ class ConversationHandler:
 
         return success_message("修改会话名称成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_conversation_is_pinned(self, conversation_id: UUID):
         """根据传递的会话id+is_pinned更新会话的置顶状态"""

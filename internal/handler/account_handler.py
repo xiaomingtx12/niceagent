@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.account_schema import (
     GetCurrentUserResp,
     UpdatePasswordReq,
@@ -20,12 +21,14 @@ class AccountHandler:
 
     account_service: AccountService
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_current_user(self):
         """获取当前登录账号信息"""
         resp = GetCurrentUserResp()
         return success_json(resp.dump(current_user))
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def update_password(self):
         """更新当前登录账号密码"""
@@ -39,6 +42,7 @@ class AccountHandler:
 
         return success_message("更新账号密码成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_name(self):
         """更新当前登录账号名称"""
@@ -52,6 +56,7 @@ class AccountHandler:
 
         return success_message("更新账号名称成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_avatar(self):
         """更新当前账号头像信息"""

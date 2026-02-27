@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.upload_file_schema import (
     UploadFileReq,
     UploadFileResp,
@@ -19,6 +20,7 @@ class UploadFileHandler:
 
     cos_service: CosService
 
+    @rate_limit(config_key="upload")
     @login_required
     def upload_file(self):
         """上传文件/文档"""
@@ -34,6 +36,7 @@ class UploadFileHandler:
         resp = UploadFileResp()
         return success_json(resp.dump(upload_file))
 
+    @rate_limit(config_key="upload")
     @login_required
     def upload_image(self):
         """上传图片"""

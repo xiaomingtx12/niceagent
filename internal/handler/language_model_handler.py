@@ -5,6 +5,7 @@ from flask import send_file
 from flask_login import login_required
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.service import LanguageModelService
 from pkg.response import success_json
 
@@ -16,11 +17,13 @@ class LanguageModelHandler:
 
     language_model_service: LanguageModelService
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_language_models(self):
         """获取所有的语言模型提供商信息"""
         return success_json(self.language_model_service.get_language_models())
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_language_model(self, provider_name: str, model_name: str):
         """根据传递的提供商名字+模型名字获取模型详细信息"""

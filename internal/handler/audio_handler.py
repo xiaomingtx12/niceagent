@@ -2,6 +2,8 @@ from dataclasses import dataclass
 
 from flask_login import login_required, current_user
 from injector import inject
+
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.audio_schema import AudioToTextReq, MessageToAudioReq
 
 from internal.service import AudioService
@@ -15,6 +17,8 @@ class AudioHandler:
 
     audio_service: AudioService
 
+    @rate_limit(config_key="chat")
+    @rate_limit(config_key="user")
     @login_required
     def audio_to_text(self):
         """将语音转换成文本"""
@@ -28,6 +32,8 @@ class AudioHandler:
 
         return success_json({"text": text})
 
+    @rate_limit(config_key="chat")
+    @rate_limit(config_key="user")
     @login_required
     def message_to_audio(self):
         """将消息转换成流式输出音频"""

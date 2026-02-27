@@ -5,6 +5,7 @@ from flask import request
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.provider_api_key_schema import (
     CreateProviderApiKeyReq,
     UpdateProviderApiKeyReq,
@@ -22,6 +23,7 @@ class ProviderApiKeyHandler:
 
     provider_api_key_service: ProviderApiKeyService
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def create_provider_api_key(self):
         """创建提供商API密钥"""
@@ -35,6 +37,7 @@ class ProviderApiKeyHandler:
 
         return success_message("创建提供商API密钥成功")
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_provider_api_key(self, provider_api_key_id: UUID):
         """获取提供商API密钥详情"""
@@ -59,6 +62,7 @@ class ProviderApiKeyHandler:
             "remark": provider_api_key.remark,
         })
 
+    @rate_limit(config_key="user")
     @login_required
     def update_provider_api_key(self, provider_api_key_id: UUID):
         """更新提供商API密钥"""
@@ -89,6 +93,7 @@ class ProviderApiKeyHandler:
 
         return success_message("更新提供商API密钥成功")
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_provider_api_key(self, provider_api_key_id: UUID):
         """删除提供商API密钥"""
@@ -99,6 +104,7 @@ class ProviderApiKeyHandler:
         
         return success_message("删除提供商API密钥成功")
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_provider_api_keys_with_page(self):
         """获取当前登录账号的提供商API密钥分页列表信息"""

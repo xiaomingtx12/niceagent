@@ -5,6 +5,7 @@ from flask import request
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.document_schema import (
     CreateDocumentsReq,
     CreateDocumentsResp,
@@ -26,6 +27,7 @@ class DocumentHandler:
 
     document_service: DocumentService
 
+    @rate_limit(config_key="upload")
     @login_required
     def create_documents(self, dataset_id: UUID):
         """知识库新增/上传文档列表"""
@@ -44,6 +46,7 @@ class DocumentHandler:
 
         return success_json(resp.dump((documents, batch)))
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_document(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id获取文档详情信息"""
@@ -55,6 +58,7 @@ class DocumentHandler:
 
         return success_json(resp.dump(document))
 
+    @rate_limit(config_key="user")
     @login_required
     def update_document_name(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id更新对应文档的名称信息"""
@@ -70,6 +74,7 @@ class DocumentHandler:
 
         return success_message("更新文档名称成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_document_enabled(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id更新指定文档的启用状态"""
@@ -85,6 +90,7 @@ class DocumentHandler:
 
         return success_message("更改文档启用状态成功")
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_document(self, dataset_id: UUID, document_id: UUID):
         """根据传递的知识库id+文档id删除指定的文档信息"""
@@ -92,6 +98,7 @@ class DocumentHandler:
 
         return success_message("删除文档成功")
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_documents_with_page(self, dataset_id: UUID):
         """根据传递的知识库id获取文档分页列表数据"""
@@ -110,6 +117,7 @@ class DocumentHandler:
 
         return success_json(PageModel(list=resp.dump(documents), paginator=paginator))
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_documents_status(self, dataset_id: UUID, batch: str):
         """根据传递的知识库id+批处理标识获取文档的状态"""

@@ -10,11 +10,12 @@ from psycopg2 import OperationalError as Psycopg2OperationalError
 from sqlalchemy.exc import OperationalError
 
 from config import Config
-from internal.exception import CustomException
+from internal.exception import CustomException, TooManyRequestsException
 from internal.extension import redis_extension, celery_extension, logging_extension
 from internal.middleware import Middleware
+from internal.middleware.rate_limit_middleware import init_rate_limit_middleware
 from internal.router import Router
-from pkg.response import json, Response, HttpCode
+from pkg.response import json, Response, HttpCode, too_many_requests_message
 from pkg.sqlalchemy import SQLAlchemy
 
 
@@ -40,6 +41,9 @@ class Http(Flask):
 
         # 3.注册绑定异常错误处理
         self.register_error_handler(Exception, self._register_error_handler)
+        self.register_error_handler(
+            TooManyRequestsException, self._handle_rate_limit_error
+        )
         self.register_error_handler(
             OperationalError, self._handle_database_operational_error
         )
@@ -75,8 +79,11 @@ class Http(Flask):
         )
         # 6.注册应用中间件
         login_manager.request_loader(middleware.request_loader)
+        
+        # 7.初始化限流中间件
+        init_rate_limit_middleware(self)
 
-        # 7.注册应用路由
+        # 8.注册应用路由
         router.register_router(self)
 
     def _register_error_handler(self, error: Exception):
@@ -120,4 +127,12 @@ class Http(Flask):
                 message="数据库连接异常，请稍后重试",
                 data={},
             )
+        )
+
+    def _handle_rate_limit_error(self, error: TooManyRequestsException):
+        """处理限流异常"""
+        logging.warning(f"Rate limit exceeded: {error.message}")
+        return too_many_requests_message(
+            msg=error.message,
+            retry_after=error.retry_after
         )

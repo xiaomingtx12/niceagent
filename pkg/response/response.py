@@ -70,6 +70,15 @@ def forbidden_message(msg: str = ""):
     return message(code=HttpCode.FORBIDDEN, msg=msg)
 
 
+def too_many_requests_message(msg: str = "", retry_after: int = None):
+    """请求过于频繁消息响应"""
+    response = message(code=HttpCode.TOO_MANY_REQUESTS, msg=msg)
+    if retry_after:
+        # 添加 Retry-After 响应头
+        response[0].headers["Retry-After"] = str(retry_after)
+    return response
+
+
 def compact_generate_response(response: Union[Response, Generator]) -> FlaskResponse:
     """统一合并处理块输出以及流式事件输出"""
     # 1.检测下是否为块输出(Response)

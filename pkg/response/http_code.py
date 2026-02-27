@@ -10,3 +10,4 @@ class HttpCode(str, Enum):
     UNAUTHORIZED = "unauthorized"  # 未授权
     FORBIDDEN = "forbidden"  # 无权限
     VALIDATE_ERROR = "validate_error"  # 数据验证错误
+    TOO_MANY_REQUESTS = "too_many_requests"  # 请求过于频繁

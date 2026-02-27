@@ -4,6 +4,7 @@ from uuid import UUID
 from flask_login import current_user, login_required
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.service import AnalysisService
 from pkg.response import success_json
 
@@ -15,6 +16,7 @@ class AnalysisHandler:
 
     analysis_service: AnalysisService
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_app_analysis(self, app_id: UUID):
         """根据传递的应用id获取应用的统计信息"""

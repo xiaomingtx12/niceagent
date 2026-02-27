@@ -5,6 +5,7 @@ from .exception import (
     UnauthorizedException,
     ForbiddenException,
     ValidateErrorException,
+    TooManyRequestsException,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "UnauthorizedException",
     "ForbiddenException",
     "ValidateErrorException",
+    "TooManyRequestsException",
 ]

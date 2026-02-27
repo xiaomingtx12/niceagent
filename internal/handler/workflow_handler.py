@@ -5,6 +5,7 @@ from flask import request
 from flask_login import current_user, login_required
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.workflow_schema import (
     CreateWorkflowReq,
     UpdateWorkflowReq,
@@ -29,6 +30,7 @@ class WorkflowHandler:
 
     workflow_service: WorkflowService
 
+    @rate_limit(config_key="user")
     @login_required
     def create_workflow(self):
         """新增工作流"""
@@ -42,12 +44,14 @@ class WorkflowHandler:
 
         return success_json({"id": workflow.id})
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_workflow(self, workflow_id: UUID):
         """根据传递的工作流id删除指定的工作流"""
         self.workflow_service.delete_workflow(workflow_id, current_user)
         return success_message("删除工作流成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_workflow(self, workflow_id: UUID):
         """根据传递的工作流id获取工作流详情"""
@@ -61,6 +65,7 @@ class WorkflowHandler:
 
         return success_message("修改工作流基础信息成功")
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_workflow(self, workflow_id: UUID):
         """根据传递的工作流id获取工作流详情"""
@@ -68,6 +73,7 @@ class WorkflowHandler:
         resp = GetWorkflowResp()
         return success_json(resp.dump(workflow))
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_workflows_with_page(self):
         """获取当前登录账号下的工作流分页列表数据"""
@@ -86,6 +92,7 @@ class WorkflowHandler:
 
         return success_json(PageModel(list=resp.dump(workflows), paginator=paginator))
 
+    @rate_limit(config_key="user")
     @login_required
     def update_draft_graph(self, workflow_id: UUID):
         """根据传递的工作流id+请求信息更新工作流草稿图配置"""
@@ -102,12 +109,15 @@ class WorkflowHandler:
 
         return success_message("更新工作流草稿配置成功")
 
+    @rate_limit(config_key="lightweight")
     @login_required
     def get_draft_graph(self, workflow_id: UUID):
         """根据传递的工作流id获取该工作流的草稿配置信息"""
         draft_graph = self.workflow_service.get_draft_graph(workflow_id, current_user)
         return success_json(draft_graph)
 
+    @rate_limit(config_key="workflow")
+    @rate_limit(config_key="user")
     @login_required
     def debug_workflow(self, workflow_id: UUID):
         """根据传递的变量字典+工作流id调试指定的工作流"""
@@ -121,12 +131,14 @@ class WorkflowHandler:
 
         return compact_generate_response(response)
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def publish_workflow(self, workflow_id: UUID):
         """根据传递的工作流id发布指定的工作流"""
         self.workflow_service.publish_workflow(workflow_id, current_user)
         return success_message("发布工作流成功")
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def cancel_publish_workflow(self, workflow_id: UUID):
         """根据传递的工作流id取消发布指定的工作流"""

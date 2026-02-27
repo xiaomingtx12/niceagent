@@ -5,6 +5,7 @@ from flask import request
 from flask_login import login_required, current_user
 from injector import inject
 
+from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.api_key_schema import (
     CreateApiKeyReq,
     UpdateApiKeyReq,
@@ -23,6 +24,7 @@ class ApiKeyHandler:
 
     api_key_service: ApiKeyService
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def create_api_key(self):
         """创建API秘钥"""
@@ -36,12 +38,14 @@ class ApiKeyHandler:
 
         return success_message("创建API秘钥成功")
 
+    @rate_limit(config_key="sensitive")
     @login_required
     def delete_api_key(self, api_key_id: UUID):
         """根据传递的id删除API秘钥"""
         self.api_key_service.delete_api_key(api_key_id, current_user)
         return success_message("删除API秘钥成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_api_key(self, api_key_id: UUID):
         """根据传递的信息更新API秘钥"""
@@ -56,6 +60,7 @@ class ApiKeyHandler:
 
         return success_message("更新API秘钥成功")
 
+    @rate_limit(config_key="user")
     @login_required
     def update_api_key_is_active(self, api_key_id: UUID):
         """根据传递的信息更新API秘钥激活状态"""
@@ -69,6 +74,7 @@ class ApiKeyHandler:
 
         return success_message("更新API秘钥激活状态成功")
 
+    @rate_limit(config_key="database_intensive")
     @login_required
     def get_api_keys_with_page(self):
         """获取当前登录账号的API秘钥分页列表信息"""
