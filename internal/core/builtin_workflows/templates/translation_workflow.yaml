@@ -225,12 +225,17 @@ nodes:
   - id: "tr-0001-0001-0001-000000000007"
     node_type: "code"
     title: "翻译质量统计"
-    description: "统计翻译结果的质量指标"
+    description: "统计翻译结果的质量指标（使用云函数标准库：re）"
     position:
       x: 1150
       y: 300
     code: |
       def main(params: dict) -> dict:
+          """
+          云函数代码节点 - 支持的标准库：
+          math, datetime, re, json, Counter, defaultdict, OrderedDict, 
+          chain, combinations, permutations, reduce
+          """
           source = params.get("source_text", "")
           translation = params.get("translation", "")
 
@@ -245,23 +250,16 @@ nodes:
           # 计算膨胀率（译文/原文长度比）
           expansion_ratio = round(tgt_chars / src_chars, 2) if src_chars > 0 else 0
 
-          # 检测是否保留了括号标注的原文术语（不使用正则）
-          term_count = 0
-          for i in range(len(translation) - 1):
-              if translation[i] in ['(', '（']:
-                  # 查找对应的右括号
-                  for j in range(i + 1, min(i + 50, len(translation))):
-                      if translation[j] in [')', '）']:
-                          # 检查括号内是否包含英文字母
-                          content = translation[i+1:j]
-                          if any(c.isalpha() and ord(c) < 128 for c in content):
-                              term_count += 1
-                          break
+          # 使用正则表达式检测括号标注的原文术语
+          # 匹配中英文括号内包含英文字母的内容
+          term_pattern = r'[（(][^）)]*[a-zA-Z]+[^）)]*[）)]'
+          terms = re.findall(term_pattern, translation)
+          term_count = len(terms)
 
           # 检测段落数是否一致
           src_paragraphs = len([p for p in source.split("\n") if p.strip()])
           tgt_paragraphs = len([p for p in translation.split("\n") if p.strip()])
-          structure_match = "一致" if src_paragraphs == tgt_paragraphs else "不一致（原文{}段，译文{}段）".format(src_paragraphs, tgt_paragraphs)
+          structure_match = "一致" if src_paragraphs == tgt_paragraphs else f"不一致（原文{src_paragraphs}段，译文{tgt_paragraphs}段）"
 
           return {
               "src_chars": str(src_chars),

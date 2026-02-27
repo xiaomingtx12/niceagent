@@ -136,19 +136,23 @@ nodes:
   - id: "rs-0001-0001-0001-000000000005"
     node_type: "code"
     title: "加权评分计算"
-    description: "根据各维度评分计算加权总分并生成筛选结论"
+    description: "根据各维度评分计算加权总分并生成筛选结论（使用云函数标准库：json, re）"
     position:
       x: 900
       y: 300
     code: |
       def main(params: dict) -> dict:
+          """
+          云函数代码节点 - 支持的标准库：
+          math, datetime, re, json, Counter, defaultdict, OrderedDict, 
+          chain, combinations, permutations, reduce
+          """
           raw = params.get("evaluation", "")
 
-          # 尝试从LLM输出中提取JSON（不使用正则）
-          json_start = raw.find('{')
-          json_end = raw.rfind('}')
+          # 使用正则表达式提取JSON内容
+          json_match = re.search(r'\{[\s\S]*\}', raw)
           
-          if json_start == -1 or json_end == -1 or json_start >= json_end:
+          if not json_match:
               return {
                   "total_score": "0",
                   "grade": "解析失败",
@@ -156,42 +160,16 @@ nodes:
                   "score_detail": raw
               }
 
-          json_str = raw[json_start:json_end+1]
+          json_str = json_match.group(0)
           
-          # 简单的JSON解析（仅支持基本结构）
+          # 使用json标准库解析
           try:
-              # 移除空白字符
-              json_str = json_str.strip()
-              
-              # 提取各维度评分（简化版解析）
-              data = {}
-              dimensions = ["skill_match", "experience_match", "education_match", "project_relevance", "growth_potential"]
-              
-              for dim in dimensions:
-                  # 查找维度数据
-                  dim_start = json_str.find('"' + dim + '"')
-                  if dim_start != -1:
-                      # 查找score值
-                      score_pos = json_str.find('"score"', dim_start)
-                      if score_pos != -1:
-                          # 提取数字
-                          colon_pos = json_str.find(':', score_pos)
-                          if colon_pos != -1:
-                              num_start = colon_pos + 1
-                              num_end = num_start
-                              while num_end < len(json_str) and (json_str[num_end].isdigit() or json_str[num_end] == '.'):
-                                  num_end += 1
-                              score_str = json_str[num_start:num_end].strip()
-                              try:
-                                  score = float(score_str) if score_str else 0
-                                  data[dim] = {"score": score}
-                              except:
-                                  data[dim] = {"score": 0}
-          except:
+              data = json.loads(json_str)
+          except json.JSONDecodeError:
               return {
                   "total_score": "0",
-                  "grade": "解析失败",
-                  "recommendation": "评估数据解析失败，请重试",
+                  "grade": "JSON解析失败",
+                  "recommendation": "评估数据格式错误，请重试",
                   "score_detail": raw
               }
 
@@ -220,7 +198,7 @@ nodes:
               score = item.get("score", 0) if isinstance(item, dict) else 0
               weighted = round(score * weight, 2)
               total += weighted
-              details.append("{}：{}/10（权重{}%）".format(labels.get(key, key), score, int(weight*100)))
+              details.append(f"{labels.get(key, key)}：{score}/10（权重{int(weight*100)}%）")
 
           total = round(total, 1)
 
@@ -238,14 +216,24 @@ nodes:
               grade = "D - 不推荐"
               recommendation = "候选人与岗位要求差距较大，暂不建议面试"
 
+          # 提取优势、顾虑和面试问题
+          strengths = data.get("strengths", [])
+          concerns = data.get("concerns", [])
+          interview_questions = data.get("interview_questions", [])
+          
+          strengths_str = "\n".join([f"• {s}" for s in strengths]) if strengths else "无"
+          concerns_str = "\n".join([f"• {c}" for c in concerns]) if concerns else "无"
+          questions_str = "\n".join([f"{i+1}. {q.get('question', '')} ({q.get('purpose', '')})" 
+                                     for i, q in enumerate(interview_questions)]) if interview_questions else "无"
+
           return {
               "total_score": str(total),
               "grade": grade,
               "recommendation": recommendation,
               "score_detail": "\n".join(details),
-              "strengths": "请查看详细评估",
-              "concerns": "请查看详细评估",
-              "interview_questions": "请查看详细评估"
+              "strengths": strengths_str,
+              "concerns": concerns_str,
+              "interview_questions": questions_str
           }
     inputs:
       - name: "evaluation"

@@ -28,4 +28,10 @@ DEFAULT_CONFIG = {
     "WEAVIATE_HTTP_SECURE": "False",
     "WEAVIATE_GRPC_PORT": 50051,
     "WEAVIATE_SKIP_INIT_CHECKS": "True",
+    # 腾讯云云函数配置（用于代码执行节点）
+    "TENCENT_SECRET_ID": "",
+    "TENCENT_SECRET_KEY": "",
+    "TENCENT_SCF_REGION": "ap-shanghai",
+    "TENCENT_SCF_NAMESPACE": "default",
+    "TENCENT_SCF_FUNCTION_NAME": "code-executor",
 }

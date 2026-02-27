@@ -1,3 +1,7 @@
+"""
+基于腾讯云云函数的安全代码执行节点
+所有代码在隔离的云函数环境中执行，确保系统安全
+"""
 import ast
 import time
 from typing import Optional
@@ -12,40 +16,53 @@ from internal.core.workflow.entities.workflow_entity import WorkflowState
 from internal.core.workflow.nodes import BaseNode
 from internal.core.workflow.utils.helper import extract_variables_from_state
 from internal.exception import FailException
+from internal.service.tencent_scf_service import get_scf_service
+
 from .code_entity import CodeNodeData
 
 
 class CodeNode(BaseNode):
-    """Python代码运行节点"""
+    """基于腾讯云云函数的Python代码运行节点（安全版本）"""
 
     node_data: CodeNodeData
 
     def invoke(
         self, state: WorkflowState, config: Optional[RunnableConfig] = None
     ) -> WorkflowState:
-        """Python代码运行节点，执行的代码函数名字必须为main，并且参数名为params，有且只有一个参数，不允许有额外的其他语句"""
+        """
+        使用腾讯云云函数执行Python代码
+        代码在隔离的云函数环境中运行，避免安全风险
+        """
         # 1.从状态中提取输入数据
         start_at = time.perf_counter()
         inputs_dict = extract_variables_from_state(self.node_data.inputs, state)
 
-        # todo:2.执行Python代码，该方法目前可以执行任意的Python代码，所以非常危险，后期需要单独将这部分功能迁移到沙箱中或者指定容器中运行和项目分离
-        result = self._execute_function(self.node_data.code, params=inputs_dict)
+        # 2.验证代码格式（本地快速校验）
+        self._validate_code_format(self.node_data.code)
 
-        # 3.检测函数的返回值是否为字典
+        # 3.通过腾讯云云函数执行代码（安全隔离）
+        scf_service = get_scf_service()
+        scf_result = scf_service.invoke_function(
+            code=self.node_data.code, params=inputs_dict, timeout=30
+        )
+
+        result = scf_result.get("data")
+
+        # 4.检测函数的返回值是否为字典
         if not isinstance(result, dict):
             raise FailException("main函数的返回值必须是一个字典")
 
-        # 4.提取输出数据
+        # 5.提取输出数据
         outputs_dict = {}
         outputs = self.node_data.outputs
         for output in outputs:
-            # 5.提取输出数据(非严格校验)
+            # 6.提取输出数据(非严格校验)
             outputs_dict[output.name] = result.get(
                 output.name,
                 VARIABLE_TYPE_DEFAULT_VALUE_MAP.get(output.type),
             )
 
-        # 6.构建状态数据并返回
+        # 7.构建状态数据并返回
         return {
             "node_results": [
                 NodeResult(
@@ -59,8 +76,11 @@ class CodeNode(BaseNode):
         }
 
     @classmethod
-    def _execute_function(cls, code: str, *args, **kwargs):
-        """执行Python函数代码"""
+    def _validate_code_format(cls, code: str):
+        """
+        本地验证代码格式（快速校验，避免无效请求）
+        实际的安全执行由云函数沙箱保证
+        """
         try:
             # 1.解析代码为AST(抽象语法树)
             tree = ast.parse(code)
@@ -77,7 +97,7 @@ class CodeNode(BaseNode):
                         if main_func:
                             raise FailException("代码中只能有一个main函数")
 
-                        # 6.检测main函数的参数是否为params，如果不是则抛出错误
+                        # 6.检测main函数的参数是否为params
                         if (
                             len(node.args.args) != 1
                             or node.args.args[0].arg != "params"
@@ -98,14 +118,9 @@ class CodeNode(BaseNode):
             if not main_func:
                 raise FailException("代码中必须包含名为main的函数")
 
-            # 10.代码通过AST校验，执行代码
-            local_vars = {}
-            exec(code, {}, local_vars)
-
-            # 11.调用并执行main函数
-            if "main" in local_vars and callable(local_vars["main"]):
-                return local_vars["main"](*args, **kwargs)
-            else:
-                raise FailException("main函数必须是一个可调用的函数")
+        except SyntaxError as e:
+            raise FailException(f"代码语法错误: {str(e)}")
         except Exception as e:
-            raise FailException("Python代码执行出错")
+            if isinstance(e, FailException):
+                raise
+            raise FailException(f"代码验证失败: {str(e)}")

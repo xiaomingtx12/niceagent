@@ -73,3 +73,10 @@ class Config:
         self.WEAVIATE_GRPC_PORT = int(_get_env("WEAVIATE_GRPC_PORT"))
         # 跳过初始化检查以减少不必要的请求
         self.WEAVIATE_SKIP_INIT_CHECKS = _get_bool_env("WEAVIATE_SKIP_INIT_CHECKS")
+
+        # 腾讯云配置（用于云函数代码执行）
+        self.TENCENT_SECRET_ID = _get_env("TENCENT_SECRET_ID")
+        self.TENCENT_SECRET_KEY = _get_env("TENCENT_SECRET_KEY")
+        self.TENCENT_SCF_REGION = _get_env("TENCENT_SCF_REGION")
+        self.TENCENT_SCF_NAMESPACE = _get_env("TENCENT_SCF_NAMESPACE")
+        self.TENCENT_SCF_FUNCTION_NAME = _get_env("TENCENT_SCF_FUNCTION_NAME")

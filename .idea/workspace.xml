@@ -4,17 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性">
       <change afterPath="$PROJECT_DIR$/test.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/config/default_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/meeting_minutes_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/meeting_minutes_workflow.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/openapi_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/retrieval_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/retrieval_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/web_app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/web_app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/wechat_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/wechat_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/code/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/code/code_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/code/code_node.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -106,7 +105,9 @@
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
     "Notification.DoNotAsk-Black action on save file ignored": "true",
+    "Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试.executor": "Run",
     "Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor": "Run",
+    "Python.deploy_scf_function.executor": "Run",
     "Python.import_knowledge_to_faiss.executor": "Run",
     "Python.import_to_faiss.executor": "Run",
     "Python.main.executor": "Run",
@@ -118,7 +119,7 @@
     "Shell Script.db migrate.executor": "Run",
     "Shell Script.db upgrade.executor": "Run",
     "Shell Script.pipreqs.executor": "Run",
-    "aidebugger.tracer.lastRunConfigName": "test",
+    "aidebugger.tracer.lastRunConfigName": "deploy_scf_function",
     "git-widget-placeholder": "workflow",
     "kotlin-language-version-configured": "true",
     "last_opened_file_path": "D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset",
@@ -159,7 +160,30 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Shell Script.celery">
+  <component name="RunManager" selected="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试">
+    <configuration name="deploy_scf_function" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
+      <module name="my-dify" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
+      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/deploy_scf_function.py" />
+      <option name="PARAMETERS" value="" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
     <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -198,29 +222,6 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/import_to_faiss.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="main" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="my-dify" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/main.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -312,29 +313,29 @@
       <envs />
       <method v="2" />
     </configuration>
-    <configuration name="test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
+    <configuration name="scripts.test_scf_executor.test_basic_execution 的 Python 测试" type="tests" factoryName="Autodetect" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
       <option name="INTERPRETER_OPTIONS" value="" />
       <option name="PARENT_ENVS" value="true" />
       <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/test" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
       <option name="IS_MODULE_SDK" value="true" />
       <option name="ADD_CONTENT_ROOTS" value="true" />
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="_new_additionalArguments" value="&quot;&quot;" />
-      <option name="_new_target" value="&quot;test_dashscope_image_tool.test_wanx_image_generation&quot;" />
+      <option name="_new_target" value="&quot;scripts.test_scf_executor.test_basic_execution&quot;" />
       <option name="_new_targetType" value="&quot;PYTHON&quot;" />
       <method v="2" />
     </configuration>
     <list>
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
+      <item itemvalue="Python.deploy_scf_function" />
       <item itemvalue="Python.test" />
       <item itemvalue="Python.import_knowledge_to_faiss" />
       <item itemvalue="Python.import_to_faiss" />
-      <item itemvalue="Python.main" />
-      <item itemvalue="Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试" />
+      <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
       <item itemvalue="Shell Script.celery" />
       <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.db upgrade" />
@@ -342,11 +343,11 @@
     </list>
     <recent_temporary>
       <list>
+        <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
+        <item itemvalue="Python.deploy_scf_function" />
         <item itemvalue="Python.test" />
         <item itemvalue="Python.import_to_faiss" />
         <item itemvalue="Python.import_knowledge_to_faiss" />
-        <item itemvalue="Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试" />
-        <item itemvalue="Python.main" />
       </list>
     </recent_temporary>
   </component>
@@ -426,7 +427,7 @@
       <workItem from="1772006197419" duration="5811000" />
       <workItem from="1772013051299" duration="26226000" />
       <workItem from="1772089619225" duration="3752000" />
-      <workItem from="1772178931784" duration="19815000" />
+      <workItem from="1772178931784" duration="23811000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -684,7 +685,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772201779267</updated>
     </task>
-    <option name="localTasksCounter" value="33" />
+    <task id="LOCAL-00033" summary="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性">
+      <option name="closed" value="true" />
+      <created>1772205460394</created>
+      <option name="number" value="00033" />
+      <option name="presentableId" value="LOCAL-00033" />
+      <option name="project" value="LOCAL" />
+      <updated>1772205460394</updated>
+    </task>
+    <option name="localTasksCounter" value="34" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -702,7 +711,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(core&amp;workflow): 新增内置应用管理及工作流节点模块&#10;&#10;- 完成内置应用管理器和服务，实现内置应用及分类信息加载与管理&#10;- 新增内置应用实体、分类实体及相关数据结构定义&#10;- 新增内置应用相关接口处理器，支持内置应用分类列表和应用列表查询&#10;- 添加工作流基础节点类及十种具体节点实现，包括代码执行、知识库检索、HTTP请求、大语言模型、起始与结束等节点&#10;- 实现代码执行节点对Python代码的安全解析及调用机制&#10;- 实现知识库检索节点，支持语义检索配置及查询结果输出&#10;- 实现HTTP请求节点，支持多种HTTP方法及动态请求参数绑定&#10;- 实现大语言模型节点，支持Prompt模板渲染和内容流式生成&#10;- 完善工作流节点的状态输入输出处理及结果结构封装&#10;- 添加内置应用配置文件及分类的YAML定义，支持扩展应用模板&#10;- 支持将内置应用添加到个人空间，支持应用及其配置信息的数据库存储&#10;- 补充辅助工具函数，提升模型数据序列化及状态变量提取能力" />
     <MESSAGE value="feat(agent): 增加辅助智能体支持及Agent应用自动创建功能&#10;&#10;- 新增AssistantAgentHandler处理辅助智能体相关请求&#10;- 实现AssistantAgentService服务，包括对话管理和消息分页获取&#10;- 扩展Account模型，支持辅助智能体会话关联&#10;- 优化AppService，支持利用AI自动生成Agent应用及icon&#10;- 引入多种Agent模型支持，根据LLM特性选择适配Agent类型&#10;- 改进应用配置校验，完善model_config处理逻辑&#10;- 新增异步任务auto_create_app，支持后台自动创建Agent应用&#10;- 细化agent推理过程消息流，支持流式事件并异步存储&#10;- 增加智能体系统模板，包括ReACT智能体的系统提示词定义&#10;- 重构并规范App配置与工具校验，确保数据一致性与完整性" />
     <MESSAGE value="feat(auth): 完成账号权限校验及多处服务传参优化&#10;&#10;- Account模型继承UserMixin，完善用户认证支持&#10;- API工具相关接口及服务方法均增加current_user参数进行权限校验&#10;- App模型新增token字段及token_with_default属性，支持应用凭证管理&#10;- 应用服务新增分页查询、拷贝、更新、删除功能，均基于当前登录账号权限&#10;- 添加对工作流配置的处理校验逻辑，确保数据有效性和一致性&#10;- 调整COS文件上传服务，接收当前登录账号参数执行账号权限检查&#10;- 修复BaseService获取数据时数据库连接异常处理，增强系统稳定性&#10;- Dataset相关接口及服务方法均添加current_user参数，实现权限控制&#10;- App调试接口中DebugChatReq支持校验上传图片URL的格式及数量限制&#10;- BaseAgent类构造函数新增name参数，方便智能体实例命名&#10;- 代码结构优化，多处函数参数调整，确保业务逻辑基于当前登录账号安全执行" />
     <MESSAGE value="feat(model): 为多个模型添加数据库索引优化查询性能&#10;&#10;- 在Account模型中添加email索引，加快基于email的查询&#10;- 在AccountOAuth模型中添加account_id及openid-provider组合索引&#10;- 为APIKey模型添加account_id和api_key索引提升API密钥检索效率&#10;- 在APIToolProvider和APITool模型中添加相关字段索引优化关联查询&#10;- 为AppConfig、AppConfigVersion及AppDatasetJoin模型添加app_id相关索引&#10;- 为Conversation及Message模型添加app_id、created_by等索引提升消息和会话检索速度&#10;- 在MessageAgentThought模型添加app_id、conversation_id和message_id索引&#10;- 为Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule模型继续添加多字段组合索引&#10;- 在EndUser和UploadFile模型添加账号相关索引强化权限控制的数据访问速度&#10;- 工作流模型Workflow和WorkflowResult均添加账号、应用及工作流相关索引&#10;- Conversation和Message模型中新增多处关联属性提高ORM查询便捷性和代码清晰度" />
@@ -727,7 +735,8 @@
     <MESSAGE value="feat(core): 优化智能体流式输出处理并增强关键词提取服务&#10;&#10;- 统一修改 marshmallow 字段默认值为 dump_default 避免弃用警告&#10;- 在 app 启动入口及 wsgi 入口添加全局警告过滤配置，屏蔽 jieba 等库相关警告&#10;- 延迟加载 jieba.analyse 模块并标准化停用词文件管理，提升关键词提取稳定性&#10;- 优化 function_call_agent 和 react_agent 流式 LLM 输出数据累积和类型判断逻辑，避免重复处理&#10;- 为 BaseAgent 使用 Pydantic V2 配置替换旧版 Config 类，支持 arbitrary_types_allowed&#10;- 新增 run.py 启动脚本，集成全局警告过滤及 Flask 应用启动流程&#10;- 添加 sitecustomize.py，自动过滤 Python 运行时常见警告，优化开发和部署环境体验" />
     <MESSAGE value="feat(core): 优化智能体流式输出处理性能&#10;&#10;- 提前提取ID避免生成器中访问已分离SQLAlchemy对象错误&#10;- 使用预先转换的字符串ID替代重复调用str提高效率&#10;- 解决智能体流式输出中ID获取的潜在异常风险&#10;- 统一处理流式输出数据，提高代码健壮性和可维护性" />
     <MESSAGE value="feat(provider): 添加可用性标识以支持国内可用状态&#10;&#10;- 在Provider实体中新增available字段，表示是否在国内可用，默认值为True&#10;- 在providers.yaml中为每个提供商条目添加available属性，设置其国内可用状态&#10;- 更新配置使得工具和提供商的可用性信息更加明确&#10;- 支持基于可用性属性实现不同地区的访问控制和显示逻辑" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(provider): 添加可用性标识以支持国内可用状态&#10;&#10;- 在Provider实体中新增available字段，表示是否在国内可用，默认值为True&#10;- 在providers.yaml中为每个提供商条目添加available属性，设置其国内可用状态&#10;- 更新配置使得工具和提供商的可用性信息更加明确&#10;- 支持基于可用性属性实现不同地区的访问控制和显示逻辑" />
+    <MESSAGE value="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -742,8 +751,9 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/my_dify$test.coverage" NAME="test 覆盖结果" MODIFIED="1772199059780" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772204320403" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$deploy_scf_function.coverage" NAME="deploy_scf_function 覆盖结果" MODIFIED="1772211694844" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
+    <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772212822915" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>
