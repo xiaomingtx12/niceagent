@@ -4,17 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(assistant_agent): 新增工作流与应用工作流生成工具&#10;&#10;-新增convert_workflow_generator_to_tool方法，实现基于LangChain的工作流生成工具&#10;-新增convert_app_with_workflow_generator_to_tool方法，实现Agent应用和工作流一键生成工具&#10;- 工具内部调用Celery异步任务自动生成工作流与Agent应用，支持后台异步处理&#10;- 调整辅助Agent工具列表，新增工作流生成相关工具&#10;- SSE事件发送修改为使用枚举实际值，修复前端流式消息接收事件类型错误">
-      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/customer_service_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/customer_service_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/resume_screening_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_workflows/templates/translation_workflow.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/intent_classifier/intent_classifier_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/intent_classifier/intent_classifier_node.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/llm/llm_node.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/utils/helper.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/utils/helper.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/workflow.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/workflow.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/conversation_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/conversation_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/USER_API_KEY_FEATURE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/oauth_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/oauth_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/pkg/oauth/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/oauth/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_moonshot_models.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test_qwen35_plus.py" beforeDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
@@ -25,10 +22,6 @@
       <change afterPath="$PROJECT_DIR$/docs/04.并发写入日志冲突.jpg" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/05.weaviate连接未关闭.png" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/06.gpt2词库无配置错误.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/07.工作流模块Bug修复文档.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/08.多LLM集成架构与国产模型接入文档.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/09.大模型基础概念学习教程.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/10.语音功能改造教程文档.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250101.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250102.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250201.md" afterDir="false" />
@@ -104,47 +97,47 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "Flask 服务器.Flask (app/http/app.py).executor": "Run",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Notification.DisplayName-DoNotAsk-Black action on save file ignored": "Black action on save file ignored",
-    "Notification.DoNotAsk-Black action on save file ignored": "true",
-    "Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor": "Run",
-    "Python.import_knowledge_to_faiss.executor": "Run",
-    "Python.import_to_faiss.executor": "Run",
-    "Python.main.executor": "Run",
-    "Python.test.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "Shell Script.celery.executor": "Run",
-    "Shell Script.db migrate.executor": "Run",
-    "Shell Script.db upgrade.executor": "Run",
-    "Shell Script.pipreqs.executor": "Run",
-    "aidebugger.tracer.lastRunConfigName": "import_to_faiss",
-    "git-widget-placeholder": "workflow",
-    "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "project.structure.last.edited": "模块",
-    "project.structure.proportion": "0.15332031",
-    "project.structure.side.proportion": "0.41965318",
-    "settings.editor.selected.configurable": "Qoder",
-    "typescript.add.unambiguous.imports.on.the.fly": "true",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;Flask 服务器.Flask (app/http/app.py).executor&quot;: &quot;Run&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Notification.DisplayName-DoNotAsk-Black action on save file ignored&quot;: &quot;Black action on save file ignored&quot;,
+    &quot;Notification.DoNotAsk-Black action on save file ignored&quot;: &quot;true&quot;,
+    &quot;Python 测试.test_dashscope_image_tool.test_wanx_image_generation 的 Python 测试.executor&quot;: &quot;Run&quot;,
+    &quot;Python.import_knowledge_to_faiss.executor&quot;: &quot;Run&quot;,
+    &quot;Python.import_to_faiss.executor&quot;: &quot;Run&quot;,
+    &quot;Python.main.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;Shell Script.celery.executor&quot;: &quot;Run&quot;,
+    &quot;Shell Script.db migrate.executor&quot;: &quot;Run&quot;,
+    &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
+    &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
+    &quot;aidebugger.tracer.lastRunConfigName&quot;: &quot;import_to_faiss&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;workflow&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
+    &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
+    &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder&quot;,
+    &quot;typescript.add.unambiguous.imports.on.the.fly&quot;: &quot;true&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
-  "keyToStringList": {
-    "DatabaseDriversLRU": [
-      "redis",
-      "postgresql"
+  &quot;keyToStringList&quot;: {
+    &quot;DatabaseDriversLRU&quot;: [
+      &quot;redis&quot;,
+      &quot;postgresql&quot;
     ]
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="D:\spring_project\py\my-dify\internal\core\language_model\providers\deepseek\_asset" />
@@ -163,7 +156,7 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Shell Script.celery">
+  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
     <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -403,7 +396,9 @@
       <workItem from="1771741610174" duration="5830000" />
       <workItem from="1771938891502" duration="13976000" />
       <workItem from="1772006197419" duration="5811000" />
-      <workItem from="1772013051299" duration="25194000" />
+      <workItem from="1772013051299" duration="26226000" />
+      <workItem from="1772089619225" duration="3752000" />
+      <workItem from="1772178931784" duration="4047000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -621,7 +616,15 @@
       <option name="project" value="LOCAL" />
       <updated>1772039014598</updated>
     </task>
-    <option name="localTasksCounter" value="28" />
+    <task id="LOCAL-00028" summary="feat(workflow): 优化工作流中大语言模型节点与意图识别节点&#10;&#10;- LLM节点支持自动整合知识库输入，合并带标签的参考信息注入prompt上下文&#10;- 意图识别节点与LLM节点新增Flask应用上下文支持，避免长时阻塞超时&#10;- 新增strip_think_tags函数，移除LLM输出中&lt;think&gt;标签及内容，提升结果清洁度&#10;- 工作流运行期间传递Flask上下文，确保语言模型加载和调用的环境完整&#10;- 优化客服、翻译、简历筛选等内置工作流模板，统一使用reference_info变量引用知识库内容&#10;- 语言模型服务日志调整，使用统一logger记录加载异常信息&#10;- 会话实体中的会话主题提取提示模板增强，新增语言类型及推理过程字段要求&#10;- 工作流回传结果改为直接返回可序列化的输出数据，提升接口调用体验">
+      <option name="closed" value="true" />
+      <created>1772043718350</created>
+      <option name="number" value="00028" />
+      <option name="presentableId" value="LOCAL-00028" />
+      <option name="project" value="LOCAL" />
+      <updated>1772043718350</updated>
+    </task>
+    <option name="localTasksCounter" value="29" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -639,7 +642,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(dataset): 添加知识库管理相关模块及腾讯云COS文件存储支持&#10;&#10;- 新增知识库相关数据库模型，包括 Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule 及 AppDatasetJoin&#10;- 新增 DatasetHandler 处理REST API请求，实现知识库创建、查询、更新及分页列表功能&#10;- 新增 DatasetService 提供业务逻辑支持，实现知识库增删改查及分页查询&#10;- 新增相关 Marshmallow 和 FlaskForm 验证和序列化Schema，保证数据校验和响应格式&#10;- 新增默认知识库描述格式化文本常量，补全描述信息逻辑&#10;- 新增文件提取器 FileExtractor，支持从腾讯云COS下载文件并解析为文本或文档列表&#10;- 新增腾讯云COS对象存储服务 CosService，支持文件上传、下载及访问URL生成&#10;- 新增文本嵌入模型服务 EmbeddingsService，集成Redis缓存及DashScope嵌入模型&#10;- 添加Celery初始化及Redis配置，支持异步任务处理&#10;- 更新依赖注入和模块导入，完善upload_file相关模型和服务&#10;- 调整部分代码样式和文档注释，移除无用头部注释，提高代码整洁度" />
     <MESSAGE value="feat(dataset): 新增知识库查询和删除功能及召回测试接口&#10;&#10;- 添加知识库最近查询记录获取接口和相关响应结构&#10;- 实现知识库删除功能，涵盖相关文档、片段及向量数据异步清理&#10;- 新增知识库召回测试入参及服务调用实现&#10;- 数据库模型支持相关新增字段和相关状态枚举定义&#10;- 更新handler层支持新增的查询记录及召回测试接口&#10;- 增加异步任务处理知识库删除后的清理工作&#10;- 优化dataset_service中权限校验及错误处理逻辑" />
     <MESSAGE value="feat(agent): 新增智能体基础结构及函数调用智能体实现&#10;&#10;- 新增AgentConfig和AgentState数据模型，支持智能体配置管理和状态跟踪&#10;- 实现BaseAgent抽象基类，定义智能体通用接口&#10;- 实现FunctionCallAgent，基于函数调用的智能体运行流程和状态图编译&#10;- 添加AgentQueueManager，管理智能体任务队列及Redis缓存标记&#10;- 定义智能体队列事件模型及事件类型枚举&#10;- 修正document_schema中process_type字段的默认值拼写错误&#10;- 更新requirements.txt，引入新依赖及版本升级，支持LangChain及相关组件&#10;- 新增agents包__init__.py，统一导出基础智能体和函数调用智能体接口" />
     <MESSAGE value="feat(auth): 集成账户模块及第三方OAuth认证&#10;&#10;- 添加账户处理器AccountHandler，实现用户信息获取及账户更新功能&#10;- 实现AuthHandler处理账号密码登录及登出逻辑&#10;- 新增OAuthHandler支持第三方授权认证流程，包括获取授权地址与认证授权&#10;- 引入JWT服务用于生成和解析登录凭证&#10;- 添加GithubOAuth作为GitHub认证的具体实现&#10;- 在中间件中实现请求加载器，用于基于JWT的接口授权验证&#10;- 所有核心业务接口新增登录保护，增强安全性&#10;- 更新路由注册，新增认证相关路由及账号管理路由&#10;- 集成Flask-Login库，增加登录管理功能&#10;- 添加密码相关功能库，含密码校验与加密对比工具&#10;- 更新依赖列表，添加flask_login与PyJWT库支持" />
@@ -664,7 +666,8 @@
     <MESSAGE value="refactor(workflow): 更新工作流广场和应用广场&#10;&#10;- 删除API集成工作流模板文件，移除相关节点和边配置&#10;- 删除综合研究助手工作流模板文件，清理所有相关内容及流程&#10;- 删除内容创作工作流模板文件，移除完整工作流定义&#10;- 更新代码审查工作流图标链接为新的图标地址&#10;- 更新代码审查助手应用的图标链接为新的图标地址&#10;- 修正代码审查工作流模板中的多余空行，优化文件格式" />
     <MESSAGE value="feat(audio): 新增基于DashScope和Edge-TTS的语音服务支持&#10;&#10;- 使用DashScope Paraformer实现语音转文本功能，替代原OpenAI Whisper&#10;- 扩展音频文件格式支持，新增mp3、flac、aac、ogg、m4a等格式验证&#10;- 添加Edge-TTS语音合成功能，替代原OpenAI TTS实现流式文字转语音&#10;- 增加多种音色支持及与Edge-TTS语音名称映射&#10;- 语音转文本接口新增用户身份参数，支持多用户调用&#10;- 优化消息会话文本转语音逻辑，支持应用配置中动态设置音色&#10;- 会话调试接口支持传入图片URL参数增强交互能力&#10;- MiniMax模型配置新增image_input特征支持&#10;- requirements.txt新增edge-tts依赖，删除重复dashscope版本声明" />
     <MESSAGE value="feat(assistant_agent): 新增工作流与应用工作流生成工具&#10;&#10;-新增convert_workflow_generator_to_tool方法，实现基于LangChain的工作流生成工具&#10;-新增convert_app_with_workflow_generator_to_tool方法，实现Agent应用和工作流一键生成工具&#10;- 工具内部调用Celery异步任务自动生成工作流与Agent应用，支持后台异步处理&#10;- 调整辅助Agent工具列表，新增工作流生成相关工具&#10;- SSE事件发送修改为使用枚举实际值，修复前端流式消息接收事件类型错误" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(assistant_agent): 新增工作流与应用工作流生成工具&#10;&#10;-新增convert_workflow_generator_to_tool方法，实现基于LangChain的工作流生成工具&#10;-新增convert_app_with_workflow_generator_to_tool方法，实现Agent应用和工作流一键生成工具&#10;- 工具内部调用Celery异步任务自动生成工作流与Agent应用，支持后台异步处理&#10;- 调整辅助Agent工具列表，新增工作流生成相关工具&#10;- SSE事件发送修改为使用枚举实际值，修复前端流式消息接收事件类型错误" />
+    <MESSAGE value="feat(workflow): 优化工作流中大语言模型节点与意图识别节点&#10;&#10;- LLM节点支持自动整合知识库输入，合并带标签的参考信息注入prompt上下文&#10;- 意图识别节点与LLM节点新增Flask应用上下文支持，避免长时阻塞超时&#10;- 新增strip_think_tags函数，移除LLM输出中&lt;think&gt;标签及内容，提升结果清洁度&#10;- 工作流运行期间传递Flask上下文，确保语言模型加载和调用的环境完整&#10;- 优化客服、翻译、简历筛选等内置工作流模板，统一使用reference_info变量引用知识库内容&#10;- 语言模型服务日志调整，使用统一logger记录加载异常信息&#10;- 会话实体中的会话主题提取提示模板增强，新增语言类型及推理过程字段要求&#10;- 工作流回传结果改为直接返回可序列化的输出数据，提升接口调用体验" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(workflow): 优化工作流中大语言模型节点与意图识别节点&#10;&#10;- LLM节点支持自动整合知识库输入，合并带标签的参考信息注入prompt上下文&#10;- 意图识别节点与LLM节点新增Flask应用上下文支持，避免长时阻塞超时&#10;- 新增strip_think_tags函数，移除LLM输出中&lt;think&gt;标签及内容，提升结果清洁度&#10;- 工作流运行期间传递Flask上下文，确保语言模型加载和调用的环境完整&#10;- 优化客服、翻译、简历筛选等内置工作流模板，统一使用reference_info变量引用知识库内容&#10;- 语言模型服务日志调整，使用统一logger记录加载异常信息&#10;- 会话实体中的会话主题提取提示模板增强，新增语言类型及推理过程字段要求&#10;- 工作流回传结果改为直接返回可序列化的输出数据，提升接口调用体验" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -679,7 +682,7 @@
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1771668488628" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/test" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772043459154" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772181930947" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

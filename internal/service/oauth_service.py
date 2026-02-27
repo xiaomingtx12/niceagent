@@ -8,7 +8,7 @@ from injector import inject
 
 from internal.exception import NotFoundException
 from internal.model import AccountOAuth
-from pkg.oauth import OAuth, GithubOAuth
+from pkg.oauth import OAuth, GithubOAuth, GiteeOAuth
 from pkg.sqlalchemy import SQLAlchemy
 from .account_service import AccountService
 from .base_service import BaseService
@@ -33,10 +33,16 @@ class OAuthService(BaseService):
             client_secret=os.getenv("GITHUB_CLIENT_SECRET"),
             redirect_uri=os.getenv("GITHUB_REDIRECT_URI"),
         )
+        gitee = GiteeOAuth(
+            client_id=os.getenv("GITEE_CLIENT_ID"),
+            client_secret=os.getenv("GITEE_CLIENT_SECRET"),
+            redirect_uri=os.getenv("GITEE_REDIRECT_URI"),
+        )
 
         # 2.构建字典并返回
         return {
             "github": github,
+            "gitee": gitee,
         }
 
     @classmethod
