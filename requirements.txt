@@ -42,3 +42,6 @@ email_validator==2.1.0
 gunicorn==23.0.0
 redis==6.4.0
 tencentcloud-sdk-python>=3.0.1000
+pytest==8.3.4
+unstructured==0.10.30
+opencv-python==4.8.1.78

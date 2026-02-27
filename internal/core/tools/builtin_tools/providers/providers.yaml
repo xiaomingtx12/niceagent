@@ -4,7 +4,7 @@
   icon: icon.svg
   background: "#E5E7EB"
   category: search
-  created_at: 1722498386
+  created_at: 1740132000
   available: true
 - name: google
   label: Google
@@ -12,7 +12,7 @@
   icon: icon.svg
   background: "#E5E7EB"
   category: search
-  created_at: 1722498386
+  created_at: 1740132000
   available: false
 - name: time
   label: 时间
@@ -20,7 +20,7 @@
   icon: icon.svg
   background: "#E5E7EB"
   category: tool
-  created_at: 1722498386
+  created_at: 1740132000
   available: true
 - name: duckduckgo
   label: DuckDuckGo
@@ -28,7 +28,7 @@
   icon: icon.svg
   background: "#FFFFFF"
   category: search
-  created_at: 1722498386
+  created_at: 1740132000
   available: true
 - name: dalle
   label: DALLE
@@ -36,7 +36,7 @@
   icon: icon.png
   background: "#E5E7EB"
   category: image
-  created_at: 1722498386
+  created_at: 1740132000
   available: false
 - name: tongyi
   label: 阿里云通义千问
@@ -52,7 +52,7 @@
   icon: icon.png
   background: "#E5E7EB"
   category: tool
-  created_at: 1722498386
+  created_at: 1740132000
   available: false
 - name: wikipedia
   label: 维基百科
@@ -60,5 +60,5 @@
   icon: icon.svg
   background: "#FFFFFF"
   category: other
-  created_at: 1722498386
+  created_at: 1740132000
   available: false
