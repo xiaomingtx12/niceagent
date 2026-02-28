@@ -8,6 +8,12 @@ from pkg.paginator import PaginatorReq
 from .schema import ListField
 
 
+class DebugApiToolReq(FlaskForm):
+    """调试API工具请求"""
+
+    parameters = ListField("parameters", default={})
+
+
 class ValidateOpenAPISchemaReq(FlaskForm):
     """校验OpenAPI规范字符串请求"""
 
@@ -36,7 +42,7 @@ class CreateApiToolReq(FlaskForm):
     icon = StringField(
         "icon",
         validators=[
-            DataRequired(message="工具提供者的图标不能为空"),
+            Optional(),
             URL(message="工具提供者的图标必须是URL链接"),
         ],
     )
@@ -71,7 +77,7 @@ class UpdateApiToolProviderReq(FlaskForm):
     icon = StringField(
         "icon",
         validators=[
-            DataRequired(message="工具提供者的图标不能为空"),
+            Optional(),
             URL(message="工具提供者的图标必须是URL链接"),
         ],
     )
@@ -179,3 +185,11 @@ class GetApiToolProvidersWithPageResp(Schema):
             ],
             "created_at": int(data.created_at.timestamp()),
         }
+
+
+class DebugApiToolResp(Schema):
+    """调试API工具响应"""
+
+    success = fields.Boolean()
+    result = fields.Raw(allow_none=True)
+    error = fields.String(allow_none=True)

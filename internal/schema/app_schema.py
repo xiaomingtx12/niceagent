@@ -34,7 +34,7 @@ class CreateAppReq(FlaskForm):
     icon = StringField(
         "icon",
         validators=[
-            DataRequired("应用图标不能为空"),
+            Optional(),
             URL(message="应用图标必须是图片URL链接"),
         ],
     )
@@ -57,7 +57,7 @@ class UpdateAppReq(FlaskForm):
     icon = StringField(
         "icon",
         validators=[
-            DataRequired("应用图标不能为空"),
+            Optional(),
             URL(message="应用图标必须是图片URL链接"),
         ],
     )
