@@ -11,6 +11,7 @@ class GiteeOAuth(OAuth):
     _AUTHORIZE_URL = "https://gitee.com/oauth/authorize"  # 跳转授权接口
     _ACCESS_TOKEN_URL = "https://gitee.com/oauth/token"  # 获取授权令牌接口
     _USER_INFO_URL = "https://gitee.com/api/v5/user"  # 获取用户信息接口
+    _EMAIL_INFO_URL = "https://gitee.com/api/v5/emails"  # 获取用户邮箱接口
 
     def get_provider(self) -> str:
         return "gitee"
@@ -50,10 +51,32 @@ class GiteeOAuth(OAuth):
         return access_token
 
     def get_raw_user_info(self, token: str) -> dict:
-        # Gitee API v5 常用方式：通过 querystring 传递 access_token
+        # 1.获取用户基本信息
         resp = requests.get(self._USER_INFO_URL, params={"access_token": token})
         resp.raise_for_status()
-        return resp.json()
+        raw_info = resp.json()
+
+        # 2.获取用户邮箱列表
+        email_resp = requests.get(self._EMAIL_INFO_URL, params={"access_token": token})
+        email_resp.raise_for_status()
+        email_info = email_resp.json()
+
+        # 3.提取主邮箱（优先使用已验证的邮箱）
+        primary_email = None
+        if isinstance(email_info, list) and len(email_info) > 0:
+            # 优先查找已验证的邮箱
+            verified_email = next(
+                (email for email in email_info if email.get("state") == "confirmed"),
+                None,
+            )
+            if verified_email:
+                primary_email = verified_email.get("email")
+            else:
+                # 如果没有已验证的邮箱，使用第一个邮箱
+                primary_email = email_info[0].get("email")
+
+        # 4.合并用户信息和邮箱
+        return {**raw_info, "email": primary_email or raw_info.get("email")}
 
     def _transform_user_info(self, raw_info: dict) -> OAuthUserInfo:
         # 1.提取邮箱，如果不存在设置一个默认邮箱

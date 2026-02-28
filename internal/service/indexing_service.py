@@ -368,13 +368,22 @@ class IndexingService(BaseService):
             lc_segment.metadata["document_enabled"] = True
             lc_segment.metadata["segment_enabled"] = True
 
+        # 1.5 获取当前用户的 account_id，用于在线程中初始化 embeddings
+        from flask import g
+        account_id = getattr(g, 'embeddings_account_id', None)
+        if not account_id:
+            account_id = document.account_id
+
         # 2.调用向量数据库，每次存储10条数据，避免一次传递过多的数据
         def thread_func(
-            flask_app: Flask, chunks: list[LCDocument], ids: list[UUID]
+            flask_app: Flask, chunks: list[LCDocument], ids: list[UUID], account_id: UUID
         ) -> None:
             """线程函数，执行向量数据库与postgres数据的存储"""
             with flask_app.app_context():
                 try:
+                    # 在线程上下文中设置 account_id
+                    g.embeddings_account_id = account_id
+                    
                     self.vector_database_service.vector_store.add_documents(
                         chunks,
                         ids=ids,
@@ -410,7 +419,7 @@ class IndexingService(BaseService):
                 ids = [chunk.metadata["node_id"] for chunk in chunks]
                 futures.append(
                     executor.submit(
-                        thread_func, current_app._get_current_object(), chunks, ids
+                        thread_func, current_app._get_current_object(), chunks, ids, account_id
                     )
                 )
 
