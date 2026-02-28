@@ -13,6 +13,8 @@ from internal.schema.api_tool_schema import (
     GetApiToolProvidersWithPageReq,
     GetApiToolProvidersWithPageResp,
     UpdateApiToolProviderReq,
+    DebugApiToolReq,
+    DebugApiToolResp,
 )
 from internal.service import ApiToolService
 from pkg.paginator import PageModel
@@ -100,3 +102,18 @@ class ApiToolHandler:
         self.api_tool_service.parse_openapi_schema(req.openapi_schema.data)
 
         return success_message("数据校验成功")
+
+    @login_required
+    def debug_api_tool(self, provider_id: UUID, tool_name: str):
+        """调试API工具"""
+        req = DebugApiToolReq()
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        result = self.api_tool_service.debug_api_tool(
+            provider_id, tool_name, req.parameters.data, current_user
+        )
+
+        resp = DebugApiToolResp()
+
+        return success_json(resp.dump(result))

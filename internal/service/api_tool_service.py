@@ -232,10 +232,15 @@ class ApiToolService(BaseService):
 
         return OpenAPISchema(**data)
 
-    def api_tool_invoke(self):
-        provider_id = "d72bb9d7-8794-4caf-bd60-1f992c537065"
-        tool_name = "YoudaoSuggest"
-
+    def debug_api_tool(
+        self,
+        provider_id: UUID,
+        tool_name: str,
+        parameters: dict,
+        account: Account,
+    ) -> dict:
+        """调试自定义API工具，返回调用结果"""
+        # 1.查询工具信息并校验权限
         api_tool = (
             self.db.session.query(ApiTool)
             .filter(
@@ -244,13 +249,19 @@ class ApiToolService(BaseService):
             )
             .one_or_none()
         )
+
+        if api_tool is None or api_tool.account_id != account.id:
+            raise NotFoundException("该工具不存在")
+
+        # 2.获取工具提供者信息
         api_tool_provider = api_tool.provider
 
+        # 3.构建工具实体并调用
         from internal.core.tools.api_tools.entities import ToolEntity
 
         tool = self.api_provider_manager.get_tool(
             ToolEntity(
-                id=provider_id,
+                id=str(provider_id),
                 name=tool_name,
                 url=api_tool.url,
                 method=api_tool.method,
@@ -259,4 +270,28 @@ class ApiToolService(BaseService):
                 parameters=api_tool.parameters,
             )
         )
-        return tool.invoke({"q": "love", "doctype": "json"})
+
+        # 4.调用工具并返回结果
+        try:
+            result = tool.invoke(parameters)
+            
+            # 如果结果是字符串，尝试解析为JSON
+            if isinstance(result, str):
+                try:
+                    import json
+                    result = json.loads(result)
+                except (json.JSONDecodeError, ValueError):
+                    # 如果不是有效的JSON，保持原样
+                    pass
+            
+            return {
+                "success": True,
+                "result": result,
+                "error": None,
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "result": None,
+                "error": str(e),
+            }

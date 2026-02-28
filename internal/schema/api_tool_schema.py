@@ -5,13 +5,13 @@ from wtforms.validators import DataRequired, Length, URL, Optional
 
 from internal.model import ApiToolProvider, ApiTool
 from pkg.paginator import PaginatorReq
-from .schema import ListField
+from .schema import ListField, DictField
 
 
 class DebugApiToolReq(FlaskForm):
     """调试API工具请求"""
 
-    parameters = ListField("parameters", default={})
+    parameters = DictField("parameters", default={})
 
 
 class ValidateOpenAPISchemaReq(FlaskForm):

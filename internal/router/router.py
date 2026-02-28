@@ -203,6 +203,11 @@ class Router:
             view_func=self.api_tool_handler.get_api_tool,
         )
         bp.add_url_rule(
+            "/api-tools/<uuid:provider_id>/tools/<string:tool_name>/debug",
+            methods=["POST"],
+            view_func=self.api_tool_handler.debug_api_tool,
+        )
+        bp.add_url_rule(
             "/api-tools/<uuid:provider_id>/delete",
             methods=["POST"],
             view_func=self.api_tool_handler.delete_api_tool_provider,
