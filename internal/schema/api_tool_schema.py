@@ -3,6 +3,7 @@ from marshmallow import Schema, fields, pre_dump
 from wtforms import StringField, ValidationError
 from wtforms.validators import DataRequired, Length, URL, Optional
 
+from internal.lib.helper import datetime_to_timestamp
 from internal.model import ApiToolProvider, ApiTool
 from pkg.paginator import PaginatorReq
 from .schema import ListField, DictField
@@ -160,6 +161,7 @@ class GetApiToolProvidersWithPageResp(Schema):
     description = fields.String()
     headers = fields.List(fields.Dict, dump_default=[])
     tools = fields.List(fields.Dict, dump_default=[])
+    updated_at = fields.Integer(dump_default=0)
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
@@ -183,7 +185,8 @@ class GetApiToolProvidersWithPageResp(Schema):
                 }
                 for tool in tools
             ],
-            "created_at": int(data.created_at.timestamp()),
+            "updated_at": datetime_to_timestamp(data.updated_at),
+            "created_at": datetime_to_timestamp(data.created_at),
         }
 
 

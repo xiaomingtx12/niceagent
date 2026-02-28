@@ -40,7 +40,7 @@ Werkzeug==3.1.5
 WTForms==3.2.1
 email_validator==2.1.0
 gunicorn==23.0.0
-redis==6.4.0
+redis==5.0.1
 tencentcloud-sdk-python>=3.0.1000
 pytest==8.3.4
 unstructured==0.10.30

@@ -5,13 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(middleware): 添加全局限流中间件支持并应用于多个接口&#10;&#10;- 定义 TooManyRequestsException 用于限流异常处理，包含重试时间支持&#10;- 扩展 HTTP 响应码和响应消息，新增请求过于频繁响应处理&#10;- 在 HTTP 服务中注册限流异常处理器，实现限流错误返回&#10;- 初始化并集成限流中间件到服务启动流程中&#10;- 在多个接口处理函数中应用限流装饰器，按不同配置项限制请求频率&#10;- 扩展异常导出列表和响应模块，支持限流消息导出和使用&#10;- 新增测试示例代码，演示API调用及限流相关交互方式">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/indexing_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/indexing_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pkg/oauth/gitee_oauth.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/oauth/gitee_oauth.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
-      <change afterPath="$PROJECT_DIR$/.env" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/01.项目API文档.md" afterDir="false" />
       <change afterPath="$PROJECT_DIR$/docs/02.LLMOps数据库ER图.drawio" afterDir="false" />
@@ -72,7 +69,7 @@
   <component name="Git.Settings">
     <option name="RECENT_BRANCH_BY_REPOSITORY">
       <map>
-        <entry key="$PROJECT_DIR$" value="master" />
+        <entry key="$PROJECT_DIR$" value="checkpoint" />
       </map>
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
@@ -171,29 +168,6 @@
       <option name="ADD_SOURCE_ROOTS" value="true" />
       <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
       <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/deploy_scf_function.py" />
-      <option name="PARAMETERS" value="" />
-      <option name="SHOW_COMMAND_LINE" value="false" />
-      <option name="EMULATE_TERMINAL" value="false" />
-      <option name="MODULE_MODE" value="false" />
-      <option name="REDIRECT_INPUT" value="false" />
-      <option name="INPUT_FILE" value="" />
-      <method v="2" />
-    </configuration>
-    <configuration name="import_knowledge_to_faiss" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
-      <module name="my-dify" />
-      <option name="ENV_FILES" value="" />
-      <option name="INTERPRETER_OPTIONS" value="" />
-      <option name="PARENT_ENVS" value="true" />
-      <envs>
-        <env name="PYTHONUNBUFFERED" value="1" />
-      </envs>
-      <option name="SDK_HOME" value="" />
-      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$/scripts" />
-      <option name="IS_MODULE_SDK" value="true" />
-      <option name="ADD_CONTENT_ROOTS" value="true" />
-      <option name="ADD_SOURCE_ROOTS" value="true" />
-      <EXTENSION ID="PythonCoverageRunConfigurationExtension" runner="coverage.py" />
-      <option name="SCRIPT_NAME" value="$PROJECT_DIR$/scripts/import_knowledge_to_faiss.py" />
       <option name="PARAMETERS" value="" />
       <option name="SHOW_COMMAND_LINE" value="false" />
       <option name="EMULATE_TERMINAL" value="false" />
@@ -328,7 +302,6 @@
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.deploy_scf_function" />
       <item itemvalue="Python.test" />
-      <item itemvalue="Python.import_knowledge_to_faiss" />
       <item itemvalue="Python.import_to_faiss" />
       <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
       <item itemvalue="Shell Script.celery" />
@@ -339,10 +312,9 @@
     <recent_temporary>
       <list>
         <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
-        <item itemvalue="Python.deploy_scf_function" />
-        <item itemvalue="Python.test" />
         <item itemvalue="Python.import_to_faiss" />
-        <item itemvalue="Python.import_knowledge_to_faiss" />
+        <item itemvalue="Python.test" />
+        <item itemvalue="Python.deploy_scf_function" />
       </list>
     </recent_temporary>
   </component>
@@ -773,7 +745,8 @@
     <SUITE FILE_PATH="coverage/my_dify$test.coverage" NAME="test 覆盖结果" MODIFIED="1772199059780" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$deploy_scf_function.coverage" NAME="deploy_scf_function 覆盖结果" MODIFIED="1772211694844" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772264302460" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$check_checkpoint_data.coverage" NAME="check_checkpoint_data 覆盖结果" MODIFIED="1772276469901" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772289831574" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>
