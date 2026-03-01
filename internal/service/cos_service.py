@@ -33,13 +33,14 @@ class CosService:
         """上传文件到腾讯云cos对象存储，上传后返回文件的信息"""
 
         # 1.提取文件扩展名并检测是否可以上传
-        filename = file.filename
+        filename = file.filename or ""
         extension = filename.rsplit(".", 1)[-1] if "." in filename else ""
+        extension_lower = extension.lower()
         if extension.lower() not in (
             ALLOWED_IMAGE_EXTENSION + ALLOWED_DOCUMENT_EXTENSION
         ):
             raise FailException(f"该.{extension}扩展的文件不允许上传")
-        elif only_image and extension not in ALLOWED_IMAGE_EXTENSION:
+        elif only_image and extension_lower not in ALLOWED_IMAGE_EXTENSION:
             raise FailException(f"该.{extension}扩展的文件不支持上传，请上传正确的图片")
 
         # 2.获取客户端+存储桶名字
@@ -47,7 +48,7 @@ class CosService:
         bucket = self._get_bucket()
 
         # 3.生成一个随机的名字
-        random_filename = str(uuid.uuid4()) + "." + extension
+        random_filename = str(uuid.uuid4()) + "." + extension_lower
         now = datetime.now()
         upload_filename = f"{now.year}/{now.month:02d}/{now.day:02d}/{random_filename}"
 
@@ -66,7 +67,7 @@ class CosService:
             name=filename,
             key=upload_filename,
             size=len(file_content),
-            extension=extension,
+            extension=extension_lower,
             mime_type=file.mimetype,
             hash=hashlib.sha3_256(file_content).hexdigest(),
         )

@@ -11,5 +11,8 @@ ALLOWED_DOCUMENT_EXTENSION = [
     "xls",
     "doc",
     "docx",
+    "ppt",
+    "pptx",
+    "xml",
     "csv",
 ]
