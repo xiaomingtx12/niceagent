@@ -4,9 +4,18 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="feat(middleware): 添加全局限流中间件支持并应用于多个接口&#10;&#10;- 定义 TooManyRequestsException 用于限流异常处理，包含重试时间支持&#10;- 扩展 HTTP 响应码和响应消息，新增请求过于频繁响应处理&#10;- 在 HTTP 服务中注册限流异常处理器，实现限流错误返回&#10;- 初始化并集成限流中间件到服务启动流程中&#10;- 在多个接口处理函数中应用限流装饰器，按不同配置项限制请求频率&#10;- 扩展异常导出列表和响应模块，支持限流消息导出和使用&#10;- 新增测试示例代码，演示API调用及限流相关交互方式">
-      <change beforePath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/api_tool_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="fix(core): 统一文件扩展名处理及修正文件类型匹配&#10;&#10;- cos_service中增强上传文件扩展名处理，使用小写统一判断和存储&#10;- 修正file_extractor中PPT扩展名判断，确保识别.ppt和.pptx两种格式&#10;- requirements.txt 重新整理依赖，按功能分类并添加缺失的包&#10;- upload_file_entity增加ppt、pptx、xml文件扩展名支持">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/base_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/function_call_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/agents/react_agent.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent/entities/agent_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/assistant_agent_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/assistant_agent_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/openapi_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="">
       <change afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
@@ -123,7 +132,7 @@
     &quot;project.structure.last.edited&quot;: &quot;模块&quot;,
     &quot;project.structure.proportion&quot;: &quot;0.15332031&quot;,
     &quot;project.structure.side.proportion&quot;: &quot;0.41965318&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;Qoder&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;preferences.pluginManager&quot;,
     &quot;typescript.add.unambiguous.imports.on.the.fly&quot;: &quot;true&quot;,
     &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   },
@@ -301,8 +310,8 @@
     <list>
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.deploy_scf_function" />
-      <item itemvalue="Python.test" />
       <item itemvalue="Python.import_to_faiss" />
+      <item itemvalue="Python.test" />
       <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
       <item itemvalue="Shell Script.celery" />
       <item itemvalue="Shell Script.db migrate" />
@@ -396,6 +405,12 @@
       <workItem from="1772089619225" duration="3752000" />
       <workItem from="1772178931784" duration="31449000" />
       <workItem from="1772264178467" duration="1900000" />
+      <workItem from="1772352331029" duration="7807000" />
+      <workItem from="1772521572343" duration="5103000" />
+      <workItem from="1772812632194" duration="63000" />
+      <workItem from="1772898259649" duration="1135000" />
+      <workItem from="1773063961977" duration="6033000" />
+      <workItem from="1773073575882" duration="7955000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -685,7 +700,23 @@
       <option name="project" value="LOCAL" />
       <updated>1772223326902</updated>
     </task>
-    <option name="localTasksCounter" value="37" />
+    <task id="LOCAL-00037" summary="fix(schema): 修正ApiTool时间戳序列化问题并调整依赖版本&#10;&#10;- 引入datetime_to_timestamp辅助函数处理时间字段转换&#10;- 增加ApiToolSchema中updated_at字段支持，确保更新时间正确序列化&#10;- 修改序列化逻辑，统一使用datetime_to_timestamp转换created_at和updated_at字段&#10;- 降级redis库版本至5.0.1以兼容现有环境依赖">
+      <option name="closed" value="true" />
+      <created>1772292089019</created>
+      <option name="number" value="00037" />
+      <option name="presentableId" value="LOCAL-00037" />
+      <option name="project" value="LOCAL" />
+      <updated>1772292089019</updated>
+    </task>
+    <task id="LOCAL-00038" summary="fix(core): 统一文件扩展名处理及修正文件类型匹配&#10;&#10;- cos_service中增强上传文件扩展名处理，使用小写统一判断和存储&#10;- 修正file_extractor中PPT扩展名判断，确保识别.ppt和.pptx两种格式&#10;- requirements.txt 重新整理依赖，按功能分类并添加缺失的包&#10;- upload_file_entity增加ppt、pptx、xml文件扩展名支持">
+      <option name="closed" value="true" />
+      <created>1772366618854</created>
+      <option name="number" value="00038" />
+      <option name="presentableId" value="LOCAL-00038" />
+      <option name="project" value="LOCAL" />
+      <updated>1772366618854</updated>
+    </task>
+    <option name="localTasksCounter" value="39" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -703,8 +734,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(model): 为多个模型添加数据库索引优化查询性能&#10;&#10;- 在Account模型中添加email索引，加快基于email的查询&#10;- 在AccountOAuth模型中添加account_id及openid-provider组合索引&#10;- 为APIKey模型添加account_id和api_key索引提升API密钥检索效率&#10;- 在APIToolProvider和APITool模型中添加相关字段索引优化关联查询&#10;- 为AppConfig、AppConfigVersion及AppDatasetJoin模型添加app_id相关索引&#10;- 为Conversation及Message模型添加app_id、created_by等索引提升消息和会话检索速度&#10;- 在MessageAgentThought模型添加app_id、conversation_id和message_id索引&#10;- 为Dataset、Document、Segment、KeywordTable、DatasetQuery、ProcessRule模型继续添加多字段组合索引&#10;- 在EndUser和UploadFile模型添加账号相关索引强化权限控制的数据访问速度&#10;- 工作流模型Workflow和WorkflowResult均添加账号、应用及工作流相关索引&#10;- Conversation和Message模型中新增多处关联属性提高ORM查询便捷性和代码清晰度" />
-    <MESSAGE value="feat(app): 添加应用调试会话与发布配置相关接口&#10;&#10;- 新增获取应用调试会话分页消息列表接口及服务方法&#10;- 实现根据应用ID和任务ID停止调试会话功能&#10;- 增加获取应用发布配置接口及重新生成WebApp凭证功能&#10;- 在Agent模块中注册ReACTAgent，支持多Agent模型选择&#10;- 应用配置校验逻辑完善，支持模型配置严格校验和工作流验证&#10;- 优化Agent推理消息结构，支持更多统计字段记录&#10;- 路由中增加调试会话、发布配置及令牌管理相关路由绑定&#10;- 增加AudioEntity语音音色允许列表，扩展文本转语音配置&#10;- 依赖注入新增LoginManager，支持登录权限验证机制" />
     <MESSAGE value="feat(app): 添加应用统计分析与WebApp交互功能&#10;&#10;- 新增AnalysisHandler与AnalysisService，实现应用统计分析接口&#10;- 统计近7天和14天消息数据，计算会话数、活跃用户、会话平均互动数等指标&#10;- 缓存统计结果到Redis，提升接口响应性能&#10;- 实现数据趋势和环比计算，辅助业务决策&#10;- 新增WebAppHandler与WebAppService，支持基于token的WebApp信息查询&#10;- 提供WebApp聊天接口，支持消息发送、流式响应和停止会话功能&#10;- 增加WebApp会话列表查询，支持是否置顶筛选&#10;- 注册路由绑定统计分析和WebApp相关接口" />
     <MESSAGE value="feat(core): 添加语音及会话处理功能，完善Agent推理统计&#10;&#10;- 新增AudioHandler及AudioService，支持语音转文本和消息转流式语音&#10;- 新增ConversationHandler及ConversationService，实现会话消息分页查询、修改和删除功能&#10;- Core Agent中BaseAgent完善invoke方法，实现流式智能体事件处理聚合&#10;- FunctionCallAgent增强智能体推理事件记录，添加token计数及费用统计字段&#10;- ConversationService优化智能体推理消息存储，异步更新会话摘要与名称&#10;- 修正AgentQueueManager中停止标识相关方法命名及调用&#10;- App模型新增只读属性app_dataset_joins，方便获取知识库关联记录&#10;- 更新相关模块导入，完善Wechat及Platform相关handler、service和model导出" />
     <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式" />
@@ -728,7 +757,9 @@
     <MESSAGE value="feat(core): 优化工作流模板中正则表达式替换非正则实现&#10;&#10;- 在多个工作流模板中移除对re模块的依赖，使用字符串方法替代正则表达式&#10;- 优化会议纪要工作流，改进时间和发言人信息提取逻辑，提升稳定性&#10;- 简历筛选工作流中，改用字符串查找实现JSON解析，增强兼容性和容错性&#10;- 翻译工作流中，替换术语匹配正则为字符串遍历检测方法&#10;- 在检索服务及相关服务中添加source_app_id参数以支持应用来源追踪&#10;- 统一更新应用服务中新增source_app_id传入，提高调用链完整性和数据准确性" />
     <MESSAGE value="feat(core): 优化云函数代码执行节点及工作流模板实现&#10;&#10;- 将代码执行节点改为基于腾讯云云函数的安全隔离执行环境&#10;- 本地验证Python代码格式，避免无效或错误代码提交&#10;- 云函数执行结果强制要求返回字典，增强类型安全检查&#10;- 配置文件添加腾讯云云函数相关密钥及环境参数支持&#10;- 会议纪要工作流中用正则表达式替代原字符串查找提升时间和发言人提取准确性&#10;- 简历筛选工作流改用正则表达式解析JSON替换原字符串截取，增强容错性&#10;- 翻译质量统计工作流使用正则表达式替代手动字符串遍历检测括号术语&#10;- 多个工作流模板中移除部分re模块依赖，改为非正则实现，降低复杂度&#10;- 检索及相关服务新增source_app_id参数，追踪应用来源&#10;- 应用服务统一新增source_app_id传入，完善调用链和数据准确性保障" />
     <MESSAGE value="feat(middleware): 添加全局限流中间件支持并应用于多个接口&#10;&#10;- 定义 TooManyRequestsException 用于限流异常处理，包含重试时间支持&#10;- 扩展 HTTP 响应码和响应消息，新增请求过于频繁响应处理&#10;- 在 HTTP 服务中注册限流异常处理器，实现限流错误返回&#10;- 初始化并集成限流中间件到服务启动流程中&#10;- 在多个接口处理函数中应用限流装饰器，按不同配置项限制请求频率&#10;- 扩展异常导出列表和响应模块，支持限流消息导出和使用&#10;- 新增测试示例代码，演示API调用及限流相关交互方式" />
-    <option name="LAST_COMMIT_MESSAGE" value="feat(middleware): 添加全局限流中间件支持并应用于多个接口&#10;&#10;- 定义 TooManyRequestsException 用于限流异常处理，包含重试时间支持&#10;- 扩展 HTTP 响应码和响应消息，新增请求过于频繁响应处理&#10;- 在 HTTP 服务中注册限流异常处理器，实现限流错误返回&#10;- 初始化并集成限流中间件到服务启动流程中&#10;- 在多个接口处理函数中应用限流装饰器，按不同配置项限制请求频率&#10;- 扩展异常导出列表和响应模块，支持限流消息导出和使用&#10;- 新增测试示例代码，演示API调用及限流相关交互方式" />
+    <MESSAGE value="fix(schema): 修正ApiTool时间戳序列化问题并调整依赖版本&#10;&#10;- 引入datetime_to_timestamp辅助函数处理时间字段转换&#10;- 增加ApiToolSchema中updated_at字段支持，确保更新时间正确序列化&#10;- 修改序列化逻辑，统一使用datetime_to_timestamp转换created_at和updated_at字段&#10;- 降级redis库版本至5.0.1以兼容现有环境依赖" />
+    <MESSAGE value="fix(core): 统一文件扩展名处理及修正文件类型匹配&#10;&#10;- cos_service中增强上传文件扩展名处理，使用小写统一判断和存储&#10;- 修正file_extractor中PPT扩展名判断，确保识别.ppt和.pptx两种格式&#10;- requirements.txt 重新整理依赖，按功能分类并添加缺失的包&#10;- upload_file_entity增加ppt、pptx、xml文件扩展名支持" />
+    <option name="LAST_COMMIT_MESSAGE" value="fix(core): 统一文件扩展名处理及修正文件类型匹配&#10;&#10;- cos_service中增强上传文件扩展名处理，使用小写统一判断和存储&#10;- 修正file_extractor中PPT扩展名判断，确保识别.ppt和.pptx两种格式&#10;- requirements.txt 重新整理依赖，按功能分类并添加缺失的包&#10;- upload_file_entity增加ppt、pptx、xml文件扩展名支持" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -746,7 +777,7 @@
     <SUITE FILE_PATH="coverage/my_dify$deploy_scf_function.coverage" NAME="deploy_scf_function 覆盖结果" MODIFIED="1772211694844" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$check_checkpoint_data.coverage" NAME="check_checkpoint_data 覆盖结果" MODIFIED="1772276469901" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1772289831574" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1773078939389" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

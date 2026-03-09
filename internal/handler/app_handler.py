@@ -6,7 +6,6 @@ from flask_login import login_required, current_user
 from injector import inject
 
 from internal.core.language_model import LanguageModelManager
-from internal.exception import FailException
 from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.app_schema import (
     CreateAppReq,
@@ -218,7 +217,7 @@ class AppHandler(object):
             return validate_error_json(req.errors)
 
         # 2.调用服务发起会话调试
-        response = self.app_service.debug_chat(app_id, req.query.data, req.image_urls.data, current_user)
+        response = self.app_service.debug_chat(app_id, req, current_user)
 
         return compact_generate_response(response)
 
@@ -265,4 +264,5 @@ class AppHandler(object):
         return success_json({"token": token})
 
     def ping(self):
-        raise FailException("数据未找到")
+        """简单的健康检查端点"""
+        return success_json({"status": "ok", "message": "pong"})

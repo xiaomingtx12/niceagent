@@ -135,21 +135,12 @@ class AgentConfig(BaseModel):
 
 
 class AgentState(MessagesState):
-    """智能体状态类
-    
-    继承自 MessagesState，自动提供 messages 字段用于短期记忆（对话历史）
-    
-    注意：在旧版本的 LangGraph 中，MessagesState 的 messages 字段使用 add_messages reducer，
-    会追加消息而不是替换。为了支持消息替换，我们需要特殊处理。
-    """
+    """智能体状态类"""
 
     task_id: UUID  # 该次状态对应的任务id，每次运行时会使用独立的任务id
     iteration_count: int = 0  # 迭代次数，默认为0
+    history: list[AnyMessage]  # 短期记忆(历史记录)
     long_term_memory: str = ""  # 长期记忆（摘要信息）
-    # 注意：短期记忆使用继承的 messages 字段，无需单独定义 history
-    
-    # 添加一个标志，用于指示是否需要替换消息列表
-    replace_messages: bool = False
 
 
 # 知识库检索工具名称

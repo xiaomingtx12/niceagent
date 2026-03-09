@@ -5,7 +5,6 @@ from typing import Generator
 from uuid import UUID
 
 from injector import inject
-from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
@@ -17,7 +16,10 @@ from internal.core.language_model.entities.model_entity import ModelFeature
 from internal.core.memory import TokenBufferMemory
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.model import Account, Message
-from internal.schema.assistant_agent_schema import GetAssistantAgentMessagesWithPageReq
+from internal.schema.assistant_agent_schema import (
+    GetAssistantAgentMessagesWithPageReq,
+    AssistantAgentChat,
+)
 from internal.task.app_task import auto_create_app
 from internal.task.workflow_task import (
     auto_generate_workflow,
@@ -42,7 +44,7 @@ class AssistantAgentService(BaseService):
     embeddings_service: EmbeddingsService
     conversation_service: ConversationService
 
-    def chat(self, query, account: Account) -> Generator:
+    def chat(self, req: AssistantAgentChat, account: Account) -> Generator:
         """传递query与账号实现与辅助Agent进行会话"""
         from internal.lib.api_key_helper import get_api_key_for_provider
         from flask import current_app
@@ -68,7 +70,8 @@ class AssistantAgentService(BaseService):
             conversation_id=conversation.id,
             invoke_from=InvokeFrom.DEBUGGER,
             created_by=account.id,
-            query=query,
+            query=req.query.data,
+            image_urls=req.image_urls.data,
             status=MessageStatus.NORMAL,
         )
 
@@ -107,12 +110,13 @@ class AssistantAgentService(BaseService):
             ),
         )
 
-        # 8.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
-        all_messages = history + [HumanMessage(query)]
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": all_messages,
+                "messages": [
+                    llm.convert_to_human_message(req.query.data, req.image_urls.data)
+                ],
+                "history": history,
                 "long_term_memory": conversation.summary,
             }
         ):
@@ -244,11 +248,10 @@ class AssistantAgentService(BaseService):
 
         return create_app
 
-
     @classmethod
     def convert_workflow_generator_to_tool(cls, account: Account) -> BaseTool:
         """将工作流生成功能转换为LangChain工具"""
-        
+
         # 提前获取account_id字符串，避免在闭包中访问account对象
         account_id_str = str(account.id)
 
@@ -294,11 +297,9 @@ class AssistantAgentService(BaseService):
         return workflow_generator
 
     @classmethod
-    def convert_app_with_workflow_generator_to_tool(
-        cls, account: Account
-    ) -> BaseTool:
+    def convert_app_with_workflow_generator_to_tool(cls, account: Account) -> BaseTool:
         """将Agent应用+工作流生成功能转换为LangChain工具"""
-        
+
         # 提前获取account_id字符串，避免在闭包中访问account对象
         account_id_str = str(account.id)
 
@@ -314,12 +315,11 @@ class AssistantAgentService(BaseService):
                 description="需要生成的工作流的详细需求说明，包括功能、处理流程等"
             )
             auto_publish: bool = Field(
-                default=False, description="是否自动发布应用和工作流，默认为False（保存为草稿）"
+                default=False,
+                description="是否自动发布应用和工作流，默认为False（保存为草稿）",
             )
 
-        @tool(
-            "app_with_workflow_generator", args_schema=AppWithWorkflowGeneratorInput
-        )
+        @tool("app_with_workflow_generator", args_schema=AppWithWorkflowGeneratorInput)
         def app_with_workflow_generator(
             app_name: str,
             app_description: str,

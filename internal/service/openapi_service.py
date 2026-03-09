@@ -4,7 +4,6 @@ from typing import Generator
 
 from flask import current_app
 from injector import inject
-from langchain_core.messages import HumanMessage
 
 from internal.core.agent.agents import FunctionCallAgent, ReACTAgent
 from internal.core.agent.entities.agent_entity import AgentConfig
@@ -96,6 +95,7 @@ class OpenAPIService(BaseService):
                 "invoke_from": InvokeFrom.SERVICE_API,
                 "created_by": end_user.id,
                 "query": req.query.data,
+                "image_urls": req.image_urls.data,
                 "status": MessageStatus.NORMAL,
             },
         )
@@ -160,14 +160,19 @@ class OpenAPIService(BaseService):
                 review_config=app_config["review_config"],
             ),
         )
+        # 15.定义智能体状态基础数据
+        agent_state = {
+            "messages": [
+                llm.convert_to_human_message(req.query.data, req.image_urls.data)
+            ],
+            "history": history,
+            "long_term_memory": conversation.summary,
+        }
 
-        # 16.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
-        all_messages = history + [HumanMessage(req.query.data)]
-        
         # 17.根据stream类型差异执行不同的代码
         if req.stream.data is True:
             agent_thoughts_dict = {}
-            
+
             # 提前提取ID，避免在生成器中访问已分离的SQLAlchemy对象
             end_user_id = str(end_user.id)
             conversation_id = str(conversation.id)
@@ -175,12 +180,7 @@ class OpenAPIService(BaseService):
 
             def handle_stream() -> Generator:
                 """流式事件处理器，在Python只要在函数内部使用了yield关键字，那么这个函数的返回值类型肯定是生成器"""
-                for agent_thought in agent.stream(
-                    {
-                        "messages": all_messages,
-                        "long_term_memory": conversation.summary,
-                    }
-                ):
+                for agent_thought in agent.stream(agent_state):
                     # 提取thought以及answer
                     event_id = str(agent_thought.id)
 
@@ -242,12 +242,7 @@ class OpenAPIService(BaseService):
             return handle_stream()
 
         # 18.块内容输出（非流式调用）
-        agent_result = agent.invoke(
-            {
-                "messages": all_messages,
-                "long_term_memory": conversation.summary,
-            }
-        )
+        agent_result = agent.invoke(agent_state)
 
         # 19.将消息以及推理过程添加到数据库
         self.conversation_service.save_agent_thoughts(

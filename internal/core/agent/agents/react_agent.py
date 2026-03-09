@@ -21,7 +21,6 @@ from internal.core.agent.entities.agent_entity import (
 )
 from internal.core.agent.entities.queue_entity import QueueEvent, AgentThought
 from internal.core.language_model.entities.model_entity import ModelFeature
-from internal.core.language_model.utils.token_counter import TokenCounter
 from internal.exception import FailException
 from .function_call_agent import FunctionCallAgent
 
@@ -52,61 +51,54 @@ class ReACTAgent(FunctionCallAgent):
 
         # 3.检测是否支持AGENT_THOUGHT，如果不支持，则使用没有工具描述的prompt
         if ModelFeature.AGENT_THOUGHT not in self.llm.features:
-            system_message = SystemMessage(
-                AGENT_SYSTEM_PROMPT_TEMPLATE.format(
-                    preset_prompt=self.agent_config.preset_prompt,
-                    long_term_memory=long_term_memory,
+            preset_messages = [
+                SystemMessage(
+                    AGENT_SYSTEM_PROMPT_TEMPLATE.format(
+                        preset_prompt=self.agent_config.preset_prompt,
+                        long_term_memory=long_term_memory,
+                    )
                 )
-            )
+            ]
         else:
             # 4.支持智能体推理，则使用REACT_AGENT_SYSTEM_PROMPT_TEMPLATE并添加工具描述
-            system_message = SystemMessage(
-                REACT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(
-                    preset_prompt=self.agent_config.preset_prompt,
-                    long_term_memory=long_term_memory,
-                    tool_description=render_text_description_and_args(
-                        self.agent_config.tools
-                    ),
+            preset_messages = [
+                SystemMessage(
+                    REACT_AGENT_SYSTEM_PROMPT_TEMPLATE.format(
+                        preset_prompt=self.agent_config.preset_prompt,
+                        long_term_memory=long_term_memory,
+                        tool_description=render_text_description_and_args(
+                            self.agent_config.tools
+                        ),
+                    )
                 )
-            )
+            ]
 
-        # 5.获取当前消息列表
-        messages = state["messages"]
-        current_message = messages[-1]  # 当前用户消息
-        
-        # 6.提取历史对话消息（排除当前消息，只保留人类和AI的对话）
-        # 同时收集所有需要删除的旧消息ID
-        history_messages = []
-        messages_to_remove = []
-        
-        for msg in messages[:-1]:  # 排除当前消息
-            messages_to_remove.append(RemoveMessage(id=msg.id))  # 标记删除
-            if msg.type in ["human", "ai"]:
-                history_messages.append(msg)
-        
-        # 7.校验历史消息格式（应该是成对的：人类消息 -> AI消息）
-        if len(history_messages) > 0 and len(history_messages) % 2 != 0:
-            self.agent_queue_manager.publish_error(
-                state["task_id"], "智能体历史消息列表格式错误"
-            )
-            logging.exception(
-                f"智能体历史消息列表格式错误, len(history)={len(history_messages)}, history={json.dumps(messages_to_dict(history_messages), ensure_ascii=False)}"
-            )
-            raise FailException("智能体历史消息列表格式错误")
+        # 5.将短期历史消息添加到消息列表中
+        history = state["history"]
+        if isinstance(history, list) and len(history) > 0:
+            # 6.校验历史消息是不是复数形式，也就是[人类消息, AI消息, 人类消息, AI消息, ...]
+            if len(history) % 2 != 0:
+                self.agent_queue_manager.publish_error(
+                    state["task_id"], "智能体历史消息列表格式错误"
+                )
+                logging.exception(
+                    "智能体历史消息列表格式错误, len(history)=%(len_history)d, history=%(history)s",
+                    {
+                        "len_history": len(history),
+                        "history": json.dumps(messages_to_dict(history)),
+                    },
+                )
+                raise FailException("智能体历史消息列表格式错误")
+            # 7.拼接历史消息
+            preset_messages.extend(history)
 
-        # 8.构建新的消息列表：系统消息 -> 历史对话 -> 当前用户消息
-        new_messages = [system_message]
-        new_messages.extend(history_messages)
-        new_messages.append(HumanMessage(current_message.content))
+        # 8.拼接当前用户的提问消息
+        human_message = state["messages"][-1]
+        preset_messages.append(HumanMessage(human_message.content))
 
-        # 9.返回更新：先删除所有旧消息，再添加新消息
-        # 这确保了消息列表的顺序正确：系统消息始终在第一位
+        # 9.处理预设消息，将预设消息添加到用户消息前，先去删除用户的原始消息，然后补充一个新的代替
         return {
-            "messages": [
-                RemoveMessage(id=current_message.id),  # 删除当前消息
-                *messages_to_remove,  # 删除所有旧消息
-                *new_messages,  # 添加新消息列表
-            ],
+            "messages": [RemoveMessage(id=human_message.id), *preset_messages],
         }
 
     def _llm_node(self, state: AgentState) -> AgentState:
@@ -143,24 +135,6 @@ class ReACTAgent(FunctionCallAgent):
         id = uuid.uuid4()
         start_at = time.perf_counter()
         llm = self.llm
-        
-        # 3.1 确保系统消息在第一位（防御性编程）
-        messages = state["messages"]
-        system_msg = None
-        other_messages = []
-        
-        for msg in messages:
-            if msg.type == "system":
-                if system_msg is None:  # 只保留第一个系统消息
-                    system_msg = msg
-            else:
-                other_messages.append(msg)
-        
-        # 重新组织消息：系统消息在最前面
-        if system_msg:
-            ordered_messages = [system_msg] + other_messages
-        else:
-            ordered_messages = other_messages
 
         # 4.定义变量存储流式输出内容
         gathered = None
@@ -168,55 +142,65 @@ class ReACTAgent(FunctionCallAgent):
         accumulated_answer = ""  # 累积完整答案
 
         # 5.流式输出调用LLM，并判断输出内容是否以"```json"为开头，用于区分工具调用和文本生成
-        for chunk in llm.stream(ordered_messages):  # 使用重新排序的消息
+        for chunk in llm.stream(state["messages"]):
             # 6.处理流式输出内容块叠加
             if gathered is None:
                 gathered = chunk
             else:
                 gathered += chunk
 
-            # 7.检测生成的类型是工具调用还是文本生成
-            if not generation_type:
-                # 8.当生成内容的长度大于等于7(```json)长度时才可以判断出类型是什么
-                if len(gathered.content.strip()) >= 7:
-                    if gathered.content.strip().startswith("```json"):
-                        generation_type = "thought"
-                    else:
-                        generation_type = "message"
+                # 7.如果生成的是消息则提交智能体消息事件
+                if generation_type == "message":
+                    # 8.提取片段内容并校测是否开启输出审核
+                    review_config = self.agent_config.review_config
+                    content = chunk.content
+                    if (
+                        review_config["enable"]
+                        and review_config["outputs_config"]["enable"]
+                    ):
+                        for keyword in review_config["keywords"]:
+                            content = re.sub(
+                                re.escape(keyword), "**", content, flags=re.IGNORECASE
+                            )
 
-            # 9.如果生成的是消息则提交智能体消息事件
-            if generation_type == "message" and chunk.content:
-                # 10.提取片段内容并校测是否开启输出审核
-                review_config = self.agent_config.review_config
-                content = chunk.content
-                if (
-                    review_config["enable"]
-                    and review_config["outputs_config"]["enable"]
-                ):
-                    for keyword in review_config["keywords"]:
-                        content = re.sub(
-                            re.escape(keyword), "**", content, flags=re.IGNORECASE
-                        )
-                
-                # 累积答案内容
-                accumulated_answer += content
+                    self.agent_queue_manager.publish(
+                        state["task_id"],
+                        AgentThought(
+                            id=id,
+                            task_id=state["task_id"],
+                            event=QueueEvent.AGENT_MESSAGE,
+                            thought=content,
+                            message=messages_to_dict(state["messages"]),
+                            answer=content,
+                            latency=(time.perf_counter() - start_at),
+                        ),
+                    )
 
-                self.agent_queue_manager.publish(
-                    state["task_id"],
-                    AgentThought(
-                        id=id,
-                        task_id=state["task_id"],
-                        event=QueueEvent.AGENT_MESSAGE,
-                        thought=content,
-                        message=messages_to_dict(state["messages"]),
-                        answer=content,
-                        latency=(time.perf_counter() - start_at),
-                    ),
-                )
-        # 8.计算LLM的输入+输出token总数（使用精确计数）
-        model_name = TokenCounter.get_model_name_from_llm(self.llm)
-        input_token_count = TokenCounter.count_messages_tokens(state["messages"], model_name)
-        output_token_count = TokenCounter.count_messages_tokens([gathered], model_name)
+                # 9.检测生成的类型是工具调用还是文本生成，同时赋值
+                if not generation_type:
+                    # 10.当生成内容的长度大于等于7(```json)长度时才可以判断出类型是什么
+                    if len(gathered.content.strip()) >= 7:
+                        if gathered.content.strip().startswith("```json"):
+                            generation_type = "thought"
+                        else:
+                            generation_type = "message"
+                            # 11.添加发布事件，避免前几个字符遗漏
+                            self.agent_queue_manager.publish(
+                                state["task_id"],
+                                AgentThought(
+                                    id=id,
+                                    task_id=state["task_id"],
+                                    event=QueueEvent.AGENT_MESSAGE,
+                                    thought=gathered.content,
+                                    message=messages_to_dict(state["messages"]),
+                                    answer=gathered.content,
+                                    latency=(time.perf_counter() - start_at),
+                                ),
+                            )
+
+        # 8.计算LLM的输入+输出token总数
+        input_token_count = self.llm.get_num_tokens_from_messages(state["messages"])
+        output_token_count = self.llm.get_num_tokens_from_messages([gathered])
 
         # 9.获取输入/输出价格和单位
         input_price, output_price, unit = self.llm.get_pricing()
@@ -272,7 +256,7 @@ class ReACTAgent(FunctionCallAgent):
             except Exception as _:
                 generation_type = "message"
                 # 解析失败，使用完整内容作为答案
-                accumulated_answer = gathered.content
+                # accumulated_answer = gathered.content
                 self.agent_queue_manager.publish(
                     state["task_id"],
                     AgentThought(
@@ -286,7 +270,7 @@ class ReACTAgent(FunctionCallAgent):
                     ),
                 )
 
-        # 14.如果最终类型是message则表示已经拿到最终答案
+        # 14.如果最终类型是message则表示已经拿到最终答案，则推送一条空内容并展示统计数据，同时停止监听
         # 发送最终的统计信息（包含完整答案）
         if generation_type == "message":
             self.agent_queue_manager.publish(
@@ -302,7 +286,7 @@ class ReACTAgent(FunctionCallAgent):
                     message_unit_price=input_price,
                     message_price_unit=unit,
                     # 答案相关字段（包含完整答案）
-                    answer=accumulated_answer,
+                    answer="",
                     answer_token_count=output_token_count,
                     answer_unit_price=output_price,
                     answer_price_unit=unit,

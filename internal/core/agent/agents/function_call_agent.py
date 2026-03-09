@@ -23,10 +23,11 @@ from internal.core.agent.entities.agent_entity import (
     MAX_ITERATION_RESPONSE,
     DATASET_RETRIEVAL_TOOL_NAME,
 )
-from internal.core.language_model.utils.token_counter import TokenCounter
 from internal.exception import FailException
 from .base_agent import BaseAgent
 from ..entities.queue_entity import AgentThought, QueueEvent
+from ...language_model.entities.model_entity import ModelFeature
+from ...language_model.utils.token_counter import TokenCounter
 
 
 class FunctionCallAgent(BaseAgent):
@@ -96,14 +97,7 @@ class FunctionCallAgent(BaseAgent):
         return {"messages": []}
 
     def _long_term_memory_recall_node(self, state: AgentState) -> AgentState:
-        """长期记忆召回节点（LangChain 1.0 版本）
-
-        处理流程：
-        1. 获取长期记忆并发布事件
-        2. 构建系统消息（包含预设提示和长期记忆）
-        3. 检查并处理现有消息历史
-        4. 使用 RemoveMessage 删除旧消息，确保消息顺序正确
-        """
+        """长期记忆召回节点"""
         # 1.根据传递的智能体配置判断是否需要召回长期记忆
         long_term_memory = ""
         if self.agent_config.enable_long_term_memory:
@@ -119,62 +113,42 @@ class FunctionCallAgent(BaseAgent):
                     ),
                 )
 
-        # 2.构建系统消息，包含预设提示和长期记忆
-        system_message = SystemMessage(
-            AGENT_SYSTEM_PROMPT_TEMPLATE.format(
-                preset_prompt=self.agent_config.preset_prompt,
-                long_term_memory=long_term_memory,
+        # 2.构建预设消息列表，并将preset_prompt+long_term_memory填充到系统消息中
+        preset_messages = [
+            SystemMessage(
+                AGENT_SYSTEM_PROMPT_TEMPLATE.format(
+                    preset_prompt=self.agent_config.preset_prompt,
+                    long_term_memory=long_term_memory,
+                )
             )
-        )
+        ]
 
-        # 3.获取当前消息列表
-        messages = state["messages"]
-        current_message = messages[-1]  # 当前用户消息
+        # 3.将短期历史消息添加到消息列表中
+        history = state["history"]
+        if isinstance(history, list) and len(history) > 0:
+            # 4.校验历史消息是不是复数形式，也就是[人类消息, AI消息, 人类消息, AI消息, ...]
+            if len(history) % 2 != 0:
+                self.agent_queue_manager.publish_error(
+                    state["task_id"], "智能体历史消息列表格式错误"
+                )
+                logging.exception(
+                    "智能体历史消息列表格式错误, len(history)=%(len_history)d, history=%(history)s",
+                    {
+                        "len_history": len(history),
+                        "history": json.dumps(messages_to_dict(history)),
+                    },
+                )
+                raise FailException("智能体历史消息列表格式错误")
+            # 5.拼接历史消息
+            preset_messages.extend(history)
 
-        # 调试：打印当前消息列表的类型
-        logging.info(
-            f"[DEBUG] _long_term_memory_recall_node 接收到的消息类型: {[msg.type for msg in messages]}"
-        )
-        logging.info(f"[DEBUG] _long_term_memory_recall_node 消息数量: {len(messages)}")
+            # 6.拼接当前用户的提问信息
+        human_message = state["messages"][-1]
+        preset_messages.append(HumanMessage(human_message.content))
 
-        # 4.提取历史对话消息（排除当前消息，只保留人类和AI的对话）
-        # 同时收集所有需要删除的旧消息ID
-        history_messages = []
-        messages_to_remove = []
-
-        for msg in messages[:-1]:  # 排除当前消息
-            messages_to_remove.append(RemoveMessage(id=msg.id))  # 标记删除
-            if msg.type in ["human", "ai"]:
-                history_messages.append(msg)
-
-        # 5.校验历史消息格式（应该是成对的：人类消息 -> AI消息）
-        if len(history_messages) > 0 and len(history_messages) % 2 != 0:
-            self.agent_queue_manager.publish_error(
-                state["task_id"], "智能体历史消息列表格式错误"
-            )
-            logging.exception(
-                f"智能体历史消息列表格式错误, len(history)={len(history_messages)}, history={json.dumps(messages_to_dict(history_messages), ensure_ascii=False)}"
-            )
-            raise FailException("智能体历史消息列表格式错误")
-
-        # 6.构建新的消息列表：系统消息 -> 历史对话 -> 当前用户消息
-        new_messages = [system_message]
-        new_messages.extend(history_messages)
-        new_messages.append(HumanMessage(current_message.content))
-
-        # 调试：打印构建的新消息列表顺序
-        logging.info(
-            f"[DEBUG] 构建的新消息列表顺序: {[msg.type for msg in new_messages]}"
-        )
-
-        # 7.返回更新：先删除所有旧消息，再添加新消息
-        # 这确保了消息列表的顺序正确：系统消息始终在第一位
+        # 7.处理预设消息，将预设消息添加到用户消息前，先去删除用户的原始消息，然后补充一个新的代替
         return {
-            "messages": [
-                RemoveMessage(id=current_message.id),  # 删除当前消息
-                *messages_to_remove,  # 删除所有旧消息
-                *new_messages,  # 添加新消息列表
-            ],
+            "messages": [RemoveMessage(id=human_message.id), *preset_messages],
         }
 
     def _llm_node(self, state: AgentState) -> AgentState:
@@ -208,39 +182,10 @@ class FunctionCallAgent(BaseAgent):
         start_at = time.perf_counter()
         llm = self.llm
 
-        # 调试：打印 _llm_node 接收到的消息顺序
-        # logging.info(f"[DEBUG] _llm_node 接收到的消息顺序: {[msg.type for msg in state['messages']]}")
-        # logging.info(f"[DEBUG] _llm_node 消息数量: {len(state['messages'])}")
-        if state["messages"]:
-            logging.info(
-                f"[DEBUG] _llm_node 第一条消息类型: {state['messages'][0].type}"
-            )
-
-        # 3.确保系统消息在第一位（防御性编程）
-        messages = state["messages"]
-        system_msg = None
-        other_messages = []
-
-        for msg in messages:
-            if msg.type == "system":
-                if system_msg is None:  # 只保留第一个系统消息
-                    system_msg = msg
-            else:
-                other_messages.append(msg)
-
-        # 重新组织消息：系统消息在最前面
-        if system_msg:
-            ordered_messages = [system_msg] + other_messages
-        else:
-            ordered_messages = other_messages
-
-        logging.info(
-            f"[DEBUG] _llm_node 重新排序后的消息顺序: {[msg.type for msg in ordered_messages]}"
-        )
-
         # 3.检测大语言模型实例是否有bind_tools方法，如果没有则不绑定，如果有还需要检测tools是否为空，不为空则绑定
         if (
-            hasattr(llm, "bind_tools")
+            ModelFeature.TOOL_CALL in llm.features
+            and hasattr(llm, "bind_tools")
             and callable(getattr(llm, "bind_tools"))
             and len(self.agent_config.tools) > 0
         ):
@@ -254,16 +199,15 @@ class FunctionCallAgent(BaseAgent):
         # 4.流式调用LLM输出对应内容
         gathered = None
         generation_type = ""
-        accumulated_answer = ""  # 累积完整答案
 
         try:
-            for chunk in llm.stream(ordered_messages):  # 使用重新排序的消息
+            for chunk in llm.stream(state["messages"]):
                 # 累积完整响应
                 if gathered is None:
                     gathered = chunk
                 else:
                     gathered += chunk
-                
+
                 # 5.检测生成类型是工具参数还是文本生成（只需判断一次）
                 if not generation_type:
                     if chunk.tool_calls:
@@ -287,9 +231,6 @@ class FunctionCallAgent(BaseAgent):
                                 content,
                                 flags=re.IGNORECASE,
                             )
-
-                    # 累积答案内容
-                    accumulated_answer += content
 
                     self.agent_queue_manager.publish(
                         state["task_id"],

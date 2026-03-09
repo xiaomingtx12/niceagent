@@ -9,7 +9,6 @@ from uuid import UUID
 import requests
 from flask import current_app
 from injector import inject
-from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel
@@ -53,6 +52,7 @@ from internal.schema.app_schema import (
     GetPublishHistoriesWithPageReq,
     GetAppsWithPageReq,
     GetDebugConversationMessagesWithPageReq,
+    DebugChatReq,
 )
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
@@ -552,7 +552,9 @@ class AppService(BaseService):
 
         return app
 
-    def debug_chat(self, app_id: UUID, query: str, image_urls: list, account: Account) -> Generator:
+    def debug_chat(
+        self, app_id: UUID, req: DebugChatReq, account: Account
+    ) -> Generator:
         """根据传递的应用id+提问query向特定的应用发起会话调试"""
         # 1.获取应用信息并校验权限
         app = self.get_app(app_id, account)
@@ -570,8 +572,8 @@ class AppService(BaseService):
             conversation_id=debug_conversation.id,
             invoke_from=InvokeFrom.DEBUGGER,
             created_by=account.id,
-            query=query,
-            image_urls=image_urls if image_urls else [],
+            query=req.query.data,
+            image_urls=req.image_urls.data,
             status=MessageStatus.NORMAL,
         )
 
@@ -635,12 +637,14 @@ class AppService(BaseService):
                 review_config=draft_app_config["review_config"],
             ),
         )
-        # 12.将历史消息和当前消息合并（适配AgentState移除history字段的更新）
-        all_messages = history + [llm.convert_to_human_message(query, image_urls)]
+
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": all_messages,
+                "messages": [
+                    llm.convert_to_human_message(req.query.data, req.image_urls.data)
+                ],
+                "history": history,
                 "long_term_memory": debug_conversation.summary,
             }
         ):
