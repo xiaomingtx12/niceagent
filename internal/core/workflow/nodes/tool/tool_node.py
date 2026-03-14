@@ -12,7 +12,7 @@ from internal.core.workflow.entities.workflow_entity import WorkflowState
 from internal.core.workflow.nodes import BaseNode
 from internal.core.workflow.utils.helper import extract_variables_from_state
 from internal.exception import FailException, NotFoundException
-from internal.model import ApiTool
+from internal.model import ApiTool, MCPServer, MCPTool
 from .tool_entity import ToolNodeData
 
 
@@ -46,7 +46,7 @@ class ToolNode(BaseNode):
                 raise NotFoundException("该内置插件扩展不存在，请核实后重试")
 
             self._tool = _tool(**self.node_data.params)
-        else:
+        elif self.node_data.tool_type == "api_tool":
             # 5.API插件，调用数据库查询记录并创建API插件
             from pkg.sqlalchemy import SQLAlchemy
 
@@ -81,6 +81,41 @@ class ToolNode(BaseNode):
                     parameters=api_tool.parameters,
                 )
             )
+        elif self.node_data.tool_type == "mcp_tool":
+            from pkg.sqlalchemy import SQLAlchemy
+
+            db = injector.get(SQLAlchemy)
+
+            mcp_server = (
+                db.session.query(MCPServer)
+                .filter(
+                    MCPServer.id == self.node_data.provider_id,
+                    MCPServer.enabled.is_(True),
+                )
+                .one_or_none()
+            )
+            if not mcp_server:
+                raise NotFoundException("该 MCP 服务不存在或已禁用，请核实后重试")
+
+            mcp_tool = (
+                db.session.query(MCPTool)
+                .filter(
+                    MCPTool.server_id == mcp_server.id,
+                    MCPTool.name == self.node_data.tool_id,
+                )
+                .one_or_none()
+            )
+            if not mcp_tool:
+                raise NotFoundException("该 MCP 扩展插件不存在，请核实后重试")
+
+            from internal.core.mcp import MCPRuntimeManager
+
+            mcp_runtime_manager = injector.get(MCPRuntimeManager)
+            self._tool = mcp_runtime_manager.get_langchain_tool(
+                mcp_server, self.node_data.tool_id
+            )
+        else:
+            raise ValidateErrorException("扩展插件类型不支持，请核实后重试")
 
     def invoke(
         self, state: WorkflowState, config: Optional[RunnableConfig] = None

@@ -22,6 +22,7 @@ from .jieba_service import JiebaService
 from .jwt_service import JwtService
 from .keyword_table_service import KeywordTableService
 from .language_model_service import LanguageModelService
+from .mcp_service import MCPService
 from .oauth_service import OAuthService
 from .openapi_service import OpenAPIService
 from .platform_service import PlatformService
@@ -66,6 +67,7 @@ __all__ = [
     "AssistantAgentService",
     "FaissService",
     "LanguageModelService",
+    "MCPService",
     "AnalysisService",
     "WebAppService",
     "AudioService",

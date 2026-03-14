@@ -37,7 +37,15 @@ from internal.exception import (
     FailException,
 )
 from internal.lib.helper import convert_model_to_dict
-from internal.model import Account, Workflow, Dataset, ApiTool, WorkflowResult
+from internal.model import (
+    Account,
+    Workflow,
+    Dataset,
+    ApiTool,
+    MCPServer,
+    MCPTool,
+    WorkflowResult,
+)
 from internal.schema.workflow_schema import CreateWorkflowReq, GetWorkflowsWithPageReq
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
@@ -305,9 +313,42 @@ class WorkflowService(BaseService):
                             "params": {},
                         },
                     }
+                elif node.get("tool_type") == "mcp_tool":
+                    tool_record = (
+                        self.db.session.query(MCPTool, MCPServer)
+                        .join(MCPServer, MCPTool.server_id == MCPServer.id)
+                        .filter(
+                            MCPTool.name == node.get("tool_id"),
+                            MCPServer.id == node.get("provider_id"),
+                            MCPTool.account_id == account.id,
+                            MCPServer.account_id == account.id,
+                        )
+                        .one_or_none()
+                    )
+                    if not tool_record:
+                        continue
+
+                    mcp_tool, server = tool_record
+                    node["meta"] = {
+                        "type": "mcp_tool",
+                        "provider": {
+                            "id": str(server.id),
+                            "name": server.name,
+                            "label": server.name,
+                            "icon": server.icon,
+                            "description": server.description,
+                        },
+                        "tool": {
+                            "id": str(mcp_tool.id),
+                            "name": mcp_tool.name,
+                            "label": mcp_tool.name,
+                            "description": mcp_tool.description,
+                            "params": {},
+                        },
+                    }
                 else:
                     node["meta"] = {
-                        "type": "api_tool",
+                        "type": "",
                         "provider": {
                             "id": "",
                             "name": "",

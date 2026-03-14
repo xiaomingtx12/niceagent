@@ -22,6 +22,7 @@ from internal.handler import (
     WorkflowHandler,
     AssistantAgentHandler,
     LanguageModelHandler,
+    MCPHandler,
     AnalysisHandler,
     WebAppHandler,
     ConversationHandler,
@@ -55,6 +56,7 @@ class Router:
     workflow_handler: WorkflowHandler
     assistant_agent_handler: AssistantAgentHandler
     language_model_handler: LanguageModelHandler
+    mcp_handler: MCPHandler
     analysis_handler: AnalysisHandler
     web_app_handler: WebAppHandler
     conversation_handler: ConversationHandler
@@ -211,6 +213,43 @@ class Router:
             "/api-tools/<uuid:provider_id>/delete",
             methods=["POST"],
             view_func=self.api_tool_handler.delete_api_tool_provider,
+        )
+        bp.add_url_rule(
+            "/mcp-servers",
+            view_func=self.mcp_handler.get_mcp_servers_with_page,
+        )
+        bp.add_url_rule(
+            "/mcp-servers",
+            methods=["POST"],
+            view_func=self.mcp_handler.create_mcp_server,
+        )
+        bp.add_url_rule(
+            "/mcp-servers/<uuid:provider_id>",
+            view_func=self.mcp_handler.get_mcp_server,
+        )
+        bp.add_url_rule(
+            "/mcp-servers/<uuid:provider_id>",
+            methods=["POST"],
+            view_func=self.mcp_handler.update_mcp_server,
+        )
+        bp.add_url_rule(
+            "/mcp-servers/<uuid:provider_id>/refresh",
+            methods=["POST"],
+            view_func=self.mcp_handler.refresh_mcp_server,
+        )
+        bp.add_url_rule(
+            "/mcp-servers/<uuid:provider_id>/tools/<string:tool_name>",
+            view_func=self.mcp_handler.get_mcp_tool,
+        )
+        bp.add_url_rule(
+            "/mcp-servers/<uuid:provider_id>/tools/<string:tool_name>/debug",
+            methods=["POST"],
+            view_func=self.mcp_handler.debug_mcp_tool,
+        )
+        bp.add_url_rule(
+            "/mcp-servers/<uuid:provider_id>/delete",
+            methods=["POST"],
+            view_func=self.mcp_handler.delete_mcp_server,
         )
         # 5.上传文件模块
         bp.add_url_rule(

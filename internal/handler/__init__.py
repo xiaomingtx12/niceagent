@@ -14,6 +14,7 @@ from .conversation_handler import ConversationHandler
 from .dataset_handler import DatasetHandler
 from .document_handler import DocumentHandler
 from .language_model_handler import LanguageModelHandler
+from .mcp_handler import MCPHandler
 from .oauth_handler import OAuthHandler
 from .openapi_handler import OpenAPIHandler
 from .platform_handler import PlatformHandler
@@ -44,6 +45,7 @@ __all__ = [
     "AssistantAgentHandler",
     "AssistantAgentHandler",
     "LanguageModelHandler",
+    "MCPHandler",
     "AnalysisHandler",
     "WebAppHandler",
     "AudioHandler",

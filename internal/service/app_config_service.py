@@ -9,11 +9,14 @@ from langchain_core.tools import BaseTool
 from internal.core.tools.api_tools.entities import ToolEntity
 from internal.core.tools.api_tools.providers import ApiProviderManager
 from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
+from internal.core.mcp import MCPRuntimeManager
 from internal.core.workflow import Workflow as WorkflowTool
 from internal.lib.helper import datetime_to_timestamp, get_value_type
 from internal.model import (
     App,
     ApiTool,
+    MCPServer,
+    MCPTool,
     Dataset,
     AppConfig,
     AppConfigVersion,
@@ -38,6 +41,7 @@ class AppConfigService(BaseService):
     api_provider_manager: ApiProviderManager
     builtin_provider_manager: BuiltinProviderManager
     language_model_manager: LanguageModelManager
+    mcp_runtime_manager: MCPRuntimeManager
 
     def get_draft_app_config(self, app: App) -> dict[str, Any]:
         """根据传递的应用获取该应用的草稿配置"""
@@ -151,6 +155,18 @@ class AppConfigService(BaseService):
                 if not builtin_tool:
                     continue
                 tools.append(builtin_tool(**tool["tool"]["params"]))
+            elif tool["type"] == "mcp_tool":
+                server = self.get(MCPServer, tool["provider"]["id"])
+                if not server or not server.enabled:
+                    continue
+                try:
+                    tools.append(
+                        self.mcp_runtime_manager.get_langchain_tool(
+                            server, tool["tool"]["name"]
+                        )
+                    )
+                except Exception:
+                    continue
             else:
                 # 4.API工具，首先根据id找到ApiTool记录，然后创建示例
                 api_tool = self.get(ApiTool, tool["tool"]["id"])
@@ -318,6 +334,42 @@ class AppConfigService(BaseService):
                             "label": provider.name,
                             "icon": provider.icon,
                             "description": provider.description,
+                        },
+                        "tool": {
+                            "id": str(tool_record.id),
+                            "name": tool_record.name,
+                            "label": tool_record.name,
+                            "description": tool_record.description,
+                            "params": {},
+                        },
+                    }
+                )
+            elif tool["type"] == "mcp_tool":
+                server = self.get(MCPServer, tool["provider_id"])
+                if not server or not server.enabled:
+                    continue
+
+                tool_record = (
+                    self.db.session.query(MCPTool)
+                    .filter(
+                        MCPTool.server_id == server.id,
+                        MCPTool.name == tool["tool_id"],
+                    )
+                    .one_or_none()
+                )
+                if not tool_record:
+                    continue
+
+                validate_tools.append({**tool, "params": {}})
+                tools.append(
+                    {
+                        "type": "mcp_tool",
+                        "provider": {
+                            "id": str(server.id),
+                            "name": server.name,
+                            "label": server.name,
+                            "icon": "",
+                            "description": server.description,
                         },
                         "tool": {
                             "id": str(tool_record.id),

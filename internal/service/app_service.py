@@ -41,6 +41,8 @@ from internal.model import (
     App,
     Account,
     ApiTool,
+    MCPServer,
+    MCPTool,
     Dataset,
     Conversation,
     Message,
@@ -924,8 +926,8 @@ class AppService(BaseService):
                 # 6.5 校验工具的参数是不是type、provider_id、tool_id、params
                 if set(tool.keys()) != {"type", "provider_id", "tool_id", "params"}:
                     raise ValidateErrorException("绑定插件工具参数出错")
-                # 6.6 校验type类型是否为builtin_tool以及api_tool
-                if tool["type"] not in ["builtin_tool", "api_tool"]:
+                # 6.6 校验 type 类型是否为 builtin_tool/api_tool/mcp_tool
+                if tool["type"] not in ["builtin_tool", "api_tool", "mcp_tool"]:
                     raise ValidateErrorException("绑定插件工具参数出错")
                 # 6.7 校验provider_id和tool_id
                 if (
@@ -938,14 +940,14 @@ class AppService(BaseService):
                 # 6.8 校验params参数，类型为字典
                 if not isinstance(tool["params"], dict):
                     raise ValidateErrorException("插件自定义参数格式错误")
-                # 6.9 校验对应的工具是否存在，而且需要划分成builtin_tool和api_tool
+                # 6.9 校验对应的工具是否存在
                 if tool["type"] == "builtin_tool":
                     builtin_tool = self.builtin_provider_manager.get_tool(
                         tool["provider_id"], tool["tool_id"]
                     )
                     if not builtin_tool:
                         continue
-                else:
+                elif tool["type"] == "api_tool":
                     api_tool = (
                         self.db.session.query(ApiTool)
                         .filter(
@@ -956,6 +958,25 @@ class AppService(BaseService):
                         .one_or_none()
                     )
                     if not api_tool:
+                        continue
+                else:
+                    mcp_server = self.get(MCPServer, tool["provider_id"])
+                    if (
+                        not mcp_server
+                        or mcp_server.account_id != account.id
+                        or not mcp_server.enabled
+                    ):
+                        continue
+                    mcp_tool = (
+                        self.db.session.query(MCPTool)
+                        .filter(
+                            MCPTool.server_id == mcp_server.id,
+                            MCPTool.name == tool["tool_id"],
+                            MCPTool.account_id == account.id,
+                        )
+                        .one_or_none()
+                    )
+                    if not mcp_tool:
                         continue
 
                 validate_tools.append(tool)
