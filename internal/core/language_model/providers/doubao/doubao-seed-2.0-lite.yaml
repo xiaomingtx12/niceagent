@@ -24,3 +24,8 @@ parameters:
     use_template: max_tokens
     default: 4096
     max: 16384
+metadata:
+  pricing:
+    input: 0.10
+    output: 0.50
+    unit: 0.000001
