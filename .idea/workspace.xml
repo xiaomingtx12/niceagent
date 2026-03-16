@@ -6,18 +6,8 @@
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/mcp/entities/mcp_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/mcp/entities/mcp_entity.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_node.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/migration/versions/6837222596d1_.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_config_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/workflow_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/workflow_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements.txt" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交">
       <change afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
@@ -164,7 +154,7 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Shell Script.db upgrade">
+  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
     <configuration name="deploy_scf_function" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -334,15 +324,15 @@
       <method v="2" />
     </configuration>
     <list>
+      <item itemvalue="Python.mcp_demo_server" />
       <item itemvalue="Python.deploy_scf_function" />
       <item itemvalue="Python.import_to_faiss" />
-      <item itemvalue="Python.mcp_demo_server" />
       <item itemvalue="Python.test" />
+      <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
       <item itemvalue="Shell Script.celery" />
       <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.db upgrade" />
       <item itemvalue="Shell Script.pipreqs" />
-      <item itemvalue="Python 测试.scripts.test_scf_executor.test_basic_execution 的 Python 测试" />
       <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
     </list>
     <recent_temporary>
@@ -442,6 +432,9 @@
       <workItem from="1773226695805" duration="4320000" />
       <workItem from="1773302584280" duration="5492000" />
       <workItem from="1773466676753" duration="9073000" />
+      <workItem from="1773479909138" duration="687000" />
+      <workItem from="1773566141433" duration="4935000" />
+      <workItem from="1773643165488" duration="6500000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -763,7 +756,15 @@
       <option name="project" value="LOCAL" />
       <updated>1773466763804</updated>
     </task>
-    <option name="localTasksCounter" value="41" />
+    <task id="LOCAL-00041" summary="feat(mcp): 集成并支持 MCP 插件系统&#10;&#10;- 删除无用的 system_model_config 数据库表&#10;- 引入 MCPHandler 并添加至处理器集合&#10;- 扩充模型模块，加入 MCPServer 和 MCPTool 类&#10;- 支持 schema 模块中 DictField 导入&#10;- 实现 MCPService 服务，并加入服务集合&#10;- app_config_service 中集成 MCPRuntimeManager 的工具获取&#10;- 扩展 app_service，支持 MCP 工具参数校验与查询&#10;- 注册 MCPHandler 的路由接口，支持 MCP 服务及工具相关操作&#10;- workflow_service 支持 MCP 工具类型的流程节点元数据填充&#10;- workflow_nodes 中支持 MCP 工具节点的创建及调用逻辑&#10;- 添加依赖 langchain-mcp-adapters 和 mcp，更新requirements.txt&#10;- 更新运行配置，添加 mcp_demo_server 调试环境&#10;- 优化项目配置和排除文件，提升开发体验">
+      <option name="closed" value="true" />
+      <created>1773479964016</created>
+      <option name="number" value="00041" />
+      <option name="presentableId" value="LOCAL-00041" />
+      <option name="project" value="LOCAL" />
+      <updated>1773479964016</updated>
+    </task>
+    <option name="localTasksCounter" value="42" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -781,7 +782,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(core): 添加语音及会话处理功能，完善Agent推理统计&#10;&#10;- 新增AudioHandler及AudioService，支持语音转文本和消息转流式语音&#10;- 新增ConversationHandler及ConversationService，实现会话消息分页查询、修改和删除功能&#10;- Core Agent中BaseAgent完善invoke方法，实现流式智能体事件处理聚合&#10;- FunctionCallAgent增强智能体推理事件记录，添加token计数及费用统计字段&#10;- ConversationService优化智能体推理消息存储，异步更新会话摘要与名称&#10;- 修正AgentQueueManager中停止标识相关方法命名及调用&#10;- App模型新增只读属性app_dataset_joins，方便获取知识库关联记录&#10;- 更新相关模块导入，完善Wechat及Platform相关handler、service和model导出" />
     <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，&#10;  使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式" />
     <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式&#10;- internal/core/tools/builtin_tools/providers/searx新增Searx搜索工具及相关配置和图标文件&#10;- 优化权限验证比较方式，统一移除多处id对比时的不必要str转换&#10;- internal/extension/logging_extension.py针对Windows平台改用RotatingFileHandler避免文件锁定问题&#10;- internal/schema/openapi_schema.py扩展OpenAPIChatReq校验图片URL数量及格式的功能，支持多图上传&#10;- internal/service/openapi_service.py重构openapi聊天服务，调整agent实例化逻辑，支持多agent类型及去除异步线程保存改为同步&#10;- internal/service/conversation_service.py、internal/service/api_tool_service.py、internal/service/dataset_service.py等多处服务内权限验证逻辑精简&#10;- internal/service/document_service.py和segment_service.py统一权限判断逻辑，修正账户ID比较方式&#10;- internal/core/agent/agents/base_agent.py优化invoke函数格式及线程创建方式改善代码风格&#10;- internal/service/app_service.py中auto_create_app方法替换默认llm模型，使用tongyi的Chat及新增环境变量支持&#10;- internal/core/model/app.py新增App模型属性wechat_config，实现微信发布配置状态自动管理及同步&#10;- 调整agent停止相关调用方法名称，修正AgentQueueManager的stop标识相关调用&#10;- 移除部分冗余注释及改进注释说明，以增强代码可读性和维护性" />
     <MESSAGE value="feat(nltk_data): 添加多语言缩略词类型词典文件&#10;&#10;- 新增捷克语缩略词类型文件，包含118条缩略词&#10;- 新增丹麦语缩略词类型文件，包含211条缩略词&#10;- 新增荷兰语缩略词类型文件，包含99条缩略词&#10;- 新增英语缩略词类型文件，包含156条缩略词&#10;- 新增爱沙尼亚语缩略词类型文件，包含48条缩略词&#10;- 新增芬兰语缩略词类型文件，包含81条缩略词&#10;- 新增法语缩略词类型文件，包含61条缩略词&#10;- 新增德语缩略词类型文件，包含71条缩略词&#10;- 新增希腊语缩略词类型文件，包含100条缩略词&#10;- 新增意大利语缩略词类型文件，包含125条缩略词&#10;- 新增挪威语缩略词类型文件，包含106条缩略词&#10;- 新增波兰语缩略词类型文件，包含225条缩略词&#10;- 新增葡萄牙语缩略词类型文件，包含72条缩略词&#10;- 新增俄语缩略词类型文件，包含1989条缩略词" />
@@ -806,7 +806,8 @@
     <MESSAGE value="fix(schema): 修正ApiTool时间戳序列化问题并调整依赖版本&#10;&#10;- 引入datetime_to_timestamp辅助函数处理时间字段转换&#10;- 增加ApiToolSchema中updated_at字段支持，确保更新时间正确序列化&#10;- 修改序列化逻辑，统一使用datetime_to_timestamp转换created_at和updated_at字段&#10;- 降级redis库版本至5.0.1以兼容现有环境依赖" />
     <MESSAGE value="fix(core): 统一文件扩展名处理及修正文件类型匹配&#10;&#10;- cos_service中增强上传文件扩展名处理，使用小写统一判断和存储&#10;- 修正file_extractor中PPT扩展名判断，确保识别.ppt和.pptx两种格式&#10;- requirements.txt 重新整理依赖，按功能分类并添加缺失的包&#10;- upload_file_entity增加ppt、pptx、xml文件扩展名支持" />
     <MESSAGE value="fix(agent): 调整智能体历史消息处理与会话请求结构&#10;&#10;- 从 AgentState 中移除 messages 字段，改用独立的 history 字段存储短期记忆&#10;- 调整 debug_chat 和辅助 Agent 会话接口，统一传递请求对象参数&#10;- 新增 image_urls 校验，限制上传图片数量及格式&#10;- 优化 FunctionCallAgent 和 ReACTAgent 处理历史消息逻辑，确保历史消息成对校验&#10;- 调整智能体消息流处理，改用 state 中的 history 字段支持历史消息拼接&#10;- 移除消息列表中多余的删除和重排序逻辑，简化消息顺序处理&#10;- 修正流式输出中生成内容类型判断和消息事件发布逻辑&#10;- 统一 Agent 调用处消息结构，支持图片参数传递及历史消息维护" />
-    <option name="LAST_COMMIT_MESSAGE" value="fix(agent): 调整智能体历史消息处理与会话请求结构&#10;&#10;- 从 AgentState 中移除 messages 字段，改用独立的 history 字段存储短期记忆&#10;- 调整 debug_chat 和辅助 Agent 会话接口，统一传递请求对象参数&#10;- 新增 image_urls 校验，限制上传图片数量及格式&#10;- 优化 FunctionCallAgent 和 ReACTAgent 处理历史消息逻辑，确保历史消息成对校验&#10;- 调整智能体消息流处理，改用 state 中的 history 字段支持历史消息拼接&#10;- 移除消息列表中多余的删除和重排序逻辑，简化消息顺序处理&#10;- 修正流式输出中生成内容类型判断和消息事件发布逻辑&#10;- 统一 Agent 调用处消息结构，支持图片参数传递及历史消息维护" />
+    <MESSAGE value="feat(mcp): 集成并支持 MCP 插件系统&#10;&#10;- 删除无用的 system_model_config 数据库表&#10;- 引入 MCPHandler 并添加至处理器集合&#10;- 扩充模型模块，加入 MCPServer 和 MCPTool 类&#10;- 支持 schema 模块中 DictField 导入&#10;- 实现 MCPService 服务，并加入服务集合&#10;- app_config_service 中集成 MCPRuntimeManager 的工具获取&#10;- 扩展 app_service，支持 MCP 工具参数校验与查询&#10;- 注册 MCPHandler 的路由接口，支持 MCP 服务及工具相关操作&#10;- workflow_service 支持 MCP 工具类型的流程节点元数据填充&#10;- workflow_nodes 中支持 MCP 工具节点的创建及调用逻辑&#10;- 添加依赖 langchain-mcp-adapters 和 mcp，更新requirements.txt&#10;- 更新运行配置，添加 mcp_demo_server 调试环境&#10;- 优化项目配置和排除文件，提升开发体验" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat(mcp): 集成并支持 MCP 插件系统&#10;&#10;- 删除无用的 system_model_config 数据库表&#10;- 引入 MCPHandler 并添加至处理器集合&#10;- 扩充模型模块，加入 MCPServer 和 MCPTool 类&#10;- 支持 schema 模块中 DictField 导入&#10;- 实现 MCPService 服务，并加入服务集合&#10;- app_config_service 中集成 MCPRuntimeManager 的工具获取&#10;- 扩展 app_service，支持 MCP 工具参数校验与查询&#10;- 注册 MCPHandler 的路由接口，支持 MCP 服务及工具相关操作&#10;- workflow_service 支持 MCP 工具类型的流程节点元数据填充&#10;- workflow_nodes 中支持 MCP 工具节点的创建及调用逻辑&#10;- 添加依赖 langchain-mcp-adapters 和 mcp，更新requirements.txt&#10;- 更新运行配置，添加 mcp_demo_server 调试环境&#10;- 优化项目配置和排除文件，提升开发体验" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -825,7 +826,7 @@
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$mcp_demo_server.coverage" NAME="mcp_demo_server 覆盖结果" MODIFIED="1773473881642" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$check_checkpoint_data.coverage" NAME="check_checkpoint_data 覆盖结果" MODIFIED="1772276469901" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1773472583432" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1773479981694" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

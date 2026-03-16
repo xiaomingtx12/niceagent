@@ -19,16 +19,36 @@ from internal.model import MCPServer
 @singleton
 @dataclass
 class MCPRuntimeManager:
-    """Runtime bridge between persisted MCP configs and LangChain tools."""
+    """
+    MCP 运行时管理器
+    
+    核心职责：在持久化的 MCP 配置和 LangChain 工具之间建立桥梁
+    负责 MCP 连接管理、工具发现、工具执行和缓存管理
+    
+    设计亮点：
+    - 单例模式确保全局唯一实例
+    - 依赖注入支持松耦合
+    - 进程内缓存提升性能
+    """
 
-    """ MCP 运行时管理器 """
-
-    _tool_cache: dict[str, list[BaseTool]] = field(default_factory=dict, init=False)
+    _tool_cache: dict[str, list[BaseTool]] = field(default_factory=dict, init=False)  # 工具缓存
 
     @classmethod
     def build_server_config(
         cls, server: MCPServer | MCPServerConfig
     ) -> MCPServerConfig:
+        """
+        构建服务器配置
+        
+        将数据库实体 MCPServer 转换为运行时配置 MCPServerConfig
+        在此过程中会执行敏感信息的解密操作
+        
+        Args:
+            server: 服务器实体或配置对象
+            
+        Returns:
+            运行时服务器配置
+        """
         if isinstance(server, MCPServerConfig):
             return server
 
@@ -43,8 +63,8 @@ class MCPRuntimeManager:
             url=server.url,
             command=server.command,
             args=server.args or [],
-            env=MCPSecretCipher.decrypt_env(server.env or {}),
-            headers=MCPSecretCipher.decrypt_headers(server.headers or []),
+            env=MCPSecretCipher.decrypt_env(server.env or {}),  # 解密环境变量
+            headers=MCPSecretCipher.decrypt_headers(server.headers or []),  # 解密请求头
             timeout=int(timeout_value),
             updated_at=server.updated_at,
         )
@@ -53,7 +73,20 @@ class MCPRuntimeManager:
     def _build_client_config(
         cls, server_config: MCPServerConfig
     ) -> dict[str, dict[str, Any]]:
+        """
+        构建客户端配置
+        
+        将服务配置转换为 langchain-mcp-adapters 需要的结构
+        根据传输协议类型构建不同的配置格式
+        
+        Args:
+            server_config: 服务器配置
+            
+        Returns:
+            客户端配置字典
+        """
         if server_config.transport == MCPTransport.STDIO:
+            # STDIO 传输配置
             return {
                 server_config.name: {
                     "transport": "stdio",
@@ -63,6 +96,7 @@ class MCPRuntimeManager:
                 }
             }
 
+        # HTTP 传输配置
         headers = {
             header.get("key"): header.get("value")
             for header in server_config.headers
@@ -78,12 +112,38 @@ class MCPRuntimeManager:
 
     @classmethod
     def _cache_key(cls, server_config: MCPServerConfig) -> str:
+        """
+        生成缓存键
+        
+        使用服务器ID和更新时间生成唯一的缓存键
+        当服务器配置更新时，缓存会自动失效
+        
+        Args:
+            server_config: 服务器配置
+            
+        Returns:
+            缓存键字符串
+        """
         updated_at = server_config.updated_at or datetime.min
         return f"{server_config.id}:{updated_at.isoformat()}"
 
     async def _load_remote_tools_async(
         self, server_config: MCPServerConfig
     ) -> list[BaseTool]:
+        """
+        异步加载远程工具
+        
+        连接 MCP 服务器并发现可用的工具
+        
+        Args:
+            server_config: 服务器配置
+            
+        Returns:
+            远程工具列表
+            
+        Raises:
+            ValidateErrorException: 如果未安装 langchain-mcp-adapters
+        """
         try:
             from langchain_mcp_adapters.client import MultiServerMCPClient
         except ImportError as exc:
@@ -91,6 +151,7 @@ class MCPRuntimeManager:
                 "未安装 langchain-mcp-adapters，无法使用 MCP 功能"
             ) from exc
 
+        # 创建 MCP 客户端并获取工具列表
         client = MultiServerMCPClient(self._build_client_config(server_config))
         return await client.get_tools()
 
