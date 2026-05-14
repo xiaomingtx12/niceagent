@@ -1,4 +1,5 @@
 .env
+.worktrees/
 tmp/*
 storage/log
 storage/memory
