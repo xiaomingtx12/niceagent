@@ -90,8 +90,8 @@ def test_d_v2_single_head():
     )
 
 
-def test_d_v2_002_is_head():
-    """R1.1 workspace_files 是当前末端 (R1 后唯一新表)。"""
+def test_d_v2_003_is_head():
+    """R3 memory_facts 是当前末端 (R3 后唯一新表)."""
     parsed = _parse_revisions()
     revs = {r for r, _, _ in parsed}
     incoming = set()
@@ -103,7 +103,7 @@ def test_d_v2_002_is_head():
         else:
             incoming.add(down)
     heads = revs - incoming
-    assert "d_v2_002_create_workspace_files" in heads
+    assert "d_v2_003_create_memory_facts" in heads
 
 
 def _is_master_head(rev: str) -> bool:
