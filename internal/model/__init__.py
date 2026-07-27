@@ -6,6 +6,7 @@ from .conversation import Message, Conversation, MessageAgentThought
 from .dataset import Dataset, Document, Segment, KeywordTable, DatasetQuery, ProcessRule
 from .end_user import EndUser
 from .mcp_server import MCPServer, MCPTool
+from .memory_fact import MemoryFact
 from .platform import WechatConfig, WechatEndUser, WechatMessage
 from .provider_api_key import ProviderApiKey
 from .upload_file import UploadFile
@@ -34,6 +35,7 @@ __all__ = [
     "EndUser",
     "MCPServer",
     "MCPTool",
+    "MemoryFact",
     "ApiKey",
     "ProviderApiKey",
     "Workflow",
