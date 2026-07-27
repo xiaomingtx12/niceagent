@@ -34,7 +34,11 @@ from internal.core.agent_v2.middleware.project_context_middleware import (
     ProjectContextMiddleware,
 )
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
+from internal.core.agent_v2.middleware.summarization_middleware import (
+    build_summarization_middleware,
+)
 from internal.core.agent_v2.saver import get_postgres_saver
+from internal.core.agent_v2.subagent_specs import build_subagent_specs
 from internal.core.agent_v2.workspace_backend import MyDifyWorkspaceBackend
 
 
@@ -75,6 +79,8 @@ def build_deep_agent(
     task_id: Optional[UUID] = None,
     use_checkpointer: bool = True,
     workspace_backend: Optional[MyDifyWorkspaceBackend] = None,
+    max_message_count: int = 20,
+    subagents: Optional[dict[str, dict]] = None,
 ) -> Any:
     """构造 deepagents `CompiledStateGraph`。
 
@@ -90,6 +96,11 @@ def build_deep_agent(
             （避免每个测试都连 DB）
         workspace_backend: R1 可选 MyDifyWorkspaceBackend 实例；不传时不挂
             FilesystemMiddleware（agent 没有 ls / read_file / write_file 工具）
+        max_message_count: R2 触发压缩的消息数阈值；0 关闭压缩（透传 None 给
+            deepagents SummarizationMiddleware，不挂该中间件）
+        subagents: R3 业务 sub-agent 配置 (AgentConfig.subagents dict);
+            有 graph_id 的条目走 AsyncSubAgentMiddleware (远端异步),
+            其余走 SubAgentMiddleware (同步 task 工具); None / 空 dict 不挂
 
     Returns:
         CompiledStateGraph，可直接 `agent.invoke(input, config)` 或 `agent.stream(...)`
@@ -119,13 +130,30 @@ def build_deep_agent(
             FilesystemMiddleware(backend=workspace_backend)
         )
 
+    # R2: 业务 SummarizationMiddleware 包 deepagents 同名中间件, 按
+    # AgentConfig.max_message_count 触发压缩. max_message_count<=0 关闭.
+    summarization_mw = build_summarization_middleware(
+        llm=llm,
+        max_message_count=max_message_count,
+        backend=workspace_backend,  # offload 超长 tool_call 内容
+    )
+    if summarization_mw is not None:
+        middleware.append(summarization_mw)
+
     checkpointer = get_postgres_saver() if use_checkpointer else False
+
+    # R3: 业务 subagents dict → deepagents SubAgent / AsyncSubAgent spec 列表.
+    # deepagents 靠 "graph_id" in spec 路由: 有 → AsyncSubAgentMiddleware,
+    # 无 → SubAgentMiddleware (task 工具). 上下文分离是 deepagents 原生行为
+    # (task 调 sub-agent 时排除 messages/todos, 只带 description).
+    subagent_specs = build_subagent_specs(subagents)
 
     return create_deep_agent(
         model=llm,
         tools=list(tools),
         system_prompt=system_prompt,
         middleware=middleware,
+        subagents=subagent_specs or None,
         checkpointer=checkpointer,
         state_schema=MyDifyDeepAgentState,
     )

@@ -91,6 +91,8 @@ class BaseAgent(Serializable, Runnable):
             conversation_id=str(self.agent_config.conversation_id or ""),
             use_checkpointer=False,  # R0 阶段先 false，等 saver migration 上线再开
             workspace_backend=None,  # R1.4 阶段; service 层 invoke 时可注入
+            max_message_count=self.agent_config.max_message_count,  # R2 压缩阈值
+            subagents=self.agent_config.subagents,  # R3 sub-agent 配置
         )
 
     def invoke(
