@@ -6,3 +6,5 @@ storage/memory
 .idea/*
 venv/*
 test/storage/*
+__pycache__/
+*.pyc

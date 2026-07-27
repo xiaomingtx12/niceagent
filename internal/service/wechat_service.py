@@ -11,7 +11,7 @@ from wechatpy.exceptions import InvalidSignatureException
 from wechatpy.replies import TextReply
 from wechatpy.utils import check_signature
 
-from internal.core.agent.agents import FunctionCallAgent, ReACTAgent
+from internal.core.agent.agents import BaseAgent
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.language_model.entities.model_entity import ModelFeature
 from internal.core.memory import TokenBufferMemory
@@ -263,19 +263,13 @@ class WechatService(BaseService):
                 )
                 tools.extend(workflow_tools)
 
-            # 7.根据LLM是否支持tool_call决定使用不同的Agent
-            agent_class = (
-                FunctionCallAgent
-                if ModelFeature.TOOL_CALL in llm.features
-                else ReACTAgent
-            )
-            agent = agent_class(
+            # 7.统一 BaseAgent（R0 删 FunctionCallAgent/ReACTAgent 分支）
+            agent = BaseAgent(
                 llm=llm,
                 agent_config=AgentConfig(
                     user_id=app.account_id,
                     invoke_from=InvokeFrom.DEBUGGER,
                     preset_prompt=app_config["preset_prompt"],
-                    enable_long_term_memory=app_config["long_term_memory"]["enable"],
                     tools=tools,
                     review_config=app_config["review_config"],
                 ),
@@ -288,7 +282,6 @@ class WechatService(BaseService):
             agent_result = agent.invoke(
                 {
                     "messages": all_messages,
-                    "long_term_memory": conversation.summary,
                 }
             )
 

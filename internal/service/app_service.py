@@ -17,7 +17,7 @@ from sqlalchemy import func, desc
 from sqlalchemy.orm import joinedload
 from werkzeug.datastructures import FileStorage
 
-from internal.core.agent.agents import FunctionCallAgent, AgentQueueManager
+from internal.core.agent.agents import BaseAgent, AgentQueueManager
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.memory import TokenBufferMemory
 from internal.core.tools.api_tools.providers import ApiProviderManager
@@ -65,7 +65,6 @@ from .cos_service import CosService
 from .language_model_service import LanguageModelService
 from .provider_api_key_service import ProviderApiKeyService
 from .retrieval_service import RetrievalService
-from ..core.agent.agents.react_agent import ReACTAgent
 from ..core.agent.entities.queue_entity import QueueEvent
 from ..core.language_model import LanguageModelManager
 from ..core.language_model.entities.model_entity import ModelFeature, ModelParameterType
@@ -624,17 +623,14 @@ class AppService(BaseService):
             )
             tools.extend(workflow_tools)
 
-        # 11.根据LLM是否支持tool_call决定使用不同的Agent
-        agent_class = (
-            FunctionCallAgent if ModelFeature.TOOL_CALL in llm.features else ReACTAgent
-        )
-        agent = agent_class(
+        # 11.统一用 BaseAgent（deepagents 0.6 内部按 model 自动选 function-call / ReACT，
+#     不再在 graph 层分支——master 老 FunctionCallAgent/ReACTAgent R0 已删）
+        agent = BaseAgent(
             llm=llm,
             agent_config=AgentConfig(
                 user_id=account.id,
                 invoke_from=InvokeFrom.DEBUGGER,
                 preset_prompt=draft_app_config["preset_prompt"],
-                enable_long_term_memory=draft_app_config["long_term_memory"]["enable"],
                 tools=tools,
                 review_config=draft_app_config["review_config"],
             ),
@@ -647,7 +643,6 @@ class AppService(BaseService):
                     llm.convert_to_human_message(req.query.data, req.image_urls.data)
                 ],
                 "history": history,
-                "long_term_memory": debug_conversation.summary,
             }
         ):
             # 13.提取thought以及answer

@@ -7,7 +7,7 @@ from flask import current_app
 from injector import inject
 from sqlalchemy import desc
 
-from internal.core.agent.agents import FunctionCallAgent, ReACTAgent, AgentQueueManager
+from internal.core.agent.agents import BaseAgent, AgentQueueManager
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
 from internal.core.language_model import LanguageModelManager
@@ -186,17 +186,13 @@ class WebAppService(BaseService):
             )
             tools.extend(workflow_tools)
 
-        # 12.根据LLM是否支持tool_call决定使用不同的Agent
-        agent_class = (
-            FunctionCallAgent if ModelFeature.TOOL_CALL in llm.features else ReACTAgent
-        )
-        agent = agent_class(
+        # 12.统一 BaseAgent（R0 删 FunctionCallAgent/ReACTAgent 分支）
+        agent = BaseAgent(
             llm=llm,
             agent_config=AgentConfig(
                 user_id=account.id,
                 invoke_from=InvokeFrom.WEB_APP,
                 preset_prompt=app_config["preset_prompt"],
-                enable_long_term_memory=app_config["long_term_memory"]["enable"],
                 tools=tools,
                 review_config=app_config["review_config"],
             ),
@@ -211,7 +207,6 @@ class WebAppService(BaseService):
         for agent_thought in agent.stream(
             {
                 "messages": all_messages,
-                "long_term_memory": conversation.summary,
             }
         ):
             # 14.提取thought以及answer

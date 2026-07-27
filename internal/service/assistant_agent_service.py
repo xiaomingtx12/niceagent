@@ -9,7 +9,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 
-from internal.core.agent.agents import AgentQueueManager, FunctionCallAgent
+from internal.core.agent.agents import AgentQueueManager, BaseAgent
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
 from internal.core.language_model.entities.model_entity import ModelFeature
@@ -99,13 +99,12 @@ class AssistantAgentService(BaseService):
             self.convert_app_with_workflow_generator_to_tool(account),
         ]
 
-        # 8.构建Agent智能体，使用FunctionCallAgent
-        agent = FunctionCallAgent(
+        # 8.构建 Agent（R0 用统一 BaseAgent，老 FunctionCallAgent 已删）
+        agent = BaseAgent(
             llm=llm,
             agent_config=AgentConfig(
                 user_id=account.id,
                 invoke_from=InvokeFrom.ASSISTANT_AGENT,
-                enable_long_term_memory=True,
                 tools=tools,
             ),
         )
@@ -117,7 +116,6 @@ class AssistantAgentService(BaseService):
                     llm.convert_to_human_message(req.query.data, req.image_urls.data)
                 ],
                 "history": history,
-                "long_term_memory": conversation.summary,
             }
         ):
             # 9.提取thought以及answer

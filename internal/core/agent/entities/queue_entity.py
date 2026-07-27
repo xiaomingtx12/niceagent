@@ -9,7 +9,6 @@ from internal.entity.conversation_entity import MessageStatus
 class QueueEvent(str, Enum):
     """队列事件类型枚举"""
 
-    LONG_TERM_MEMORY_RECALL = "long_term_memory_recall"  # 长期记忆召回
     AGENT_THOUGHT = "agent_thought"  # 智能体推理
     AGENT_MESSAGE = "agent_message"  # 智能体消息
     AGENT_ACTION = "agent_action"  # 智能体动作
