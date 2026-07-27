@@ -159,3 +159,89 @@ def test_before_agent_independent_per_call():
     # 关键: out_a 的 dict 不能引用 mw_b 的字段
     assert "app-B" not in out_a["runtime_app_id"]
     assert "app-A" not in out_b["runtime_app_id"]
+
+
+# ---------- R4: memory_facts 召回 ----------
+
+
+def test_without_fact_service_no_recall_field():
+    """不传 memory_fact_service 时 state 不含 runtime_recalled_facts (R0 兼容)."""
+    mw = ProjectContextMiddleware(
+        account_id="acc", app_id="app", conversation_id="cnv",
+    )
+    out = mw.before_agent(state={}, runtime=None)
+    assert "runtime_recalled_facts" not in out
+
+
+def test_with_fact_service_calls_recall_top_k():
+    """传 memory_fact_service 时调用 recall_top_k 并写到 state."""
+    from unittest.mock import MagicMock
+
+    fake_service = MagicMock()
+    fake_fact = MagicMock()
+    fake_fact.to_dict.return_value = {"id": "f1", "content": "用户喜欢简短"}
+    fake_service.recall_top_k.return_value = [fake_fact]
+
+    mw = ProjectContextMiddleware(
+        account_id="acc", app_id="app", conversation_id="cnv",
+        end_user_id="eu-1",
+        memory_fact_service=fake_service,
+        recall_k=3,
+    )
+    out = mw.before_agent(state={}, runtime=None)
+
+    fake_service.recall_top_k.assert_called_once_with(
+        account_id="acc",
+        app_id="app",
+        end_user_id="eu-1",
+        k=3,
+    )
+    assert out["runtime_recalled_facts"] == [
+        {"id": "f1", "content": "用户喜欢简短"},
+    ]
+
+
+def test_recall_failure_does_not_raise():
+    """recall_top_k 抛错时中间件不阻断 invoke; 降级到空列表."""
+    from unittest.mock import MagicMock
+
+    fake_service = MagicMock()
+    fake_service.recall_top_k.side_effect = RuntimeError("DB connection lost")
+
+    mw = ProjectContextMiddleware(
+        account_id="acc", app_id="app", conversation_id="cnv",
+        memory_fact_service=fake_service,
+    )
+    out = mw.before_agent(state={}, runtime=None)
+    assert out["runtime_recalled_facts"] == []
+
+
+def test_recall_with_no_end_user():
+    """end_user_id=None → recall_top_k 也传 None (creator 调试场景)."""
+    from unittest.mock import MagicMock
+
+    fake_service = MagicMock()
+    fake_service.recall_top_k.return_value = []
+
+    mw = ProjectContextMiddleware(
+        account_id="acc", app_id="app", conversation_id="cnv",
+        end_user_id=None,
+        memory_fact_service=fake_service,
+    )
+    out = mw.before_agent(state={}, runtime=None)
+
+    fake_service.recall_top_k.assert_called_once_with(
+        account_id="acc",
+        app_id="app",
+        end_user_id=None,
+        k=5,  # 默认 recall_k
+    )
+    assert out["runtime_recalled_facts"] == []
+
+
+def test_constructor_stores_recall_k():
+    """recall_k 默认 5 (top-5 fact 注入 L3)."""
+    mw = ProjectContextMiddleware(
+        account_id="acc", app_id="app", conversation_id="cnv",
+    )
+    assert mw._recall_k == 5
