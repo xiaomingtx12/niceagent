@@ -23,6 +23,7 @@ from .jwt_service import JwtService
 from .keyword_table_service import KeywordTableService
 from .language_model_service import LanguageModelService
 from .mcp_service import MCPService
+from .memory_fact_service import MemoryFactService
 from .oauth_service import OAuthService
 from .openapi_service import OpenAPIService
 from .platform_service import PlatformService
@@ -65,6 +66,7 @@ __all__ = [
     "WorkflowService",
     "BuiltinAppService",
     "AssistantAgentService",
+    "MemoryFactService",
     "FaissService",
     "LanguageModelService",
     "MCPService",
