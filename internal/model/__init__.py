@@ -10,6 +10,7 @@ from .platform import WechatConfig, WechatEndUser, WechatMessage
 from .provider_api_key import ProviderApiKey
 from .upload_file import UploadFile
 from .workflow import Workflow, WorkflowResult
+from .workspace_file import WorkspaceFile
 
 __all__ = [
     "App",
@@ -38,4 +39,5 @@ __all__ = [
     "Workflow",
     "WorkflowResult",
     "WechatConfig", "WechatEndUser", "WechatMessage",
+    "WorkspaceFile",
 ]
