@@ -66,13 +66,18 @@ class BaseAgent(Serializable, Runnable):
 
         取 agent_config 里渲染好的 system_prompt + tools + review_config，
         加上 invoke 时填到 thread_config 的 account_id/app_id/conversation_id
-        —— 这三个 ID 从 `self.agent_config` 里没有显式字段，但 deepagents
-        runtime context 由调用方在 `agent.invoke(input, config)` 时通过
-        `thread_config["metadata"]` 注入；本方法不感知它们，由 chat_service
-        在 invoke 时传入 build_thread_config。
+        (R1 起这三个 ID 是 AgentConfig 显式字段, factory 直接读; 之前 master
+        老实现靠 getattr hack)。
 
-        R0 阶段默认走 PostgresSaver（use_checkpointer=True）；单测里 chat_service
+        R1 阶段默认走 PostgresSaver（use_checkpointer=True）；单测里 chat_service
         可传 `use_checkpointer=False` 跳过 DB（这一开关暂保留在 factory）。
+
+        workspace_backend 构造方式 (R1):
+        - 若 AgentConfig.enable_workspace=True + 三 ID 齐全, 构造 MyDifyWorkspaceBackend
+          注入 FilesystemMiddleware; 否则不挂
+        - session 从 BaseAgent 调用方注入 (chat_service 拿 flask g.sqlalchemy
+          session); R1 阶段 BaseAgent 暂不持有 session, 默认 None (singleton
+          build 阶段不挂 workspace; service 层 invoke 时再传)
         """
         return build_deep_agent(
             llm=self.llm,
@@ -81,10 +86,11 @@ class BaseAgent(Serializable, Runnable):
                 preset_prompt=self.agent_config.preset_prompt
             ),
             review_config=self.agent_config.review_config,
-            account_id=str(getattr(self.agent_config, "_account_id", "")) or "0",
-            app_id=str(getattr(self.agent_config, "_app_id", "")) or "0",
-            conversation_id=str(getattr(self.agent_config, "_conversation_id", "")) or "0",
+            account_id=str(self.agent_config.account_id or ""),
+            app_id=str(self.agent_config.app_id or ""),
+            conversation_id=str(self.agent_config.conversation_id or ""),
             use_checkpointer=False,  # R0 阶段先 false，等 saver migration 上线再开
+            workspace_backend=None,  # R1.4 阶段; service 层 invoke 时可注入
         )
 
     def invoke(

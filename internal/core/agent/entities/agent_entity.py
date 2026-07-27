@@ -122,6 +122,34 @@ class AgentConfig(BaseModel):
     # 最大迭代次数限制
     max_iteration_count: int = 10  # 默认最大迭代次数为10
 
+    # ---------- R1 新增 ----------
+    # 三层 workspace 路径 scope (account_id / app_id / conversation_id)
+    # R1 之前 BaseAgent 用 getattr(self.agent_config, "_account_id", "") hack
+    # 传 thread_config; 现在用显式字段, factory 直接读
+    account_id: UUID = Field(default=None)  # type: ignore[assignment]
+    app_id: UUID = Field(default=None)  # type: ignore[assignment]
+    conversation_id: UUID = Field(default=None)  # type: ignore[assignment]
+
+    # AgentState.messages 最大长度 (R1 替代 master 老 dialog_round;
+    # deepagents SummarizationMiddleware 用此阈值触发压缩)
+    max_message_count: int = Field(
+        default=20,
+        description="AgentState.messages 最大长度, 超过触发压缩",
+    )
+
+    # 是否启用 workspace 文件系统 (R1 FilesystemMiddleware 开关)
+    enable_workspace: bool = Field(
+        default=True,
+        description="True 挂 FilesystemMiddleware (db 持久化); False 不挂",
+    )
+
+    # sub-agents 配置占位 (R3 启用, R1 不消费; 留 schema 以便 R2/R3 直接读)
+    # 格式: {"researcher": {"system_prompt": "...", "tools": [...]}, ...}
+    subagents: dict[str, dict] = Field(
+        default_factory=dict,
+        description="sub-agent 配置; R3 AsyncSubAgentMiddleware 消费",
+    )
+
 
 class AgentState(MessagesState):
     """智能体状态类"""
