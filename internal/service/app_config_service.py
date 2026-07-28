@@ -237,6 +237,7 @@ class AppConfigService(BaseService):
             "model_config": model_config,
             "dialog_round": app_config.dialog_round,
             "preset_prompt": app_config.preset_prompt,
+            "subagents": app_config.subagents or {},
             "tools": tools,
             "workflows": workflows,
             "datasets": datasets,

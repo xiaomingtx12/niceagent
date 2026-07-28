@@ -193,8 +193,12 @@ class WebAppService(BaseService):
                 user_id=account.id,
                 invoke_from=InvokeFrom.WEB_APP,
                 preset_prompt=app_config["preset_prompt"],
+                subagents=app_config["subagents"],
                 tools=tools,
                 review_config=app_config["review_config"],
+                account_id=account.id,
+                app_id=app.id,
+                conversation_id=conversation.id,
             ),
         )
 

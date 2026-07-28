@@ -15,6 +15,7 @@ import pytest
 from internal.core.agent_v2.subagent_specs import (
     SubAgentSpecError,
     build_subagent_specs,
+    validate_platform_subagents,
 )
 
 
@@ -134,6 +135,60 @@ def test_missing_system_prompt_raises_for_sync():
 def test_non_dict_value_raises():
     with pytest.raises(SubAgentSpecError, match="dict"):
         build_subagent_specs({"a": "not-a-dict"})
+
+
+# ---------- Creator API 持久化契约 ----------
+
+
+def test_platform_config_normalizes_sync_subagent():
+    config = validate_platform_subagents(
+        {
+            "researcher": {
+                "description": "  搜索并归纳资料  ",
+                "system_prompt": "  你是严谨的研究员。  ",
+            }
+        }
+    )
+    assert config == {
+        "researcher": {
+            "description": "搜索并归纳资料",
+            "system_prompt": "你是严谨的研究员。",
+        }
+    }
+
+
+@pytest.mark.parametrize("name", ["Researcher", "research agent", "_researcher"])
+def test_platform_config_rejects_invalid_name(name):
+    with pytest.raises(SubAgentSpecError, match="名称"):
+        validate_platform_subagents(
+            {name: {"description": "研究", "system_prompt": "做研究"}}
+        )
+
+
+def test_platform_config_rejects_remote_or_secret_fields():
+    with pytest.raises(SubAgentSpecError, match="暂不支持"):
+        validate_platform_subagents(
+            {
+                "remote": {
+                    "description": "远端任务",
+                    "system_prompt": "执行任务",
+                    "graph_id": "remote-graph",
+                    "headers": {"authorization": "secret"},
+                }
+            }
+        )
+
+
+def test_platform_config_rejects_more_than_eight_agents():
+    config = {
+        f"agent-{index}": {
+            "description": f"agent {index}",
+            "system_prompt": "执行分配的任务",
+        }
+        for index in range(9)
+    }
+    with pytest.raises(SubAgentSpecError, match="数量"):
+        validate_platform_subagents(config)
 
 
 # ---------- factory 集成 ----------

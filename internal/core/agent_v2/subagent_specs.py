@@ -33,11 +33,84 @@ AgentConfig.subagents 是业务 dict 格式 (AppConfig.subagents JSONB 同构):
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
 class SubAgentSpecError(ValueError):
     """业务 subagents 配置非法 (缺必填字段)。"""
+
+
+MAX_PLATFORM_SUBAGENTS = 8
+MAX_SUBAGENT_DESCRIPTION_LENGTH = 500
+MAX_SUBAGENT_SYSTEM_PROMPT_LENGTH = 8000
+_PLATFORM_SUBAGENT_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_PLATFORM_SYNC_FIELDS = frozenset({"description", "system_prompt"})
+
+
+def validate_platform_subagents(
+    subagents: dict[str, dict] | None,
+) -> dict[str, dict[str, str]]:
+    """校验并规范化 Creator API 可持久化的同步 sub-agent 配置。
+
+    平台首期只持久化声明式同步 sub-agent。模型和工具不单独存储：
+    DeepAgents 会让缺少 `model` / `tools` 的 sub-agent 继承主 Agent，
+    从而继续经过 my-dify 的模型与工具权限边界。
+
+    Args:
+        subagents: AppConfig/AppConfigVersion JSONB 中的团队配置。
+
+    Returns:
+        去除描述和提示词首尾空白后的新字典。
+
+    Raises:
+        SubAgentSpecError: 配置不是受支持的同步团队结构。
+    """
+    if subagents is None:
+        return {}
+    if not isinstance(subagents, dict):
+        raise SubAgentSpecError("subagents 必须是对象")
+    if len(subagents) > MAX_PLATFORM_SUBAGENTS:
+        raise SubAgentSpecError(
+            f"subagents 数量不能超过 {MAX_PLATFORM_SUBAGENTS}"
+        )
+
+    normalized: dict[str, dict[str, str]] = {}
+    for name, config in subagents.items():
+        if not isinstance(name, str) or not _PLATFORM_SUBAGENT_NAME_PATTERN.fullmatch(
+            name
+        ):
+            raise SubAgentSpecError(
+                "sub-agent 名称必须以小写字母开头，且只能包含小写字母、数字、_、-，长度不超过 64"
+            )
+        if not isinstance(config, dict):
+            raise SubAgentSpecError(f"subagent {name!r} 配置必须是对象")
+        unexpected_fields = set(config) - _PLATFORM_SYNC_FIELDS
+        if unexpected_fields:
+            fields = ", ".join(sorted(unexpected_fields))
+            raise SubAgentSpecError(
+                f"subagent {name!r} 包含暂不支持的字段: {fields}"
+            )
+
+        description = config.get("description")
+        system_prompt = config.get("system_prompt")
+        if not isinstance(description, str) or not description.strip():
+            raise SubAgentSpecError(f"subagent {name!r} 缺 description")
+        if len(description) > MAX_SUBAGENT_DESCRIPTION_LENGTH:
+            raise SubAgentSpecError(
+                f"subagent {name!r} description 不能超过 {MAX_SUBAGENT_DESCRIPTION_LENGTH} 个字符"
+            )
+        if not isinstance(system_prompt, str) or not system_prompt.strip():
+            raise SubAgentSpecError(f"subagent {name!r} 缺 system_prompt")
+        if len(system_prompt) > MAX_SUBAGENT_SYSTEM_PROMPT_LENGTH:
+            raise SubAgentSpecError(
+                f"subagent {name!r} system_prompt 不能超过 {MAX_SUBAGENT_SYSTEM_PROMPT_LENGTH} 个字符"
+            )
+        normalized[name] = {
+            "description": description.strip(),
+            "system_prompt": system_prompt.strip(),
+        }
+    return normalized
 
 
 def build_subagent_specs(subagents: dict[str, dict] | None) -> list[dict[str, Any]]:
@@ -102,4 +175,9 @@ def build_subagent_specs(subagents: dict[str, dict] | None) -> list[dict[str, An
     return specs
 
 
-__all__ = ["SubAgentSpecError", "build_subagent_specs"]
+__all__ = [
+    "MAX_PLATFORM_SUBAGENTS",
+    "SubAgentSpecError",
+    "build_subagent_specs",
+    "validate_platform_subagents",
+]

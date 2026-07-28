@@ -12,6 +12,8 @@ class QueueEvent(str, Enum):
     AGENT_THOUGHT = "agent_thought"  # 智能体推理
     AGENT_MESSAGE = "agent_message"  # 智能体消息
     AGENT_ACTION = "agent_action"  # 智能体动作
+    SUB_AGENT_DELEGATE = "sub_agent_delegate"  # 主 Agent 委托专家
+    SUB_AGENT_END = "sub_agent_end"  # 专家返回结果
     DATASET_RETRIEVAL = "dataset_retrieval"  # 知识库检索
     AGENT_END = "agent_end"  # 智能体结束
     TIMEOUT = "timeout"  # 智能体超时事件

@@ -143,11 +143,12 @@ class AgentConfig(BaseModel):
         description="True 挂 FilesystemMiddleware (db 持久化); False 不挂",
     )
 
-    # sub-agents 配置占位 (R3 启用, R1 不消费; 留 schema 以便 R2/R3 直接读)
-    # 格式: {"researcher": {"system_prompt": "...", "tools": [...]}, ...}
+    # DeepAgents sub-agent 团队配置。Creator API 首期持久化同步 Agent：
+    # {"researcher": {"description": "...", "system_prompt": "..."}}
+    # 不传 model/tools 时按 DeepAgents 原生行为继承主 Agent。
     subagents: dict[str, dict] = Field(
         default_factory=dict,
-        description="sub-agent 配置; R3 AsyncSubAgentMiddleware 消费",
+        description="DeepAgents sub-agent 团队配置",
     )
 
 

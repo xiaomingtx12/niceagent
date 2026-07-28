@@ -192,6 +192,9 @@ class AppConfig(db.Model):
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 预设prompt
+    subagents = Column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )  # DeepAgents 同步 sub-agent 团队配置
     tools = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 应用关联工具列表
@@ -267,6 +270,9 @@ class AppConfigVersion(db.Model):
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 人设与回复逻辑
+    subagents = Column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )  # DeepAgents 同步 sub-agent 团队配置
     tools = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 应用关联的工具列表

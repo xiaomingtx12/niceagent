@@ -270,8 +270,12 @@ class WechatService(BaseService):
                     user_id=app.account_id,
                     invoke_from=InvokeFrom.DEBUGGER,
                     preset_prompt=app_config["preset_prompt"],
+                    subagents=app_config["subagents"],
                     tools=tools,
                     review_config=app_config["review_config"],
+                    account_id=app.account_id,
+                    app_id=app.id,
+                    conversation_id=conversation.id,
                 ),
             )
 

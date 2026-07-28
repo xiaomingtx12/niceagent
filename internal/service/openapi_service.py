@@ -152,8 +152,12 @@ class OpenAPIService(BaseService):
                 user_id=account.id,
                 invoke_from=InvokeFrom.DEBUGGER,
                 preset_prompt=app_config["preset_prompt"],
+                subagents=app_config["subagents"],
                 tools=tools,
                 review_config=app_config["review_config"],
+                account_id=account.id,
+                app_id=app.id,
+                conversation_id=conversation.id,
             ),
         )
         # 15.定义智能体状态基础数据

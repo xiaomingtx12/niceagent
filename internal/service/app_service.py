@@ -19,6 +19,10 @@ from werkzeug.datastructures import FileStorage
 
 from internal.core.agent.agents import BaseAgent, AgentQueueManager
 from internal.core.agent.entities.agent_entity import AgentConfig
+from internal.core.agent_v2.subagent_specs import (
+    SubAgentSpecError,
+    validate_platform_subagents,
+)
 from internal.core.memory import TokenBufferMemory
 from internal.core.tools.api_tools.providers import ApiProviderManager
 from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
@@ -357,6 +361,7 @@ class AppService(BaseService):
             model_config=draft_app_config["model_config"],
             dialog_round=draft_app_config["dialog_round"],
             preset_prompt=draft_app_config["preset_prompt"],
+            subagents=draft_app_config["subagents"],
             tools=[
                 {
                     "type": tool["type"],
@@ -631,8 +636,12 @@ class AppService(BaseService):
                 user_id=account.id,
                 invoke_from=InvokeFrom.DEBUGGER,
                 preset_prompt=draft_app_config["preset_prompt"],
+                subagents=draft_app_config["subagents"],
                 tools=tools,
                 review_config=draft_app_config["review_config"],
+                account_id=account.id,
+                app_id=app.id,
+                conversation_id=debug_conversation.id,
             ),
         )
 
@@ -794,6 +803,7 @@ class AppService(BaseService):
             "model_config",
             "dialog_round",
             "preset_prompt",
+            "subagents",
             "tools",
             "workflows",
             "datasets",
@@ -902,7 +912,16 @@ class AppService(BaseService):
                     "人设与回复逻辑必须是字符串，长度在0-2000个字符"
                 )
 
-        # 6.校验tools工具
+        # 6.校验 DeepAgents 同步 sub-agent 团队
+        if "subagents" in draft_app_config:
+            try:
+                draft_app_config["subagents"] = validate_platform_subagents(
+                    draft_app_config["subagents"]
+                )
+            except SubAgentSpecError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+
+        # 7.校验tools工具
         if "tools" in draft_app_config:
             tools = draft_app_config["tools"]
             validate_tools = []

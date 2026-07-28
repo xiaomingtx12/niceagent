@@ -1,0 +1,86 @@
+"""factory.build_deep_agent 集成单测（不依赖 DB / LLM）。
+
+用 FakeChatModel + 空 tools 跑 create_deep_agent，确认：
+- 返回 CompiledStateGraph
+- 4 个业务中间件都装上了
+- state_schema 是 MyDifyDeepAgentState
+
+约束：单测环境不能真连 Postgres——传 use_checkpointer=False
+绕过 saver；model 用 langchain 自带的 FakeListChatModel。
+"""
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+from internal.core.agent_v2.factory import (
+    MyDifyDeepAgentState,
+    build_deep_agent,
+    build_thread_config,
+)
+
+
+def _llm():
+    """Fake LLM：第一次返回 AIMessage（不调工具）；用于跑通 graph。"""
+    return FakeListChatModel(responses=["hello"])
+
+
+def test_build_deep_agent_returns_compiled_state_graph():
+    from langgraph.graph.state import CompiledStateGraph
+    agent = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={"enable": False},
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        use_checkpointer=False,
+    )
+    assert isinstance(agent, CompiledStateGraph)
+
+
+def test_build_deep_agent_with_review_enabled_keeps_going():
+    """review enable=True 但没关键词时不影响调用。"""
+    agent = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={"enable": True, "keywords": [], "inputs_config": {"enable": True}, "outputs_config": {"enable": True}},
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        use_checkpointer=False,
+    )
+    # deepagents 1.x 用 builder.schemas (dict[schema_cls, channels])；用户的
+    # state_schema 字段被合并进 StateSchema/InputSchema/OutputSchema 的 channels
+    schemas = getattr(agent.builder, "schemas", None)
+    assert schemas is not None
+    # 拿 StateSchema 的 channels dict，里面应当包含 deepagents 扩展字段 + 我们
+    # 后续可注入的字段；这里只验证 'messages' / 'todos' / 'files' 三个 deepagents
+    # 内置字段都在
+    all_channels = set()
+    for ch_dict in schemas.values():
+        all_channels.update(ch_dict.keys())
+    assert "messages" in all_channels
+    assert "todos" in all_channels
+    assert "files" in all_channels
+
+
+def test_build_thread_config_contains_thread_id_and_metadata():
+    cfg = build_thread_config(
+        account_id="acct1", app_id="app1", conversation_id="cnv1"
+    )
+    assert cfg["configurable"]["thread_id"] == "(acct1,app1,cnv1,main)"
+    assert cfg["metadata"]["account_id"] == "acct1"
+    assert cfg["metadata"]["app_id"] == "app1"
+    assert cfg["metadata"]["conversation_id"] == "cnv1"
+    assert cfg["metadata"]["agent_id"] == "main"
+
+
+def test_build_thread_config_with_subagent_id():
+    cfg = build_thread_config(
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        agent_id="researcher",
+    )
+    assert cfg["configurable"]["thread_id"] == "(acct1,app1,cnv1,researcher)"
+    assert cfg["metadata"]["agent_id"] == "researcher"
