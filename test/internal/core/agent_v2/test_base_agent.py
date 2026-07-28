@@ -15,9 +15,11 @@ from uuid import uuid4
 import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
+from langchain_core.messages import HumanMessage
 
 from internal.core.agent.agents.base_agent import BaseAgent
 from internal.core.agent.entities.agent_entity import AgentConfig, AgentState
+from internal.core.agent.entities.queue_entity import QueueEvent
 from internal.entity.conversation_entity import InvokeFrom
 
 
@@ -121,3 +123,91 @@ def test_base_agent_publish_call_does_not_raise_with_mock_redis():
         event=QueueEvent.PING,
     )
     agent.queue_manager.publish(_u(), thought)  # 不抛错即可
+
+
+def test_merge_thread_config_adds_defaults_and_preserves_overrides():
+    config = _config().model_copy(
+        update={
+            "account_id": uuid4(),
+            "app_id": uuid4(),
+            "conversation_id": uuid4(),
+        }
+    )
+    agent = BaseAgent.model_construct(llm=_llm(), agent_config=config)
+
+    merged = agent._merge_thread_config(
+        {
+            "tags": ["chat"],
+            "metadata": {"request_id": "req-1"},
+            "configurable": {"checkpoint_ns": "custom"},
+        }
+    )
+
+    assert merged["configurable"]["thread_id"].endswith(",main)")
+    assert merged["configurable"]["checkpoint_ns"] == "custom"
+    assert merged["metadata"]["request_id"] == "req-1"
+    assert merged["metadata"]["conversation_id"] == str(config.conversation_id)
+    assert merged["tags"] == ["chat"]
+
+
+def test_invoke_uses_latest_human_message_as_query(monkeypatch):
+    agent = BaseAgent.model_construct(llm=_llm(), agent_config=_config())
+    monkeypatch.setattr(BaseAgent, "stream", lambda *_args, **_kwargs: iter(()))
+
+    result = agent.invoke(
+        {
+            "messages": [
+                HumanMessage(content="旧问题"),
+                AIMessage(content="旧回答"),
+                HumanMessage(content="当前问题"),
+            ]
+        }
+    )
+
+    assert result.query == "当前问题"
+
+
+def test_run_stream_translates_graph_updates_and_adds_single_terminal_event():
+    task_id = uuid4()
+
+    class FakeGraph:
+        def stream(self, input, config=None, **kwargs):
+            yield {
+                "model": {
+                    "messages": [
+                        AIMessage(
+                            content="完成",
+                            usage_metadata={
+                                "input_tokens": 2,
+                                "output_tokens": 1,
+                                "total_tokens": 3,
+                            },
+                        )
+                    ]
+                }
+            }
+
+    class FakeQueueManager:
+        def __init__(self):
+            self.events = []
+
+        def publish(self, _task_id, thought):
+            self.events.append(thought)
+
+        def publish_error(self, _task_id, error):
+            raise AssertionError(error)
+
+    agent = BaseAgent.model_construct(llm=_llm(), agent_config=_config())
+    agent._agent = FakeGraph()
+    agent._agent_queue_manager = FakeQueueManager()
+
+    agent._run_stream_in_thread(
+        {"messages": [HumanMessage(content="问题")], "task_id": task_id},
+        None,
+    )
+
+    assert [event.event for event in agent._agent_queue_manager.events] == [
+        QueueEvent.AGENT_MESSAGE,
+        QueueEvent.AGENT_END,
+    ]
+    assert agent._agent_queue_manager.events[0].answer == "完成"

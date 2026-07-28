@@ -264,11 +264,12 @@ class WechatService(BaseService):
                 tools.extend(workflow_tools)
 
             # 7.统一 BaseAgent（R0 删 FunctionCallAgent/ReACTAgent 分支）
+            message = self.get(Message, message_id)
             agent = BaseAgent(
                 llm=llm,
                 agent_config=AgentConfig(
-                    user_id=app.account_id,
-                    invoke_from=InvokeFrom.DEBUGGER,
+                    user_id=message.created_by,
+                    invoke_from=InvokeFrom.SERVICE_API,
                     preset_prompt=app_config["preset_prompt"],
                     subagents=app_config["subagents"],
                     tools=tools,

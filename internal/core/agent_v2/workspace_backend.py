@@ -22,6 +22,8 @@ R1 路径白名单（[deepagents-v2-plan-workspace-three-layer-paths] memory）�
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import fnmatch
+import hashlib
 from typing import Any, Optional
 from uuid import UUID
 
@@ -38,7 +40,7 @@ from deepagents.backends.protocol import (
     ReadResult,
     WriteResult,
 )
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from internal.model import WorkspaceFile
@@ -49,9 +51,11 @@ class WorkspacePathError(ValueError):
 
 
 def _normalize(path: str) -> str:
-    """路径标准化：去掉尾部 /，保留前导 /。"""
+    """标准化 DeepAgents 使用的 POSIX 绝对路径。"""
     if not path:
         return "/"
+    if "\x00" in path or "\\" in path:
+        raise WorkspacePathError("workspace paths must use POSIX separators")
     p = path.rstrip("/")
     return p if p else "/"
 
@@ -90,7 +94,7 @@ def _validate_workspace_path(
     first = segments[0]
     # 拒绝路径遍历 / home 展开 — 任何 segment 都不可为 '..' / '~' / '.'
     for seg in segments:
-        if seg in (".", "..", "~"):
+        if not seg or seg in (".", "..", "~"):
             raise WorkspacePathError(
                 f"path '{p}' contains illegal segment '{seg}'"
             )
@@ -129,11 +133,13 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         account_id: UUID,
         app_id: UUID,
         conversation_id: UUID,
+        created_by: Optional[UUID] = None,
     ) -> None:
         self._session = session
         self._account_id = account_id
         self._app_id = app_id
         self._conversation_id = conversation_id
+        self._created_by = created_by
 
     # ---------- 路径校验 ----------
 
@@ -167,16 +173,31 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         latest = self._fetch_latest(rest)
         return latest.version if latest else 0
 
-    def _list_paths(self, prefix: str) -> list[WorkspaceFile]:
-        """列 (account_id, app_id, path LIKE prefix%) 非删除行最新版本。"""
-        like_pattern = f"{prefix}%"
+    def _visible_prefixes(self) -> tuple[str, str]:
+        """当前 backend 可见的共享 seed 与本会话目录。"""
+        return ("seed", str(self._conversation_id))
+
+    def _list_paths(self, prefix: Optional[str]) -> list[WorkspaceFile]:
+        """列出目录下最新版本，并强制限制在 seed 与当前会话范围。"""
+        prefixes = (prefix,) if prefix is not None else self._visible_prefixes()
+        path_filters = []
+        for item in prefixes:
+            escaped = (
+                item.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            path_filters.append(WorkspaceFile.path == item)
+            path_filters.append(
+                WorkspaceFile.path.like(f"{escaped}/%", escape="\\")
+            )
         # 取每条 path 的 max(version)
         rows = self._session.execute(
             select(WorkspaceFile)
             .where(
                 WorkspaceFile.account_id == self._account_id,
                 WorkspaceFile.app_id == self._app_id,
-                WorkspaceFile.path.like(like_pattern),
+                or_(*path_filters),
                 WorkspaceFile.is_deleted.is_(False),
             )
             .order_by(WorkspaceFile.path, WorkspaceFile.version.desc())
@@ -230,9 +251,9 @@ class MyDifyWorkspaceBackend(BackendProtocol):
             storage_backend="db",
             mime_type="text/plain",
             size_bytes=len(content.encode("utf-8")),
-            content_sha256="",  # 简版: 不算 sha256 (R1.3 后续优化)
+            content_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
             content=content.encode("utf-8"),
-            created_by=self._account_id,
+            created_by=self._created_by,
             is_deleted=False,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -279,7 +300,7 @@ class MyDifyWorkspaceBackend(BackendProtocol):
 
     def ls(self, path: str = "/") -> LsResult:
         try:
-            rest = self._resolve(path) if path and path != "/" else ""
+            rest = self._resolve(path) if path and path != "/" else None
         except WorkspacePathError as exc:
             return LsResult(error=str(exc))
         rows = self._list_paths(rest)
@@ -293,20 +314,22 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         result = self.ls(path)
         return result.entries or []
 
-    def glob(self, pattern: str, path: str = "/") -> GlobResult:
+    def glob(self, pattern: str, path: str | None = "/") -> GlobResult:
         try:
-            rest = self._resolve(path) if path and path != "/" else ""
+            rest = self._resolve(path) if path and path != "/" else None
         except WorkspacePathError as exc:
             return GlobResult(error=str(exc))
         rows = self._list_paths(rest)
-        # 简化: 只做 "*" 通配
-        if "*" not in pattern:
-            pattern = f"*{pattern}*"
-        import fnmatch
         matches: list[FileInfo] = []
         for r in rows:
-            leaf = r.path.split("/")[-1]
-            if fnmatch.fnmatch(leaf, pattern):
+            candidate = (
+                r.path[len(rest) + 1 :]
+                if rest and r.path.startswith(f"{rest}/")
+                else r.path
+            )
+            if fnmatch.fnmatch(candidate, pattern) or fnmatch.fnmatch(
+                candidate.rsplit("/", 1)[-1], pattern
+            ):
                 matches.append(
                     {"path": f"/workspace/{self._account_id}/{self._app_id}/{r.path}"}
                 )
@@ -317,14 +340,18 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         return result.matches or []
 
     def grep(
-        self, pattern: str, path: str | None = None, glob: str | None = None
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
     ) -> GrepResult:
         try:
-            rest = self._resolve(path) if path else ""
+            rest = self._resolve(path) if path and path != "/" else None
         except WorkspacePathError as exc:
             return GrepResult(error=str(exc))
         rows = self._list_paths(rest)
-        import fnmatch
         out_matches: list[GrepMatch] = []
         for r in rows:
             if glob and not fnmatch.fnmatch(
@@ -341,7 +368,12 @@ class MyDifyWorkspaceBackend(BackendProtocol):
                         "line": ln,
                         "text": line,
                     })
-        return GrepResult(matches=out_matches)
+                    if max_count is not None and len(out_matches) > max_count:
+                        return GrepResult(
+                            matches=out_matches[:max_count],
+                            truncated=True,
+                        )
+        return GrepResult(matches=out_matches, truncated=False)
 
     def grep_raw(
         self, pattern: str, path: str | None = None, glob: str | None = None
@@ -372,7 +404,7 @@ class MyDifyWorkspaceBackend(BackendProtocol):
                 responses.append(FileUploadResponse(path=res.path or path))
         return responses
 
-    def aupload_files(
+    async def aupload_files(
         self, files: list[tuple[str, bytes]]
     ) -> list[FileUploadResponse]:
         return self.upload_files(files)
@@ -396,7 +428,7 @@ class MyDifyWorkspaceBackend(BackendProtocol):
             )
         return responses
 
-    def adownload_files(
+    async def adownload_files(
         self, paths: list[str]
     ) -> list[FileDownloadResponse]:
         return self.download_files(paths)
@@ -427,9 +459,14 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         return self.glob(pattern, path)
 
     async def agrep(
-        self, pattern: str, path: str | None = None, glob: str | None = None
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob: str | None = None,
+        *,
+        max_count: int | None = None,
     ) -> GrepResult:
-        return self.grep(pattern, path, glob)
+        return self.grep(pattern, path, glob, max_count=max_count)
 
     async def aglob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
         return self.glob_info(pattern, path)
@@ -448,6 +485,7 @@ def build_workspace_backend(
     account_id: UUID,
     app_id: UUID,
     conversation_id: UUID,
+    created_by: Optional[UUID] = None,
 ) -> MyDifyWorkspaceBackend:
     """构造 backend 工厂（factory 内调用）。
 
@@ -458,6 +496,7 @@ def build_workspace_backend(
         account_id=account_id,
         app_id=app_id,
         conversation_id=conversation_id,
+        created_by=created_by,
     )
 
 

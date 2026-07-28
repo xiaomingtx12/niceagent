@@ -1,6 +1,5 @@
 from uuid import UUID
 
-from langchain_core.messages import AnyMessage
 from langchain_core.tools import BaseTool
 from langgraph.graph import MessagesState
 from pydantic import BaseModel, Field
@@ -126,9 +125,9 @@ class AgentConfig(BaseModel):
     # 三层 workspace 路径 scope (account_id / app_id / conversation_id)
     # R1 之前 BaseAgent 用 getattr(self.agent_config, "_account_id", "") hack
     # 传 thread_config; 现在用显式字段, factory 直接读
-    account_id: UUID = Field(default=None)  # type: ignore[assignment]
-    app_id: UUID = Field(default=None)  # type: ignore[assignment]
-    conversation_id: UUID = Field(default=None)  # type: ignore[assignment]
+    account_id: UUID | None = None
+    app_id: UUID | None = None
+    conversation_id: UUID | None = None
 
     # AgentState.messages 最大长度 (R1 替代 master 老 dialog_round;
     # deepagents SummarizationMiddleware 用此阈值触发压缩)
@@ -140,7 +139,10 @@ class AgentConfig(BaseModel):
     # 是否启用 workspace 文件系统 (R1 FilesystemMiddleware 开关)
     enable_workspace: bool = Field(
         default=True,
-        description="True 挂 FilesystemMiddleware (db 持久化); False 不挂",
+        description=(
+            "是否允许使用注入的持久化 workspace backend；未注入时仍使用 "
+            "DeepAgents 默认的会话内 StateBackend"
+        ),
     )
 
     # DeepAgents sub-agent 团队配置。Creator API 首期持久化同步 Agent：
@@ -157,7 +159,6 @@ class AgentState(MessagesState):
 
     task_id: UUID  # 该次状态对应的任务id，每次运行时会使用独立的任务id
     iteration_count: int = 0  # 迭代次数，默认为0
-    history: list[AnyMessage]  # 短期记忆(历史记录)
 
 
 # 知识库检索工具名称

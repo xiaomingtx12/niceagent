@@ -1,13 +1,9 @@
-"""R2 业务 SummarizationMiddleware。
+"""业务化配置 DeepAgents 原生 SummarizationMiddleware。
 
-复用 deepagents `_DeepAgentsSummarizationMiddleware` (硬约束 #5: 不重写
-_should_summarize / _partition_messages / offload 逻辑)。本模块只负责:
-1. 把 `AgentConfig.max_message_count` 透传成 deepagents 的 trigger 参数
-2. 提供一个 thin 子类把 `.name` 改成 "MyDifySummarizationMiddleware",
-   避免与 deepagents `create_deep_agent` base stack 自带的 default
-   SummarizationMiddleware (trigger=None) 撞名触发
-   `langchain.agents.factory.create_agent` 的
-   `Please remove duplicate middleware instances.` AssertionError。
+本模块不重写摘要算法，只负责把 `AgentConfig.max_message_count` 转成
+DeepAgents 的 ``trigger`` / ``keep`` 参数。自定义实例保留框架原生中间件名
+``SummarizationMiddleware``，这样 ``create_deep_agent`` 会通过同名替换机制
+替换默认实例，而不是在 middleware stack 里追加第二个摘要器。
 
 业务约定:
 - trigger: `("messages", AgentConfig.max_message_count)` (默认 20)
@@ -16,7 +12,8 @@ _should_summarize / _partition_messages / offload 逻辑)。本模块只负责:
 - model: 用主 agent 的 LLM (不开独立 summary LLM, 节省成本)
 - backend: 复用 R1 MyDifyWorkspaceBackend —— 把超长 tool_call 内容 offload 到
   workspace_files; 不传时用 deepagents StateBackend 占位
-- trigger=None (R2 之前 max_message_count=0 时) → 永不触发, 等价于关闭压缩
+- max_message_count <= 0 时不传自定义实例，继续使用 DeepAgents 默认的
+  token-window 摘要策略
 
 state schema 字段 (deepagents 中间件自动管理):
 - `_summarization_event: dict | None` —— 最近一次摘要事件, 含 cutoff_index
@@ -27,7 +24,7 @@ state schema 字段 (deepagents 中间件自动管理):
 - 纯函数 build_summarization_trigger / build_summarization_keep 覆盖
   trigger / keep 各种边界, 无 LLM / DB 依赖
 - build_summarization_middleware 返回 deepagents 中间件实例, 验证:
-  - .name 是 "MyDifySummarizationMiddleware" (避免与 base stack 同名)
+  - .name 是 "SummarizationMiddleware" (原位替换 base stack 默认实例)
   - trigger / keep 透传正确
   - backend 透传正确
 """
@@ -42,27 +39,16 @@ from deepagents.middleware.summarization import _DeepAgentsSummarizationMiddlewa
 
 
 class MyDifySummarizationMiddleware(_DeepAgentsSummarizationMiddleware):
-    """业务 SummarizationMiddleware, 仅重写 `.name` 避免与 deepagents base stack 撞名。
+    """带业务阈值的原生摘要器替换项。
 
-    deepagents `create_deep_agent` 默认会在 base stack 挂一个 trigger=None 的
-    `_DeepAgentsSummarizationMiddleware` (其 `.name` property 返回 alias
-    "SummarizationMiddleware")。如果我们在 `middleware=[...]` 里再 append 一个
-    `SummarizationMiddleware(...)` 实例, 两者 `.name` 相同, 会触发
-    `langchain.agents.factory.create_agent` line 1080:
-        if len({m.name for m in middleware}) != len(middleware):
-            raise AssertionError("Please remove duplicate middleware instances.")
-
-    重写 `.name` 为 "MyDifySummarizationMiddleware" 即可与 base stack 区分开.
-    其余逻辑 (wrap_model_call / _should_summarize / _partition_messages / 后端
-    offload) 完全沿用 deepagents 实现 —— 硬约束 #5: 不重写 deepagents 已有逻辑.
+    DeepAgents 0.6.12 的 ``_apply_custom_middleware`` 会按 ``.name`` 原位替换
+    core middleware。这里必须返回框架原生名称，才能保留正确顺序且只存在一个
+   摘要器。
     """
 
     @property
     def name(self) -> str:
-        # _DeepAgentsSummarizationMiddleware.name 用了 type check (`type(self) is ...`);
-        # 我们的子类会 fall through 到 type(self).__name__ = "MyDifySummarizationMiddleware".
-        # 但显式返回更稳, 避免以后 deepagents 改 property 行为.
-        return "MyDifySummarizationMiddleware"
+        return "SummarizationMiddleware"
 
 
 # 业务对外名; 单测和 factory 都引用这个
@@ -116,9 +102,8 @@ def build_summarization_middleware(
                  参数的兜底.
 
     Returns:
-        - None: max_message_count <= 0 (关闭压缩)
-        - MyDifySummarizationMiddleware 实例 (`.name` 区别于 deepagents
-          base stack default, 避免 create_agent 撞名校验失败)
+        - None: max_message_count <= 0，使用 DeepAgents 默认摘要策略
+        - MyDifySummarizationMiddleware 实例；由 DeepAgents 按同名替换默认实例
     """
     trigger = build_summarization_trigger(max_message_count)
     if trigger is None:

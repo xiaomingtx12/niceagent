@@ -8,8 +8,10 @@
 约束：单测环境不能真连 Postgres——传 use_checkpointer=False
 绕过 saver；model 用 langchain 自带的 FakeListChatModel。
 """
+import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
+from internal.core.agent_v2 import factory
 from internal.core.agent_v2.factory import (
     MyDifyDeepAgentState,
     build_deep_agent,
@@ -62,6 +64,55 @@ def test_build_deep_agent_with_review_enabled_keeps_going():
     assert "messages" in all_channels
     assert "todos" in all_channels
     assert "files" in all_channels
+    assert "runtime_account_id" in all_channels
+    assert "runtime_review_blocked" in all_channels
+
+
+def test_build_deep_agent_routes_backend_through_native_contract(monkeypatch):
+    from deepagents.backends import StateBackend
+
+    captured = {}
+    sentinel = object()
+
+    def fake_create_deep_agent(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    backend = StateBackend()
+    monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
+
+    result = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={},
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        workspace_backend=backend,
+        use_checkpointer=False,
+    )
+
+    assert result is sentinel
+    assert captured["backend"] is backend
+    names = [middleware.name for middleware in captured["middleware"]]
+    assert "FilesystemMiddleware" not in names
+    assert names.count("SummarizationMiddleware") == 1
+
+
+def test_build_deep_agent_rejects_conflicting_checkpointer_options():
+    with pytest.raises(ValueError, match="cannot be provided together"):
+        build_deep_agent(
+            llm=_llm(),
+            tools=[],
+            system_prompt="test prompt",
+            review_config={},
+            account_id="acct1",
+            app_id="app1",
+            conversation_id="cnv1",
+            checkpointer=True,
+            use_checkpointer=False,
+        )
 
 
 def test_build_thread_config_contains_thread_id_and_metadata():

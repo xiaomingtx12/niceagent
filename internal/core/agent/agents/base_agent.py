@@ -1,15 +1,24 @@
 import uuid
+import time
 from threading import Thread
 from typing import Optional, Any, Iterator
 
+from deepagents.backends.protocol import BackendProtocol
 from langchain_core.language_models import BaseChatModel
 from langchain_core.load import Serializable
+from langchain_core.messages import HumanMessage
 from langchain_core.runnables import Runnable, RunnableConfig
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import ConfigDict, PrivateAttr
 
 from internal.core.agent.entities.agent_entity import AgentConfig, AgentState
 from internal.core.agent_v2.factory import build_deep_agent, build_thread_config
+from internal.core.agent_v2.middleware.event_translation_middleware import (
+    ToolCallContext,
+    translate_ai_message,
+    translate_tool_message,
+)
 from internal.exception import FailException
 from .agent_queue_manager import AgentQueueManager
 from ..entities.queue_entity import AgentResult, AgentThought, QueueEvent
@@ -38,6 +47,8 @@ class BaseAgent(Serializable, Runnable):
     agent_config: AgentConfig
     _agent: CompiledStateGraph = PrivateAttr(None)
     _agent_queue_manager: AgentQueueManager = PrivateAttr(None)
+    _checkpointer: BaseCheckpointSaver | bool | None = PrivateAttr(None)
+    _workspace_backend: BackendProtocol | None = PrivateAttr(None)
 
     model_config = ConfigDict(
         # 字段允许接收任意类型，且不需要校验器
@@ -50,11 +61,17 @@ class BaseAgent(Serializable, Runnable):
         self,
         llm: BaseChatModel,
         agent_config: AgentConfig,
+        checkpointer: BaseCheckpointSaver | bool | None = None,
+        workspace_backend: BackendProtocol | None = None,
         *args,
         **kwargs,
     ):
         """构造函数，调用 build_deep_agent 构造 CompiledStateGraph。"""
         super().__init__(*args, llm=llm, agent_config=agent_config, **kwargs)
+        self._checkpointer = checkpointer
+        self._workspace_backend = (
+            workspace_backend if agent_config.enable_workspace else None
+        )
         self._agent = self._build_agent()
         self._agent_queue_manager = AgentQueueManager(
             user_id=agent_config.user_id,
@@ -69,15 +86,8 @@ class BaseAgent(Serializable, Runnable):
         (R1 起这三个 ID 是 AgentConfig 显式字段, factory 直接读; 之前 master
         老实现靠 getattr hack)。
 
-        R1 阶段默认走 PostgresSaver（use_checkpointer=True）；单测里 chat_service
-        可传 `use_checkpointer=False` 跳过 DB（这一开关暂保留在 factory）。
-
-        workspace_backend 构造方式 (R1):
-        - 若 AgentConfig.enable_workspace=True + 三 ID 齐全, 构造 MyDifyWorkspaceBackend
-          注入 FilesystemMiddleware; 否则不挂
-        - session 从 BaseAgent 调用方注入 (chat_service 拿 flask g.sqlalchemy
-          session); R1 阶段 BaseAgent 暂不持有 session, 默认 None (singleton
-          build 阶段不挂 workspace; service 层 invoke 时再传)
+        Checkpointer 默认关闭；同步多 Agent 委托不依赖 saver。需要跨请求恢复时，
+        调用方应显式注入一个生命周期受控的 LangGraph checkpointer。
         """
         return build_deep_agent(
             llm=self.llm,
@@ -89,8 +99,8 @@ class BaseAgent(Serializable, Runnable):
             account_id=str(self.agent_config.account_id or ""),
             app_id=str(self.agent_config.app_id or ""),
             conversation_id=str(self.agent_config.conversation_id or ""),
-            use_checkpointer=False,  # R0 阶段先 false，等 saver migration 上线再开
-            workspace_backend=None,  # R1.4 阶段; service 层 invoke 时可注入
+            checkpointer=self._checkpointer,
+            workspace_backend=self._workspace_backend,
             max_message_count=self.agent_config.max_message_count,  # R2 压缩阈值
             subagents=self.agent_config.subagents,  # R3 sub-agent 配置
         )
@@ -100,7 +110,17 @@ class BaseAgent(Serializable, Runnable):
     ) -> AgentResult:
         """块内容响应，一次性生成完整内容后返回"""
         # 1.调用stream方法获取流式事件输出数据
-        content = input["messages"][0].content
+        if not input.get("messages"):
+            raise FailException("智能体输入消息不能为空")
+        current_message = next(
+            (
+                message
+                for message in reversed(input["messages"])
+                if isinstance(message, HumanMessage)
+            ),
+            input["messages"][-1],
+        )
+        content = current_message.content
         query = ""
         image_urls = []
         if isinstance(content, str):
@@ -184,47 +204,31 @@ class BaseAgent(Serializable, Runnable):
         config: Optional[RunnableConfig] = None,
         **kwargs: Optional[Any],
     ) -> Iterator[AgentThought]:
-        """流式输出。
-
-        R0 改造点：
-        1. 不再走 master 老 `_agent.invoke` + AgentQueueManager 异步线程
-           协议（master 老的 sub-thread 监听 model queue 在 deepagents 模型下
-           拆开了 model 调用的中间件流，_agent_queue_manager 兼容性保留但
-           实际机制变更：现在 thread 调 deepagent `agent.stream()` 而非
-           `agent.invoke()`，把中间件事件直接通过 yield 暴露）
-        2. `_agent_queue_manager.listen(task_id)` 在 R0 阶段仍然保留接口，
-           但内部要改成读 deepagents stream events（不在 R0 必做范围）
-        3. R0 最小改动：调 deepagents `agent.stream(input, config)`，把
-           `agent_thoughts` 状态切片 yield 给上层 SSE 端点
-
-        简化策略：R0 阶段保留 thread + queue 模式，但 thread 内调 deepagent
-        stream，把 EventTranslationMiddleware 写入 state 的 agent_thoughts
-        一次性拷贝到 queue，queue 端按 listen 协议 yield。
-        """
+        """流式输出，并保持现有 SSE queue/心跳/停止协议。"""
         # 1.检测 agent 是否已构建
         if not self._agent:
             raise FailException("智能体未成功构建，请核实后尝试")
 
-        # 2.构建对应的任务id及数据初始化
-        input["task_id"] = input.get("task_id", uuid.uuid4())
-        input["iteration_count"] = input.get("iteration_count", 0)
+        # 2.兼容旧调用的 history 字段，并避免修改调用方传入的字典。
+        stream_input = dict(input)
+        history = list(stream_input.pop("history", []) or [])
+        stream_input["messages"] = history + list(stream_input.get("messages", []))
+        stream_input["task_id"] = stream_input.get("task_id", uuid.uuid4())
+        stream_input["iteration_count"] = stream_input.get("iteration_count", 0)
+        effective_config = self._merge_thread_config(config)
 
         # 3.创建子线程执行 deepagent stream
-        # 注：thread 兼容 master 老协议——chat_service 依赖
-        # `yield from self._agent_queue_manager.listen(input["task_id"])`
-        # 拿到 AgentThought 流；thread 内调 deepagent stream 并把 thoughts
-        # 推到 queue_manager。详见 agent_queue_manager.put_thoughts_from_deepagent
-        # 的实现（R0 阶段用最小实现——单测覆盖）。
+        # 后台线程跑图，当前线程继续由 queue manager 负责心跳与停止标记。
         thread = Thread(
             target=self._run_stream_in_thread,
-            args=(input, config),
+            args=(stream_input, effective_config),
             kwargs=kwargs,
         )
         thread.daemon = True
         thread.start()
 
         # 4.调用队列管理器监听数据并返回迭代器
-        yield from self._agent_queue_manager.listen(input["task_id"])
+        yield from self._agent_queue_manager.listen(stream_input["task_id"])
 
     def _run_stream_in_thread(
         self,
@@ -232,34 +236,108 @@ class BaseAgent(Serializable, Runnable):
         config: Optional[RunnableConfig],
         **kwargs: Any,
     ) -> None:
-        """线程入口：跑 deepagent stream，把 thoughts 推到 queue_manager。
+        """消费 LangGraph update，把 AI/工具消息转换并推送到 SSE 队列。"""
+        from langchain_core.messages import AIMessage, ToolMessage
 
-        R0 最小实现：deepagents 0.6.x `CompiledStateGraph.stream()` 返回
-        `Iterator[dict[str, Any]]`，每个 chunk 是 `{node_name: state_delta}`
-        —— 不是 `(mode, chunk)` 元组（tuple 是 langgraph 0.x 旧语义）。
-
-        EventTranslationMiddleware 把累积的 thoughts 写到 state['agent_thoughts']，
-        这里在 stream 跑完后一次性 publish 给 queue manager。queue 端按
-        listen 协议 yield 给上层 SSE 端点。
-
-        真实 streaming token yield 留 R1+ 由 deepagents 0.7 streaming
-        middleware 提供；R0 阶段一次完整快照已足够前端展示 agent 推理步骤。
-        """
+        tool_calls: ToolCallContext = {}
+        terminal_published = False
+        last_update_at = time.perf_counter()
         try:
+            graph_input = {
+                key: value
+                for key, value in input.items()
+                if key not in {"task_id", "iteration_count"}
+            }
             # chunk 是 dict {node_name: state_delta}，不是 (mode, chunk) 元组
-            for chunk in self._agent.stream(input, config=config, **kwargs):
+            for chunk in self._agent.stream(graph_input, config=config, **kwargs):
                 if not isinstance(chunk, dict):
                     continue
                 for state_delta in chunk.values():
                     if not isinstance(state_delta, dict):
                         continue
-                    thoughts = state_delta.get("agent_thoughts", [])
+                    messages = state_delta.get("messages", [])
+                    if not isinstance(messages, list):
+                        messages = [messages]
+                    thoughts: list[AgentThought] = []
+                    for message in messages:
+                        if isinstance(message, AIMessage):
+                            ai_thoughts, new_tool_calls = translate_ai_message(
+                                message,
+                                task_id=input["task_id"],
+                            )
+                            tool_calls.update(new_tool_calls)
+                            thoughts.extend(ai_thoughts)
+                        elif isinstance(message, ToolMessage):
+                            thoughts.append(
+                                translate_tool_message(
+                                    message,
+                                    task_id=input["task_id"],
+                                    tool_calls=tool_calls,
+                                )
+                            )
+                    if thoughts:
+                        now = time.perf_counter()
+                        latency = (now - last_update_at) / len(thoughts)
+                        thoughts = [
+                            thought.model_copy(update={"latency": latency})
+                            for thought in thoughts
+                        ]
+                        last_update_at = now
                     for thought in thoughts:
                         self._agent_queue_manager.publish(
                             input["task_id"], thought
                         )
+                        if thought.event in {
+                            QueueEvent.AGENT_END,
+                            QueueEvent.ERROR,
+                            QueueEvent.STOP,
+                            QueueEvent.TIMEOUT,
+                        }:
+                            terminal_published = True
         except Exception as exc:  # noqa: BLE001
             self._agent_queue_manager.publish_error(input["task_id"], str(exc))
+            terminal_published = True
+        finally:
+            if not terminal_published:
+                self._agent_queue_manager.publish(
+                    input["task_id"],
+                    AgentThought(
+                        id=uuid.uuid4(),
+                        task_id=input["task_id"],
+                        event=QueueEvent.AGENT_END,
+                    ),
+                )
+
+    def _merge_thread_config(
+        self,
+        config: Optional[RunnableConfig],
+    ) -> Optional[RunnableConfig]:
+        """补齐稳定 thread_id，同时保留调用方 callbacks/tags 等配置。"""
+        account_id = str(self.agent_config.account_id or "")
+        app_id = str(self.agent_config.app_id or "")
+        conversation_id = str(self.agent_config.conversation_id or "")
+        if not all((account_id, app_id, conversation_id)):
+            return config
+
+        defaults = build_thread_config(
+            account_id=account_id,
+            app_id=app_id,
+            conversation_id=conversation_id,
+        )
+        if config is None:
+            return defaults
+
+        merged: RunnableConfig = dict(defaults)
+        merged.update(config)
+        merged["configurable"] = {
+            **defaults["configurable"],
+            **(config.get("configurable") or {}),
+        }
+        merged["metadata"] = {
+            **defaults["metadata"],
+            **(config.get("metadata") or {}),
+        }
+        return merged
 
     @property
     def queue_manager(self) -> AgentQueueManager:

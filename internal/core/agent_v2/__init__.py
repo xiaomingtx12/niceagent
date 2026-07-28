@@ -20,7 +20,8 @@ from internal.core.agent_v2.factory import (
     build_thread_config,
 )
 from internal.core.agent_v2.middleware.event_translation_middleware import (
-    EventTranslationMiddleware,
+    translate_ai_message,
+    translate_tool_message,
 )
 from internal.core.agent_v2.middleware.model_compat_middleware import (
     ModelCompatMiddleware,
@@ -49,7 +50,6 @@ from internal.core.agent_v2.saver import (
 
 
 __all__ = [
-    "EventTranslationMiddleware",
     "ModelCompatMiddleware",
     "MyDifyDeepAgentState",
     "ProjectContextMiddleware",
@@ -66,4 +66,6 @@ __all__ = [
     "normalize_usage",
     "should_trigger_summarization",
     "summarization_threshold",
+    "translate_ai_message",
+    "translate_tool_message",
 ]

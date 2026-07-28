@@ -149,8 +149,8 @@ class OpenAPIService(BaseService):
         agent = BaseAgent(
             llm=llm,
             agent_config=AgentConfig(
-                user_id=account.id,
-                invoke_from=InvokeFrom.DEBUGGER,
+                user_id=end_user.id,
+                invoke_from=InvokeFrom.SERVICE_API,
                 preset_prompt=app_config["preset_prompt"],
                 subagents=app_config["subagents"],
                 tools=tools,
@@ -162,10 +162,9 @@ class OpenAPIService(BaseService):
         )
         # 15.定义智能体状态基础数据
         agent_state = {
-            "messages": [
+            "messages": history + [
                 llm.convert_to_human_message(req.query.data, req.image_urls.data)
             ],
-            "history": history,
         }
 
         # 17.根据stream类型差异执行不同的代码

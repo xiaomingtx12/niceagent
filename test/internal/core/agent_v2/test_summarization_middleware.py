@@ -6,8 +6,7 @@
 - build_summarization_middleware: max_message_count<=0 返回 None;
   >0 返回 MyDifySummarizationMiddleware 实例
 - 透传 backend 给 deepagents 实例
-- 关键: .name = "MyDifySummarizationMiddleware" 避免与 deepagents base stack
-  default SummarizationMiddleware 撞名触发 create_agent AssertionError
+- 关键: .name = "SummarizationMiddleware"，由 DeepAgents 原位替换默认实例
 
 约束 (硬约束 #5): 不重写 _should_summarize; 只测业务包装层.
 不依赖 DB / LLM / deepagents graph 启动.
@@ -125,43 +124,22 @@ def test_build_passes_backend_for_offload():
     assert mw._backend is backend
 
 
-def test_name_avoids_collision_with_deepagents_base_stack():
-    """关键: `.name` 必须区别于 "SummarizationMiddleware" 避免 create_agent 撞名校验.
-
-    deepagents `create_deep_agent` 在 base stack 挂一个 default SummarizationMiddleware
-    (其 `.name` property 返回 "SummarizationMiddleware"). 我们在 user middleware 里
-    再加一个实例必须用不同的 `.name`, 否则触发
-    `langchain.agents.factory.create_agent` line 1080:
-        if len({m.name for m in middleware}) != len(middleware):
-            raise AssertionError("Please remove duplicate middleware instances.")
-    """
+def test_name_replaces_deepagents_default_middleware():
+    """同名使 DeepAgents 在 core stack 原位置替换默认摘要器。"""
     mw = build_summarization_middleware(
         llm=_llm(), max_message_count=20, backend=_backend()
     )
-    assert mw.name == "MyDifySummarizationMiddleware"
-    # 显式不撞 deepagents 公共 alias
-    assert mw.name != "SummarizationMiddleware"
+    assert mw.name == "SummarizationMiddleware"
 
 
-def test_name_collision_set_actually_distinct():
-    """端到端校验: 我们的 MyDifySummarizationMiddleware + deepagents base stack default
-    SummarizationMiddleware 一起挂到 create_agent, 两者 `.name` 不同, 不会触发
-    `len({m.name for m in middleware}) != len(middleware)` 校验.
-
-    回归用: 万一未来 deepagents 改了 property 行为让子类继承 alias,
-    这条测试会失败 → 提醒我们重新评估.
-    """
+def test_name_matches_deepagents_default_for_in_place_replacement():
+    """DeepAgents 0.6.12 的 custom middleware 合并契约是按名称替换。"""
     from deepagents.middleware.summarization import _DeepAgentsSummarizationMiddleware
 
     mw_a = MyDifySummarizationMiddleware(model=_llm(), backend=_backend())
     mw_b = _DeepAgentsSummarizationMiddleware(model=_llm(), backend=_backend())
-    # base stack 的 default 也返回 "SummarizationMiddleware"
     assert mw_b.name == "SummarizationMiddleware"
-    # 而我们的子类返回 "MyDifySummarizationMiddleware"
-    assert mw_a.name == "MyDifySummarizationMiddleware"
-    # 所以两者一起挂是 {mw_a.name, mw_b.name} = 2 个不同的 name, 不会撞
-    combined = [mw_a, mw_b]
-    assert len({m.name for m in combined}) == len(combined) == 2
+    assert mw_a.name == mw_b.name
 
 
 def test_passes_through_trigger_and_keep():

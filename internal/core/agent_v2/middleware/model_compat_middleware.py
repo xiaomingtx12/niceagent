@@ -87,11 +87,20 @@ class ModelCompatMiddleware(AgentMiddleware):
     ) -> Any:
         """包一层 normalize_usage，把老字段映射到新字段。"""
         response = handler(request)
-        ai_message = getattr(response, "result", None) or response
-        if hasattr(ai_message, "model_copy"):
-            normalized = normalize_usage(ai_message)
-            if normalized is not ai_message:
-                # 把 normalized 写回 response.result（如果是 ModelResponse）
+        result = getattr(response, "result", response)
+        if isinstance(result, list):
+            normalized_messages = [
+                normalize_usage(message)
+                if hasattr(message, "model_copy")
+                else message
+                for message in result
+            ]
+            if normalized_messages != result:
+                response.result = normalized_messages
+            return response
+        if hasattr(result, "model_copy"):
+            normalized = normalize_usage(result)
+            if normalized is not result:
                 if hasattr(response, "result"):
                     response.result = normalized
                 else:

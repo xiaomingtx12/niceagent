@@ -1,9 +1,5 @@
-"""saver 模块单测。
-
-覆盖：
-- build_thread_id 格式约定
-- get_postgres_saver 单例 + URI 转换
-"""
+"""saver 模块单测。"""
+from internal.core.agent_v2 import saver
 from internal.core.agent_v2.saver import build_thread_id, _pg_uri_for_langgraph
 
 
@@ -40,3 +36,55 @@ def test_pg_uri_for_langgraph_passthrough():
         _pg_uri_for_langgraph("postgresql://user:pass@host/db")
         == "postgresql://user:pass@host/db"
     )
+
+
+def test_get_postgres_saver_uses_long_lived_connection_pool(monkeypatch):
+    created = {}
+
+    class FakePool:
+        def __init__(self, **kwargs):
+            created["pool_kwargs"] = kwargs
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    class FakeSaver:
+        def __init__(self, pool):
+            created["pool"] = pool
+            self.setup_calls = 0
+
+        def setup(self):
+            self.setup_calls += 1
+
+    class FakeConfig:
+        SQLALCHEMY_DATABASE_URI = (
+            "postgresql+psycopg://user:pass@database/mydify"
+        )
+
+    monkeypatch.setattr(saver, "_saver_singleton", None)
+    monkeypatch.setattr(saver, "_saver_pool", None)
+    monkeypatch.setattr(saver, "_close_registered", False)
+    monkeypatch.setattr(saver, "ConnectionPool", FakePool)
+    monkeypatch.setattr(saver, "PostgresSaver", FakeSaver)
+    monkeypatch.setattr(saver, "Config", FakeConfig)
+    monkeypatch.setattr(
+        saver.atexit,
+        "register",
+        lambda fn: created.setdefault("registered", fn),
+    )
+
+    first = saver.get_postgres_saver()
+    second = saver.get_postgres_saver()
+
+    assert first is second
+    assert first.setup_calls == 1
+    assert created["pool_kwargs"]["conninfo"] == (
+        "postgresql://user:pass@database/mydify"
+    )
+    assert created["pool_kwargs"]["kwargs"]["autocommit"] is True
+    assert created["registered"] is saver.close_postgres_saver
+
+    pool = created["pool"]
+    saver.close_postgres_saver()
+    assert pool.closed is True

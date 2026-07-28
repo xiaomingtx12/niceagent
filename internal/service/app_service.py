@@ -648,10 +648,9 @@ class AppService(BaseService):
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": [
+                "messages": history + [
                     llm.convert_to_human_message(req.query.data, req.image_urls.data)
                 ],
-                "history": history,
             }
         ):
             # 13.提取thought以及answer

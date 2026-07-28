@@ -158,6 +158,7 @@ def test_write_creates_seed_row_with_null_conversation_id(backend, session, ids)
     assert row.path == "seed/readme.md"
     assert row.version == 1
     assert row.storage_backend == "db"
+    assert len(row.content_sha256) == 64
     assert row.is_deleted is False
 
 
@@ -275,6 +276,31 @@ def test_grep_finds_matching_lines(backend, ids):
     assert result.matches[0]["text"] == "ERROR fail"
 
 
+def test_grep_honors_max_count(backend, ids):
+    base = f"/workspace/{ids['account_id']}/{ids['app_id']}"
+    backend.write(f"{base}/seed/log.txt", "hit one\nhit two")
+    result = backend.grep("hit", f"{base}/seed", max_count=1)
+    assert len(result.matches) == 1
+    assert result.truncated is True
+
+
+def test_root_queries_do_not_leak_other_conversations(session, ids):
+    other_conversation = uuid4()
+    current = MyDifyWorkspaceBackend(session=session, **ids)
+    other = MyDifyWorkspaceBackend(
+        session=session,
+        account_id=ids["account_id"],
+        app_id=ids["app_id"],
+        conversation_id=other_conversation,
+    )
+    base = f"/workspace/{ids['account_id']}/{ids['app_id']}"
+    other.write(f"{base}/{other_conversation}/private.txt", "secret")
+
+    assert current.ls("/").entries == []
+    assert current.grep("secret").matches == []
+    assert current.glob("*.txt", "/").matches == []
+
+
 # ---------- upload / download ----------
 
 
@@ -303,6 +329,22 @@ def test_download_files_outside_scope_returns_error(backend):
     responses = backend.download_files(["/etc/passwd"])
     assert len(responses) == 1
     assert responses[0].error is not None
+
+
+def test_async_upload_and_download_are_awaitable(backend, ids):
+    import asyncio
+
+    base = f"/workspace/{ids['account_id']}/{ids['app_id']}"
+    path = f"{base}/seed/async.txt"
+
+    async def run():
+        uploaded = await backend.aupload_files([(path, b"async")])
+        downloaded = await backend.adownload_files([path])
+        return uploaded, downloaded
+
+    uploaded, downloaded = asyncio.run(run())
+    assert uploaded[0].error is None
+    assert downloaded[0].content == b"async"
 
 
 # ---------- async 包装 ----------

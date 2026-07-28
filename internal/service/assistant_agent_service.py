@@ -68,7 +68,7 @@ class AssistantAgentService(BaseService):
             Message,
             app_id=assistant_agent_id,
             conversation_id=conversation.id,
-            invoke_from=InvokeFrom.DEBUGGER,
+            invoke_from=InvokeFrom.ASSISTANT_AGENT,
             created_by=account.id,
             query=req.query.data,
             image_urls=req.image_urls.data,
@@ -106,16 +106,19 @@ class AssistantAgentService(BaseService):
                 user_id=account.id,
                 invoke_from=InvokeFrom.ASSISTANT_AGENT,
                 tools=tools,
+                account_id=account.id,
+                app_id=account.id,
+                conversation_id=conversation.id,
+                enable_workspace=False,
             ),
         )
 
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": [
+                "messages": history + [
                     llm.convert_to_human_message(req.query.data, req.image_urls.data)
                 ],
-                "history": history,
             }
         ):
             # 9.提取thought以及answer
