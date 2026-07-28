@@ -8,6 +8,7 @@ from typing import Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import InMemorySaver
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
@@ -16,6 +17,7 @@ from config.config import Config
 
 _saver_singleton: Optional[PostgresSaver] = None
 _saver_pool: Optional[ConnectionPool] = None
+_memory_saver_singleton: Optional[InMemorySaver] = None
 _saver_lock = Lock()
 _close_registered = False
 
@@ -48,6 +50,30 @@ def get_postgres_saver() -> PostgresSaver:
                 atexit.register(close_postgres_saver)
                 _close_registered = True
         return _saver_singleton
+
+
+def get_configured_checkpointer(
+    mode: str | None = None,
+) -> BaseCheckpointSaver | bool:
+    """Resolve the supported runtime saver mode.
+
+    Production defaults to PostgreSQL. Tests and local ephemeral runs may opt
+    into ``memory``; ``disabled`` is explicit and never selected implicitly.
+    """
+    selected = (mode or Config().AGENT_CHECKPOINT_BACKEND).strip().lower()
+    if selected == "postgres":
+        return get_postgres_saver()
+    if selected == "memory":
+        global _memory_saver_singleton
+        with _saver_lock:
+            if _memory_saver_singleton is None:
+                _memory_saver_singleton = InMemorySaver()
+            return _memory_saver_singleton
+    if selected in {"disabled", "false", "off", "none"}:
+        return False
+    raise ValueError(
+        "AGENT_CHECKPOINT_BACKEND 必须是 postgres、memory 或 disabled"
+    )
 
 
 def close_postgres_saver() -> None:
@@ -89,4 +115,5 @@ __all__ = [
     "build_thread_id",
     "close_postgres_saver",
     "get_postgres_saver",
+    "get_configured_checkpointer",
 ]

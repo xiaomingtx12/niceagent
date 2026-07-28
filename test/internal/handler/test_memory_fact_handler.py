@@ -1,222 +1,180 @@
-"""MemoryFactHandler 单测.
+"""MemoryFactHandler contract tests."""
 
-覆盖 6 个端点 (WebApp 4 + creator 2):
-- GET  /web-apps/<token>/memory/facts  → list_my_memory_facts
-- POST /web-apps/<token>/memory/facts  → create_my_memory_fact
-- GET  /web-apps/<token>/memory/facts/<fact_id> → get_my_memory_fact
-- DELETE /web-apps/<token>/memory/facts/<fact_id> → delete_my_memory_fact
-- GET  /apps/<app_id>/memory/facts     → list_app_memory_facts
-- DELETE /apps/<app_id>/memory/facts/<fact_id> → delete_app_memory_fact
-
-约束 (硬约束 #5): handler 只做参数解析 + 鉴权 + 序列化; 业务逻辑由
-MemoryFactService 保证. handler 单测只验证 handler 正确调用 service +
-返回正确结构, 不重复测业务逻辑 (service 已在 test_memory_fact_service
-覆盖). 用 unittest.mock 隔离 service + Flask test client 模拟 request
-context (current_user).
-
-注: WebApp 端点鉴权 master 现状是用 login_required + Account; 真正 anonymous
-end-user 鉴权待 R5+. 本测试按 master 模式覆盖.
-"""
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock
 from uuid import uuid4
 
 import pytest
 from flask import Flask
-from flask_login import LoginManager
+from flask_login import LoginManager, UserMixin, login_user
+
+from internal.handler.memory_fact_handler import MemoryFactHandler
 
 
-# ---------- 通用 fixture ----------
+class _Account(UserMixin):
+    def __init__(self):
+        self.id = uuid4()
 
-@pytest.fixture
-def account():
-    a = MagicMock()
-    a.id = uuid4()
-    a.is_authenticated = True  # flask_login 检查
-    a.is_active = True
-    return a
-
-
-@pytest.fixture
-def app():
-    a = MagicMock()
-    a.id = uuid4()
-    a.account_id = uuid4()
-    return a
+    def get_id(self):
+        return str(self.id)
 
 
 @pytest.fixture
-def flask_app(account):
-    """Flask app + LoginManager + user_loader + 已登录 context."""
-    from flask_login import login_user
+def web():
+    flask_app = Flask(__name__)
+    flask_app.config["SECRET_KEY"] = "test"
+    login_manager = LoginManager(flask_app)
+    account = _Account()
 
-    app = Flask(__name__)
-    app.config["SECRET_KEY"] = "test"
-    lm = LoginManager()
-    lm.init_app(app)
-
-    @lm.user_loader
-    def _load_user(user_id):
-        return account  # 测试恒返回 mock account
-
-    with app.test_request_context():
-        # 主动 login_user 让 current_user 解析到 account
-        login_user(account)
-        yield app, account
-
-
-@pytest.fixture
-def handler(flask_app, app):
-    """构造 handler + 把 mock service 装上. flask_app 已激活 request context."""
-    _flask, account = flask_app
-    from internal.handler.memory_fact_handler import MemoryFactHandler
-
-    h = MemoryFactHandler(
+    @login_manager.user_loader
+    def _load_user(_user_id):
+        return account
+    app = MagicMock(id=uuid4(), account_id=uuid4())
+    end_user = MagicMock(id=uuid4())
+    handler = MemoryFactHandler(
         memory_fact_service=MagicMock(),
         web_app_service=MagicMock(),
         app_service=MagicMock(),
     )
-    h.web_app_service.get_web_app.return_value = app
-    h.app_service.get_app.return_value = app
-    return h, app, account
+    handler.web_app_service.get_web_app.return_value = app
+    handler.web_app_service.resolve_web_app_end_user.return_value = end_user
+    handler.app_service.get_app.return_value = app
+    return flask_app, account, app, end_user, handler
 
 
-def _fact(**overrides):
-    f = MagicMock()
-    f.id = overrides.get("id", uuid4())
-    f.to_dict.return_value = overrides.get("to_dict", {"id": str(f.id), "content": "x"})
-    return f
+def _call(web, path, method, view, *, json=None, **kwargs):
+    flask_app, account, *_ = web
+    with flask_app.test_request_context(path, method=method, json=json):
+        login_user(account)
+        return view(**kwargs)
 
 
-def _body(resp):
-    """pkg.response.success_json 返回 (jsonify_response, status) tuple."""
-    return resp[0].get_json()
+def _data(response):
+    return response[0].get_json()["data"]
 
 
-# ---------- end-user 端点 (WebApp token) ----------
+def test_list_resolves_server_side_end_user_and_validates_pagination(web):
+    _, _, app, end_user, handler = web
+    fact = MagicMock()
+    fact.to_dict.return_value = {"id": "fact-1", "content": "偏好中文"}
+    handler.memory_fact_service.list_end_user_facts.return_value = [fact]
 
-
-def test_list_my_memory_facts_calls_service(handler):
-    h, app, account = handler
-    fact = _fact(to_dict={"id": "f1", "content": "hello"})
-    h.memory_fact_service.list_end_user_facts.return_value = [fact]
-
-    resp = h.list_my_memory_facts(token="abc")
-
-    h.web_app_service.get_web_app.assert_called_once_with("abc")
-    h.memory_fact_service.list_end_user_facts.assert_called_once_with(
-        account_id=str(app.account_id),
-        app_id=str(app.id),
-        end_user_id=str(account.id),
+    response = _call(
+        web,
+        "/web-apps/token/memories?sort=importance&limit=25&offset=5",
+        "GET",
+        handler.list_my_memories,
+        token="token",
     )
-    body = _body(resp)
-    # Response envelope: {code, message, data: {items, total}}
-    assert body["data"]["total"] == 1
-    assert body["data"]["items"] == [{"id": "f1", "content": "hello"}]
 
-
-def test_create_my_memory_fact_calls_service(handler):
-    h, app, account = handler
-    fact = _fact(to_dict={"id": "new", "content": "manual"})
-    h.memory_fact_service.create_fact.return_value = fact
-
-    # 模拟 wtforms validate 通过
-    req_instance = MagicMock()
-    req_instance.validate.return_value = True
-    req_instance.fact_type.data = "preference"
-    req_instance.content.data = "manual"
-    req_instance.confidence.data = 0.95
-    with patch(
-        "internal.handler.memory_fact_handler.CreateMemoryFactReq",
-        return_value=req_instance,
-    ):
-        resp = h.create_my_memory_fact(token="abc")
-
-    h.memory_fact_service.create_fact.assert_called_once()
-    kwargs = h.memory_fact_service.create_fact.call_args.kwargs
-    assert kwargs["fact_type"] == "preference"
-    assert kwargs["content"] == "manual"
-    assert kwargs["confidence"] == 0.95
-    assert kwargs["auto_extracted"] is False
-    assert kwargs["end_user_id"] == str(account.id)
-    assert _body(resp)["data"] == {"id": "new", "content": "manual"}
-
-
-def test_get_my_memory_fact_found(handler):
-    h, app, account = handler
-    target_id = uuid4()
-    fact = _fact(id=target_id, to_dict={"id": str(target_id), "content": "found"})
-    other = _fact(to_dict={"id": str(uuid4()), "content": "other"})
-    h.memory_fact_service.list_end_user_facts.return_value = [other, fact]
-
-    resp = h.get_my_memory_fact(token="abc", fact_id=target_id)
-
-    assert _body(resp)["data"] == {"id": str(target_id), "content": "found"}
-
-
-def test_get_my_memory_fact_not_found(handler):
-    h, app, account = handler
-    h.memory_fact_service.list_end_user_facts.return_value = []
-
-    resp = h.get_my_memory_fact(token="abc", fact_id=uuid4())
-
-    # 找不到 -> 返回 errors dict
-    assert _body(resp)["data"] == {"fact_id": "fact 不存在或无权访问"}
-
-
-def test_delete_my_memory_fact_calls_service_actor_end_user(handler):
-    h, app, account = handler
-    fact_id = uuid4()
-
-    resp = h.delete_my_memory_fact(token="abc", fact_id=fact_id)
-
-    h.memory_fact_service.soft_delete_fact.assert_called_once_with(
-        account_id=str(app.account_id),
-        fact_id=fact_id,
-        actor_end_user_id=str(account.id),
-        actor_is_creator=False,
+    handler.memory_fact_service.list_end_user_facts.assert_called_once_with(
+        account_id=app.account_id,
+        app_id=app.id,
+        end_user_id=end_user.id,
+        keyword=None,
+        sort="importance",
+        limit=25,
+        offset=5,
     )
-    assert "删除成功" in (_body(resp).get("message") or "")
+    assert _data(response)["items"] == [{"id": "fact-1", "content": "偏好中文"}]
 
-
-# ---------- creator 端点 ----------
-
-
-def test_list_app_memory_facts_calls_service(handler):
-    h, app, account = handler
-    fact = _fact(to_dict={"id": "c1", "content": "creator view"})
-    h.memory_fact_service.list_creator_facts.return_value = [fact]
-
-    req_instance = MagicMock()
-    req_instance.validate.return_value = True
-    req_instance.end_user_id.data = "eu1"
-    req_instance.fact_type.data = "instruction"
-    with patch(
-        "internal.handler.memory_fact_handler.GetMemoryFactsReq",
-        return_value=req_instance,
-    ):
-        resp = h.list_app_memory_facts(app_id=app.id)
-
-    h.app_service.get_app.assert_called_once_with(app.id, account)
-    h.memory_fact_service.list_creator_facts.assert_called_once_with(
-        account_id=str(app.account_id),
-        app_id=str(app.id),
-        end_user_id_filter="eu1",
-        fact_type_filter="instruction",
+    invalid = _call(
+        web,
+        "/web-apps/token/memories?limit=bad",
+        "GET",
+        handler.list_my_memories,
+        token="token",
     )
-    assert _body(resp)["data"]["total"] == 1
+    assert "pagination" in _data(invalid)
 
 
-def test_delete_app_memory_fact_actor_is_creator(handler):
-    h, app, account = handler
-    fact_id = uuid4()
+def test_manual_create_validates_importance(web):
+    _, _, app, end_user, handler = web
+    fact = MagicMock()
+    fact.to_dict.return_value = {"id": "new"}
+    handler.memory_fact_service.create_end_user_fact.return_value = fact
 
-    resp = h.delete_app_memory_fact(app_id=app.id, fact_id=fact_id)
-
-    h.app_service.get_app.assert_called_once_with(app.id, account)
-    h.memory_fact_service.soft_delete_fact.assert_called_once_with(
-        account_id=str(app.account_id),
-        fact_id=fact_id,
-        actor_is_creator=True,
+    response = _call(
+        web,
+        "/web-apps/token/memories",
+        "POST",
+        handler.create_my_memory,
+        token="token",
+        json={"content": "  长期使用中文  ", "importance": 0.8},
     )
-    assert "删除成功" in (_body(resp).get("message") or "")
+
+    handler.memory_fact_service.create_end_user_fact.assert_called_once_with(
+        account_id=app.account_id,
+        app_id=app.id,
+        end_user_id=end_user.id,
+        content="  长期使用中文  ",
+        importance=0.8,
+    )
+    assert _data(response) == {"id": "new"}
+
+    invalid = _call(
+        web,
+        "/web-apps/token/memories",
+        "POST",
+        handler.create_my_memory,
+        token="token",
+        json={"content": "x", "importance": 2},
+    )
+    assert "importance" in _data(invalid)
+
+
+def test_batch_delete_rejects_invalid_time_and_scopes_to_end_user(web):
+    _, _, app, end_user, handler = web
+    handler.memory_fact_service.batch_delete_end_user_facts.return_value = 2
+    fact_ids = [str(uuid4()), str(uuid4())]
+
+    response = _call(
+        web,
+        "/web-apps/token/memories/batch-delete",
+        "POST",
+        handler.batch_delete_my_memories,
+        token="token",
+        json={"fact_ids": fact_ids},
+    )
+    handler.memory_fact_service.batch_delete_end_user_facts.assert_called_once_with(
+        account_id=app.account_id,
+        app_id=app.id,
+        end_user_id=end_user.id,
+        fact_ids=fact_ids,
+        before=None,
+        after=None,
+    )
+    assert _data(response) == {"deleted": 2}
+
+    invalid = _call(
+        web,
+        "/web-apps/token/memories/batch-delete",
+        "POST",
+        handler.batch_delete_my_memories,
+        token="token",
+        json={"before": "not-a-date"},
+    )
+    assert "before" in _data(invalid)
+
+
+def test_creator_memory_endpoint_is_read_only_inspection(web):
+    _, account, app, _, handler = web
+    fact = MagicMock()
+    fact.to_dict.return_value = {"id": "creator-visible"}
+    handler.memory_fact_service.list_creator_facts.return_value = [fact]
+
+    response = _call(
+        web,
+        f"/apps/{app.id}/memories?keyword=java",
+        "GET",
+        handler.list_app_memories,
+        app_id=app.id,
+    )
+
+    handler.app_service.get_app.assert_called_once_with(app.id, ANY)
+    handler.memory_fact_service.list_creator_facts.assert_called_once_with(
+        account_id=app.account_id,
+        app_id=app.id,
+        end_user_id_filter=None,
+        keyword="java",
+    )
+    assert _data(response)["items"] == [{"id": "creator-visible"}]

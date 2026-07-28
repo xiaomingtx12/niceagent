@@ -13,7 +13,7 @@ from internal.core.agent.agents import AgentQueueManager, BaseAgent
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
 from internal.core.language_model.entities.model_entity import ModelFeature
-from internal.core.memory import TokenBufferMemory
+from internal.core.memory import load_history_messages
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.model import Account, Message
 from internal.schema.assistant_agent_schema import (
@@ -28,6 +28,7 @@ from internal.task.workflow_task import (
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from .agent_runtime_service import AgentRuntimeService
 from .conversation_service import ConversationService
 from .embeddings_service import EmbeddingsService
 from .faiss_service import FaissService
@@ -43,6 +44,7 @@ class AssistantAgentService(BaseService):
     faiss_service: FaissService
     embeddings_service: EmbeddingsService
     conversation_service: ConversationService
+    agent_runtime_service: AgentRuntimeService
 
     def chat(self, req: AssistantAgentChat, account: Account) -> Generator:
         """传递query与账号实现与辅助Agent进行会话"""
@@ -58,7 +60,9 @@ class AssistantAgentService(BaseService):
             raise FailException(f"辅助智能体会话失败: {str(e)}")
 
         # 2.获取辅助Agent对应的id
-        assistant_agent_id = current_app.config.get("ASSISTANT_AGENT_ID")
+        assistant_agent_id = UUID(
+            str(current_app.config.get("ASSISTANT_AGENT_ID"))
+        )
 
         # 3.获取当前应用的调试会话信息
         conversation = account.assistant_agent_conversation
@@ -83,13 +87,11 @@ class AssistantAgentService(BaseService):
             api_key=api_key,
         )
 
-        # 6.实例化TokenBufferMemory用于提取短期记忆
-        token_buffer_memory = TokenBufferMemory(
+        # 6.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
+        history = load_history_messages(
             db=self.db,
             conversation=conversation,
-            model_instance=llm,
         )
-        history = token_buffer_memory.get_history_prompt_messages(message_limit=3)
 
         # 7.将草稿配置中的tools转换成LangChain工具
         tools = [
@@ -99,24 +101,41 @@ class AssistantAgentService(BaseService):
             self.convert_app_with_workflow_generator_to_tool(account),
         ]
 
-        # 8.构建 Agent（R0 用统一 BaseAgent，老 FunctionCallAgent 已删）
+        runtime = self.agent_runtime_service.prepare(
+            account_id=account.id,
+            app_id=assistant_agent_id,
+            conversation_id=conversation.id,
+            created_by=account.id,
+            end_user_id=None,
+            query=req.query.data,
+            skill_bindings=[],
+            subagents=[],
+        )
         agent = BaseAgent(
             llm=llm,
+            checkpointer=runtime.checkpointer,
+            workspace_backend=runtime.workspace_backend,
+            permissions=runtime.permissions,
+            skill_sources=runtime.skill_sources,
+            memory_sources=runtime.memory_sources,
+            subagent_skill_sources=runtime.subagent_skill_sources,
             agent_config=AgentConfig(
                 user_id=account.id,
                 invoke_from=InvokeFrom.ASSISTANT_AGENT,
+                app_name="应用构建助手",
+                app_description="帮助 Creator 创建应用和工作流。",
                 tools=tools,
                 account_id=account.id,
-                app_id=account.id,
+                app_id=assistant_agent_id,
                 conversation_id=conversation.id,
-                enable_workspace=False,
             ),
         )
 
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": history + [
+                "history": history,
+                "messages": [
                     llm.convert_to_human_message(req.query.data, req.image_urls.data)
                 ],
             }
@@ -180,7 +199,7 @@ class AssistantAgentService(BaseService):
         self.conversation_service.save_agent_thoughts(
             account_id=account.id,
             app_id=assistant_agent_id,
-            app_config={"long_term_memory": {"enable": True}},
+            app_config={},
             conversation_id=conversation.id,
             message_id=message.id,
             agent_thoughts=[agent_thought for agent_thought in agent_thoughts.values()],

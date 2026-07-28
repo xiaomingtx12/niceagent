@@ -12,15 +12,16 @@ from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
 from internal.core.language_model import LanguageModelManager
 from internal.core.language_model.entities.model_entity import ModelFeature
-from internal.core.memory import TokenBufferMemory
+from internal.core.memory import load_history_messages
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import NotFoundException, ForbiddenException
-from internal.model import App, Account, Conversation, Message
+from internal.model import App, Account, Conversation, EndUser, Message
 from internal.schema.web_app_schema import WebAppChatReq
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
+from .agent_runtime_service import AgentRuntimeService
 from .base_service import BaseService
 from .conversation_service import ConversationService
 from .language_model_service import LanguageModelService
@@ -38,6 +39,32 @@ class WebAppService(BaseService):
     conversation_service: ConversationService
     language_model_service: LanguageModelService
     language_model_manager: LanguageModelManager
+    agent_runtime_service: AgentRuntimeService
+
+    def resolve_web_app_end_user(
+        self,
+        *,
+        app: App,
+        account: Account,
+    ) -> EndUser:
+        """Resolve the authenticated WebApp account to an app-scoped EndUser."""
+        end_user = (
+            self.db.session.query(EndUser)
+            .filter(
+                EndUser.app_id == app.id,
+                EndUser.external_user_id == account.id,
+            )
+            .one_or_none()
+        )
+        if end_user is None:
+            end_user = EndUser(
+                tenant_id=app.account_id,
+                app_id=app.id,
+                external_user_id=account.id,
+            )
+            self.db.session.add(end_user)
+            self.db.session.commit()
+        return end_user
 
     def get_web_app(self, token: str) -> App:
         """根据传递的token获取WebApp实例"""
@@ -100,6 +127,7 @@ class WebAppService(BaseService):
         """根据传递的token凭证+请求与指定的WebApp进行对话"""
         # 1.获取WebApp应用并校验应用是否发布
         app = self.get_web_app(token)
+        end_user = self.resolve_web_app_end_user(app=app, account=account)
 
         # 2.检测是否传递了会话id，如果传递了需要校验会话的归属信息
         if req.conversation_id.data:
@@ -108,7 +136,7 @@ class WebAppService(BaseService):
                 not conversation
                 or conversation.app_id != app.id
                 or conversation.invoke_from != InvokeFrom.WEB_APP
-                or conversation.created_by != account.id
+                or conversation.created_by not in {end_user.id, account.id}
                 or conversation.is_deleted is True
             ):
                 raise ForbiddenException(
@@ -122,7 +150,7 @@ class WebAppService(BaseService):
                     "app_id": app.id,
                     "name": "New Conversation",
                     "invoke_from": InvokeFrom.WEB_APP,
-                    "created_by": account.id,
+                    "created_by": end_user.id,
                 },
             )
 
@@ -135,7 +163,7 @@ class WebAppService(BaseService):
             app_id=app.id,
             conversation_id=conversation.id,
             invoke_from=InvokeFrom.WEB_APP,
-            created_by=account.id,
+            created_by=end_user.id,
             query=req.query.data,
             image_urls=req.image_urls.data,
             status=MessageStatus.NORMAL,
@@ -144,17 +172,13 @@ class WebAppService(BaseService):
         # 6.从语言模型管理器中加载大语言模型
         llm = self.language_model_service.load_language_model(
             app_config.get("model_config", {}),
-            account_id=account.id,
+            account_id=app.account_id,
         )
 
-        # 7.实例化TokenBufferMemory用于提取短期记忆
-        token_buffer_memory = TokenBufferMemory(
+        # 7.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
+        history = load_history_messages(
             db=self.db,
             conversation=conversation,
-            model_instance=llm,
-        )
-        history = token_buffer_memory.get_history_prompt_messages(
-            message_limit=app_config["dialog_round"],
         )
 
         # 8.将草稿配置中的tools转换成LangChain工具
@@ -169,7 +193,7 @@ class WebAppService(BaseService):
                 self.retrieval_service.create_langchain_tool_from_search(
                     flask_app=current_app._get_current_object(),
                     dataset_ids=[dataset["id"] for dataset in app_config["datasets"]],
-                    account_id=account.id,
+                    account_id=app.account_id,
                     retrival_source=RetrievalSource.APP,
                     source_app_id=app.id,
                     **app_config["retrieval_config"],
@@ -186,31 +210,55 @@ class WebAppService(BaseService):
             )
             tools.extend(workflow_tools)
 
-        # 12.统一 BaseAgent（R0 删 FunctionCallAgent/ReACTAgent 分支）
+        runtime = self.agent_runtime_service.prepare(
+            account_id=app.account_id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+            created_by=end_user.id,
+            end_user_id=end_user.id,
+            query=req.query.data,
+            skill_bindings=app_config["skills"],
+            subagents=app_config["subagents"],
+        )
         agent = BaseAgent(
             llm=llm,
+            checkpointer=runtime.checkpointer,
+            workspace_backend=runtime.workspace_backend,
+            permissions=runtime.permissions,
+            skill_sources=runtime.skill_sources,
+            memory_sources=runtime.memory_sources,
+            subagent_skill_sources=runtime.subagent_skill_sources,
             agent_config=AgentConfig(
-                user_id=account.id,
+                user_id=end_user.id,
                 invoke_from=InvokeFrom.WEB_APP,
+                app_name=app.name,
+                app_description=app.description,
                 preset_prompt=app_config["preset_prompt"],
+                opening_statement=(
+                    app_config["opening_statement"] if not history else ""
+                ),
                 subagents=app_config["subagents"],
                 tools=tools,
                 review_config=app_config["review_config"],
-                account_id=account.id,
+                account_id=app.account_id,
                 app_id=app.id,
                 conversation_id=conversation.id,
+                end_user_id=end_user.id,
             ),
         )
 
         # 13.定义字典存储推理过程，并调用智能体获取消息
         # 注意：将历史消息和当前消息合并到messages字段中（AgentState已移除history字段）
-        all_messages = history + [
-            llm.convert_to_human_message(req.query.data, req.image_urls.data)
-        ]
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": all_messages,
+                "history": history,
+                "messages": [
+                    llm.convert_to_human_message(
+                        req.query.data,
+                        req.image_urls.data,
+                    )
+                ],
             }
         ):
             # 14.提取thought以及answer
@@ -272,21 +320,41 @@ class WebAppService(BaseService):
 
         # 20.将消息以及推理过程添加到数据库
         self.conversation_service.save_agent_thoughts(
-            account_id=account.id,
+            account_id=app.account_id,
             app_id=app.id,
             app_config=app_config,
             conversation_id=conversation.id,
             message_id=message.id,
             agent_thoughts=[agent_thought for agent_thought in agent_thoughts.values()],
         )
+        answer = "".join(
+            thought.answer
+            for thought in agent_thoughts.values()
+            if thought.event == QueueEvent.AGENT_MESSAGE
+        )
+        self.agent_runtime_service.extract_and_store_facts(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id=end_user.id,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            query=req.query.data,
+            answer=answer,
+            llm=llm,
+        )
 
     def stop_web_app_chat(self, token: str, task_id: UUID, account: Account):
         """根据传递的token+task_id停止与指定WebApp对话"""
         # 1.获取WebApp应用并校验应用是否发布
-        self.get_web_app(token)
+        app = self.get_web_app(token)
+        end_user = self.resolve_web_app_end_user(app=app, account=account)
 
         # 2.调用智能体队列管理器停止特定任务
-        AgentQueueManager.set_stop_flag(task_id, InvokeFrom.WEB_APP, account.id)
+        AgentQueueManager.set_stop_flag(
+            task_id,
+            InvokeFrom.WEB_APP,
+            end_user.id,
+        )
 
     def get_conversations(
         self, token: str, is_pinned: bool, account: Account
@@ -294,13 +362,14 @@ class WebAppService(BaseService):
         """根据传递的token+is_pinned+account获取指定账号在该WebApp下的会话列表数据"""
         # 1.获取WebApp应用并校验应用是否发布
         app = self.get_web_app(token)
+        end_user = self.resolve_web_app_end_user(app=app, account=account)
 
         # 2.筛选过滤并查询数据
         conversations = (
             self.db.session.query(Conversation)
             .filter(
                 Conversation.app_id == app.id,
-                Conversation.created_by == account.id,
+                Conversation.created_by.in_([end_user.id, account.id]),
                 Conversation.invoke_from == InvokeFrom.WEB_APP,
                 Conversation.is_pinned == is_pinned,
                 ~Conversation.is_deleted,

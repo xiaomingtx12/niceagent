@@ -1,9 +1,9 @@
 import uuid
-import time
 from threading import Thread
 from typing import Optional, Any, Iterator
 
 from deepagents.backends.protocol import BackendProtocol
+from deepagents.middleware.filesystem import FilesystemPermission
 from langchain_core.language_models import BaseChatModel
 from langchain_core.load import Serializable
 from langchain_core.messages import HumanMessage
@@ -14,10 +14,9 @@ from pydantic import ConfigDict, PrivateAttr
 
 from internal.core.agent.entities.agent_entity import AgentConfig, AgentState
 from internal.core.agent_v2.factory import build_deep_agent, build_thread_config
+from internal.core.agent_v2.context import build_app_system_prompt
 from internal.core.agent_v2.middleware.event_translation_middleware import (
-    ToolCallContext,
-    translate_ai_message,
-    translate_tool_message,
+    bind_event_translation,
 )
 from internal.exception import FailException
 from .agent_queue_manager import AgentQueueManager
@@ -49,6 +48,12 @@ class BaseAgent(Serializable, Runnable):
     _agent_queue_manager: AgentQueueManager = PrivateAttr(None)
     _checkpointer: BaseCheckpointSaver | bool | None = PrivateAttr(None)
     _workspace_backend: BackendProtocol | None = PrivateAttr(None)
+    _skill_sources: list[str] = PrivateAttr(default_factory=list)
+    _memory_sources: list[str] = PrivateAttr(default_factory=list)
+    _subagent_skill_sources: dict[str, list[str]] = PrivateAttr(
+        default_factory=dict
+    )
+    _permissions: list[FilesystemPermission] = PrivateAttr(default_factory=list)
 
     model_config = ConfigDict(
         # 字段允许接收任意类型，且不需要校验器
@@ -63,15 +68,21 @@ class BaseAgent(Serializable, Runnable):
         agent_config: AgentConfig,
         checkpointer: BaseCheckpointSaver | bool | None = None,
         workspace_backend: BackendProtocol | None = None,
+        permissions: list[FilesystemPermission] | None = None,
+        skill_sources: list[str] | None = None,
+        memory_sources: list[str] | None = None,
+        subagent_skill_sources: dict[str, list[str]] | None = None,
         *args,
         **kwargs,
     ):
         """构造函数，调用 build_deep_agent 构造 CompiledStateGraph。"""
         super().__init__(*args, llm=llm, agent_config=agent_config, **kwargs)
         self._checkpointer = checkpointer
-        self._workspace_backend = (
-            workspace_backend if agent_config.enable_workspace else None
-        )
+        self._workspace_backend = workspace_backend
+        self._permissions = list(permissions or [])
+        self._skill_sources = list(skill_sources or [])
+        self._memory_sources = list(memory_sources or [])
+        self._subagent_skill_sources = dict(subagent_skill_sources or {})
         self._agent = self._build_agent()
         self._agent_queue_manager = AgentQueueManager(
             user_id=agent_config.user_id,
@@ -92,8 +103,11 @@ class BaseAgent(Serializable, Runnable):
         return build_deep_agent(
             llm=self.llm,
             tools=self.agent_config.tools,
-            system_prompt=self.agent_config.system_prompt.format(
-                preset_prompt=self.agent_config.preset_prompt
+            system_prompt=build_app_system_prompt(
+                app_name=self.agent_config.app_name,
+                app_description=self.agent_config.app_description,
+                preset_prompt=self.agent_config.preset_prompt,
+                opening_statement=self.agent_config.opening_statement,
             ),
             review_config=self.agent_config.review_config,
             account_id=str(self.agent_config.account_id or ""),
@@ -101,7 +115,16 @@ class BaseAgent(Serializable, Runnable):
             conversation_id=str(self.agent_config.conversation_id or ""),
             checkpointer=self._checkpointer,
             workspace_backend=self._workspace_backend,
-            max_message_count=self.agent_config.max_message_count,  # R2 压缩阈值
+            permissions=self._permissions,
+            skill_sources=self._skill_sources,
+            memory_sources=self._memory_sources,
+            subagent_skill_sources=self._subagent_skill_sources,
+            end_user_id=(
+                str(self.agent_config.end_user_id)
+                if self.agent_config.end_user_id
+                else None
+            ),
+            workflow_variables=self.agent_config.workflow_variables,
             subagents=self.agent_config.subagents,  # R3 sub-agent 配置
         )
 
@@ -212,10 +235,23 @@ class BaseAgent(Serializable, Runnable):
         # 2.兼容旧调用的 history 字段，并避免修改调用方传入的字典。
         stream_input = dict(input)
         history = list(stream_input.pop("history", []) or [])
-        stream_input["messages"] = history + list(stream_input.get("messages", []))
+        current_messages = list(stream_input.get("messages", []))
         stream_input["task_id"] = stream_input.get("task_id", uuid.uuid4())
         stream_input["iteration_count"] = stream_input.get("iteration_count", 0)
         effective_config = self._merge_thread_config(config)
+        has_checkpoint = False
+        if self._checkpointer not in (None, False) and effective_config is not None:
+            try:
+                snapshot = self._agent.get_state(effective_config)
+                has_checkpoint = bool(snapshot.values)
+            except Exception:
+                # Saver availability errors must still surface during graph
+                # execution; this check only decides whether DB history is a
+                # first-run bootstrap.
+                has_checkpoint = False
+        stream_input["messages"] = (
+            current_messages if has_checkpoint else history + current_messages
+        )
 
         # 3.创建子线程执行 deepagent stream
         # 后台线程跑图，当前线程继续由 queue manager 负责心跳与停止标记。
@@ -236,77 +272,46 @@ class BaseAgent(Serializable, Runnable):
         config: Optional[RunnableConfig],
         **kwargs: Any,
     ) -> None:
-        """消费 LangGraph update，把 AI/工具消息转换并推送到 SSE 队列。"""
-        from langchain_core.messages import AIMessage, ToolMessage
+        """执行 graph；所有业务事件均由 EventTranslationMiddleware 发布。"""
+        graph_input = {
+            key: value
+            for key, value in input.items()
+            if key not in {"task_id", "iteration_count"}
+        }
+        with bind_event_translation(
+            task_id=input["task_id"],
+            publisher=self._agent_queue_manager.publish,
+        ) as event_session:
+            try:
+                # 消费 updates 仅用于驱动 graph，BaseAgent 不再解析框架内部 chunk。
+                for _ in self._agent.stream(
+                    graph_input,
+                    config=config,
+                    **kwargs,
+                ):
+                    pass
+            except Exception as exc:  # noqa: BLE001
+                event_session.publish_error(exc)
+            finally:
+                # after_agent 是正常路径；这里覆盖框架提前退出但未抛异常的情况。
+                event_session.finish()
+                self._close_runtime_backends()
 
-        tool_calls: ToolCallContext = {}
-        terminal_published = False
-        last_update_at = time.perf_counter()
-        try:
-            graph_input = {
-                key: value
-                for key, value in input.items()
-                if key not in {"task_id", "iteration_count"}
-            }
-            # chunk 是 dict {node_name: state_delta}，不是 (mode, chunk) 元组
-            for chunk in self._agent.stream(graph_input, config=config, **kwargs):
-                if not isinstance(chunk, dict):
-                    continue
-                for state_delta in chunk.values():
-                    if not isinstance(state_delta, dict):
-                        continue
-                    messages = state_delta.get("messages", [])
-                    if not isinstance(messages, list):
-                        messages = [messages]
-                    thoughts: list[AgentThought] = []
-                    for message in messages:
-                        if isinstance(message, AIMessage):
-                            ai_thoughts, new_tool_calls = translate_ai_message(
-                                message,
-                                task_id=input["task_id"],
-                            )
-                            tool_calls.update(new_tool_calls)
-                            thoughts.extend(ai_thoughts)
-                        elif isinstance(message, ToolMessage):
-                            thoughts.append(
-                                translate_tool_message(
-                                    message,
-                                    task_id=input["task_id"],
-                                    tool_calls=tool_calls,
-                                )
-                            )
-                    if thoughts:
-                        now = time.perf_counter()
-                        latency = (now - last_update_at) / len(thoughts)
-                        thoughts = [
-                            thought.model_copy(update={"latency": latency})
-                            for thought in thoughts
-                        ]
-                        last_update_at = now
-                    for thought in thoughts:
-                        self._agent_queue_manager.publish(
-                            input["task_id"], thought
-                        )
-                        if thought.event in {
-                            QueueEvent.AGENT_END,
-                            QueueEvent.ERROR,
-                            QueueEvent.STOP,
-                            QueueEvent.TIMEOUT,
-                        }:
-                            terminal_published = True
-        except Exception as exc:  # noqa: BLE001
-            self._agent_queue_manager.publish_error(input["task_id"], str(exc))
-            terminal_published = True
-        finally:
-            if not terminal_published:
-                self._agent_queue_manager.publish(
-                    input["task_id"],
-                    AgentThought(
-                        id=uuid.uuid4(),
-                        task_id=input["task_id"],
-                        event=QueueEvent.AGENT_END,
-                    ),
-                )
+    def _close_runtime_backends(self) -> None:
+        """Close every route backend owned by this per-run agent instance."""
+        if self._workspace_backend is None:
+            return
+        candidates = [getattr(self._workspace_backend, "default", None)]
+        routes = getattr(self._workspace_backend, "routes", {}) or {}
+        candidates.extend(routes.values())
+        seen: set[int] = set()
+        for backend in candidates:
+            if backend is None or id(backend) in seen:
+                continue
+            seen.add(id(backend))
+            close = getattr(backend, "close", None)
+            if callable(close):
+                close()
 
     def _merge_thread_config(
         self,

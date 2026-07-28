@@ -1,151 +1,193 @@
-"""memory_facts HTTP handler (R4 end-user "我的记忆" 5 端点 + creator 1 端点).
+"""End-user owned memory API and creator read-only inspection."""
 
-业务接口层 (HTTP):
-- WebApp token 鉴权 (继承 master 模式 — 用 current_user 作 end-user 标识):
-  - GET    /web-apps/<token>/memory/facts          list (end-user 本人 + account)
-  - POST   /web-apps/<token>/memory/facts          create (手动写入, end_user_id 来自会话)
-  - GET    /web-apps/<token>/memory/facts/<fact_id> read one (校验可见性)
-  - DELETE /web-apps/<token>/memory/facts/<fact_id> soft_delete (end-user 限本人)
-- Creator @login_required:
-  - GET    /apps/<app_id>/memory/facts             list_creator (全 app, 可过滤)
-  - DELETE /apps/<app_id>/memory/facts/<fact_id>   soft_delete (creator 全权)
-
-end-user 鉴权现状: master 用 login_required + Account (即 creator 本人);
-真正 anonymous end-user 鉴权待 R5+ 接入 — 本轮按 master 模式保持一致,
-end_user_id 默认取 current_user.id (creator 登录时), 这与 plan §3.1 语义
-"creator 同时也能用 WebApp 自己玩" 一致.
-
-约束 (硬约束 #5):
-- 复用 master handler dataclass + inject + pkg.response 模式
-- 业务逻辑全在 MemoryFactService; handler 只做参数解析 + 鉴权 + 序列化
-"""
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from flask import request
-from flask_login import login_required, current_user
+from flask_login import current_user, login_required
 from injector import inject
 
-from internal.schema.memory_fact_schema import (
-    CreateMemoryFactReq,
-    GetMemoryFactsReq,
+from internal.service import (
+    AppService,
+    MemoryFactService,
+    WebAppService,
 )
-from internal.service import MemoryFactService, WebAppService, AppService
-from internal.model import App
-from pkg.response import (
-    success_json,
-    validate_error_json,
-    success_message,
-)
+from pkg.response import success_json, success_message, validate_error_json
 
 
 @inject
 @dataclass
 class MemoryFactHandler:
-    """memory_facts 控制器."""
-
     memory_fact_service: MemoryFactService
-    web_app_service: WebAppService  # for token → app 解析 (复用 master 模式)
-    app_service: AppService  # for app_id → app (creator 鉴权)
-
-    # ---------- WebApp token 鉴权端点 ----------
+    web_app_service: WebAppService
+    app_service: AppService
 
     @login_required
-    def list_my_memory_facts(self, token: str):
-        """GET /web-apps/<token>/memory/facts - 端用户 '我的记忆' 列表."""
-        app = self._resolve_web_app(token)
-        # master 模式: end_user_id = current_user.id (creator 当 WebApp 用户);
-        # 真 anonymous end-user 鉴权待 R5+
-        end_user_id = str(current_user.id)
-        facts = self.memory_fact_service.list_end_user_facts(
-            account_id=str(app.account_id),
-            app_id=str(app.id),
-            end_user_id=end_user_id,
+    def list_my_memories(self, token: str):
+        app, end_user = self._identity(token)
+        try:
+            limit = int(request.args.get("limit", 50))
+            offset = int(request.args.get("offset", 0))
+        except (TypeError, ValueError):
+            return validate_error_json(
+                {"pagination": ["limit 和 offset 必须是整数"]}
+            )
+        if not 1 <= limit <= 200 or offset < 0:
+            return validate_error_json(
+                {
+                    "pagination": [
+                        "limit 必须在 1 到 200 之间，offset 不能小于 0"
+                    ]
+                }
+            )
+        sort = request.args.get("sort", "updated_at")
+        if sort not in {"updated_at", "importance"}:
+            return validate_error_json(
+                {"sort": ["sort 只能是 updated_at 或 importance"]}
+            )
+        rows = self.memory_fact_service.list_end_user_facts(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id=end_user.id,
+            keyword=request.args.get("keyword"),
+            sort=sort,
+            limit=limit,
+            offset=offset,
         )
-        return success_json({"items": [f.to_dict() for f in facts], "total": len(facts)})
+        return success_json({"items": [row.to_dict() for row in rows]})
 
     @login_required
-    def create_my_memory_fact(self, token: str):
-        """POST /web-apps/<token>/memory/facts - 端用户手动写入."""
-        req = CreateMemoryFactReq()
-        if not req.validate():
-            return validate_error_json(req.errors)
-        app = self._resolve_web_app(token)
-        end_user_id = str(current_user.id)
-        fact = self.memory_fact_service.create_fact(
-            account_id=str(app.account_id),
-            app_id=str(app.id),
-            end_user_id=end_user_id,
-            fact_type=req.fact_type.data,
-            content=req.content.data,
-            confidence=req.confidence.data or 1.0,
-            auto_extracted=False,
+    def create_my_memory(self, token: str):
+        app, end_user = self._identity(token)
+        payload = request.get_json(silent=True) or {}
+        content = payload.get("content")
+        if not isinstance(content, str) or not content.strip():
+            return validate_error_json({"content": ["记忆内容不能为空"]})
+        importance = self._parse_importance(payload.get("importance", 0.7))
+        if importance is None:
+            return validate_error_json(
+                {"importance": ["importance 必须是 0 到 1 之间的数字"]}
+            )
+        row = self.memory_fact_service.create_end_user_fact(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id=end_user.id,
+            content=content,
+            importance=importance,
         )
-        return success_json(fact.to_dict())
+        return success_json(row.to_dict())
 
     @login_required
-    def get_my_memory_fact(self, token: str, fact_id: UUID):
-        """GET /web-apps/<token>/memory/facts/<fact_id> - 单个 fact."""
-        app = self._resolve_web_app(token)
-        end_user_id = str(current_user.id)
-        facts = self.memory_fact_service.list_end_user_facts(
-            account_id=str(app.account_id),
-            app_id=str(app.id),
-            end_user_id=end_user_id,
+    def update_my_memory(self, token: str, fact_id: UUID):
+        app, end_user = self._identity(token)
+        payload = request.get_json(silent=True) or {}
+        content = payload.get("content")
+        if not isinstance(content, str) or not content.strip():
+            return validate_error_json({"content": ["记忆内容不能为空"]})
+        importance = (
+            self._parse_importance(payload["importance"])
+            if payload.get("importance") is not None
+            else None
         )
-        for f in facts:
-            if f.id == fact_id:
-                return success_json(f.to_dict())
-        return validate_error_json({"fact_id": "fact 不存在或无权访问"})
-
-    @login_required
-    def delete_my_memory_fact(self, token: str, fact_id: UUID):
-        """DELETE /web-apps/<token>/memory/facts/<fact_id> - 端用户软删除本人."""
-        app = self._resolve_web_app(token)
-        end_user_id = str(current_user.id)
-        self.memory_fact_service.soft_delete_fact(
-            account_id=str(app.account_id),
+        if payload.get("importance") is not None and importance is None:
+            return validate_error_json(
+                {"importance": ["importance 必须是 0 到 1 之间的数字"]}
+            )
+        row = self.memory_fact_service.update_end_user_fact(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id=end_user.id,
             fact_id=fact_id,
-            actor_end_user_id=end_user_id,
-            actor_is_creator=False,
+            content=content,
+            importance=importance,
         )
-        return success_message("删除成功")
-
-    # ---------- Creator 端点 ----------
+        return success_json(row.to_dict())
 
     @login_required
-    def list_app_memory_facts(self, app_id: UUID):
-        """GET /apps/<app_id>/memory/facts - creator 面板列表."""
-        req = GetMemoryFactsReq()
-        if not req.validate():
-            return validate_error_json(req.errors)
-        # AppService.get_app 已经做 account_id 校验 (NotFound / Forbidden)
-        app = self.app_service.get_app(app_id, current_user)
-        facts = self.memory_fact_service.list_creator_facts(
-            account_id=str(app.account_id),
-            app_id=str(app.id),
-            end_user_id_filter=req.end_user_id.data,
-            fact_type_filter=req.fact_type.data,
-        )
-        return success_json({"items": [f.to_dict() for f in facts], "total": len(facts)})
-
-    @login_required
-    def delete_app_memory_fact(self, app_id: UUID, fact_id: UUID):
-        """DELETE /apps/<app_id>/memory/facts/<fact_id> - creator 软删除."""
-        # AppService.get_app 已经做 account_id 校验
-        app = self.app_service.get_app(app_id, current_user)
-        self.memory_fact_service.soft_delete_fact(
-            account_id=str(app.account_id),
+    def delete_my_memory(self, token: str, fact_id: UUID):
+        app, end_user = self._identity(token)
+        self.memory_fact_service.soft_delete_end_user_fact(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id=end_user.id,
             fact_id=fact_id,
-            actor_is_creator=True,
         )
-        return success_message("删除成功")
+        return success_message("记忆已删除")
 
-    # ---------- helpers ----------
+    @login_required
+    def batch_delete_my_memories(self, token: str):
+        app, end_user = self._identity(token)
+        payload = request.get_json(silent=True) or {}
+        fact_ids = payload.get("fact_ids")
+        if fact_ids is not None and (
+            not isinstance(fact_ids, list)
+            or not all(isinstance(item, str) for item in fact_ids)
+        ):
+            return validate_error_json(
+                {"fact_ids": ["fact_ids 必须是 UUID 字符串数组"]}
+            )
+        before = self._parse_datetime(payload.get("before"))
+        after = self._parse_datetime(payload.get("after"))
+        if payload.get("before") and before is None:
+            return validate_error_json(
+                {"before": ["before 必须是 ISO 8601 时间"]}
+            )
+        if payload.get("after") and after is None:
+            return validate_error_json(
+                {"after": ["after 必须是 ISO 8601 时间"]}
+            )
+        if before and after and after > before:
+            return validate_error_json(
+                {"time_range": ["after 不能晚于 before"]}
+            )
+        count = self.memory_fact_service.batch_delete_end_user_facts(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id=end_user.id,
+            fact_ids=fact_ids,
+            before=before,
+            after=after,
+        )
+        return success_json({"deleted": count})
 
-    def _resolve_web_app(self, token: str) -> App:
-        """复用 WebAppService.get_web_app 按 token 拿 app + 校验发布状态."""
-        return self.web_app_service.get_web_app(token)
+    @login_required
+    def list_app_memories(self, app_id: UUID):
+        app = self.app_service.get_app(app_id, current_user)
+        rows = self.memory_fact_service.list_creator_facts(
+            account_id=app.account_id,
+            app_id=app.id,
+            end_user_id_filter=request.args.get("end_user_id"),
+            keyword=request.args.get("keyword"),
+        )
+        return success_json({"items": [row.to_dict() for row in rows]})
+
+    def _identity(self, token: str):
+        app = self.web_app_service.get_web_app(token)
+        end_user = self.web_app_service.resolve_web_app_end_user(
+            app=app,
+            account=current_user,
+        )
+        return app, end_user
+
+    @staticmethod
+    def _parse_datetime(value):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _parse_importance(value):
+        if isinstance(value, bool):
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if 0 <= parsed <= 1 else None
 
 
 __all__ = ["MemoryFactHandler"]

@@ -7,6 +7,11 @@ DEFAULT_CONFIG = {
     "SQLALCHEMY_POOL_SIZE": 30,
     "SQLALCHEMY_POOL_RECYCLE": 3600,
     "SQLALCHEMY_ECHO": "True",
+    # DeepAgents runtime
+    "AGENT_CHECKPOINT_BACKEND": "postgres",
+    "AGENT_MEMORY_RECALL_K": 5,
+    "AGENT_AUTO_EXTRACT_MEMORY": "True",
+    "BUILTIN_SKILLS_ROOT": "resources/agent_skills/builtin",
     # Redis数据库配置
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,

@@ -176,12 +176,6 @@ class FallbackHistoryToDraftReq(FlaskForm):
             raise ValidationError("回退配置版本id必须为UUID")
 
 
-class UpdateDebugConversationSummaryReq(FlaskForm):
-    """更新应用调试会话长期记忆请求体"""
-
-    summary = StringField("summary", default="")
-
-
 class DebugChatReq(FlaskForm):
     """应用调试会话请求结构体"""
 

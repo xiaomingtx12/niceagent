@@ -28,6 +28,14 @@ class Config:
             "pool_pre_ping": True,
         }
         self.SQLALCHEMY_ECHO = _get_bool_env("SQLALCHEMY_ECHO")
+        self.AGENT_CHECKPOINT_BACKEND = str(
+            _get_env("AGENT_CHECKPOINT_BACKEND")
+        ).lower()
+        self.AGENT_MEMORY_RECALL_K = int(_get_env("AGENT_MEMORY_RECALL_K"))
+        self.AGENT_AUTO_EXTRACT_MEMORY = _get_bool_env(
+            "AGENT_AUTO_EXTRACT_MEMORY"
+        )
+        self.BUILTIN_SKILLS_ROOT = _get_env("BUILTIN_SKILLS_ROOT")
 
         # Redis配置
         self.REDIS_HOST = _get_env("REDIS_HOST")

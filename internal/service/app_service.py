@@ -23,7 +23,7 @@ from internal.core.agent_v2.subagent_specs import (
     SubAgentSpecError,
     validate_platform_subagents,
 )
-from internal.core.memory import TokenBufferMemory
+from internal.core.memory import load_history_messages
 from internal.core.tools.api_tools.providers import ApiProviderManager
 from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
 from internal.core.tools.builtin_tools.providers.tongyi import qwen_image_generation
@@ -63,12 +63,14 @@ from internal.schema.app_schema import (
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
+from .agent_runtime_service import AgentRuntimeService
 from .base_service import BaseService
 from .conversation_service import ConversationService
 from .cos_service import CosService
 from .language_model_service import LanguageModelService
 from .provider_api_key_service import ProviderApiKeyService
 from .retrieval_service import RetrievalService
+from .skill_service import SkillService
 from ..core.agent.entities.queue_entity import QueueEvent
 from ..core.language_model import LanguageModelManager
 from ..core.language_model.entities.model_entity import ModelFeature, ModelParameterType
@@ -95,6 +97,8 @@ class AppService(BaseService):
     language_model_service: LanguageModelService
     language_model_manager: LanguageModelManager
     provider_api_key_service: ProviderApiKeyService
+    agent_runtime_service: AgentRuntimeService
+    skill_service: SkillService
 
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
@@ -361,6 +365,7 @@ class AppService(BaseService):
             model_config=draft_app_config["model_config"],
             dialog_round=draft_app_config["dialog_round"],
             preset_prompt=draft_app_config["preset_prompt"],
+            skills=draft_app_config["skills"],
             subagents=draft_app_config["subagents"],
             tools=[
                 {
@@ -373,7 +378,9 @@ class AppService(BaseService):
             ],
             workflows=[workflow["id"] for workflow in draft_app_config["workflows"]],
             retrieval_config=draft_app_config["retrieval_config"],
-            long_term_memory=draft_app_config["long_term_memory"],
+            # Kept only because the legacy database column is non-nullable.
+            # Runtime memory is owned by checkpoints/workspace/memory_facts.
+            long_term_memory={},
             opening_statement=draft_app_config["opening_statement"],
             opening_questions=draft_app_config["opening_questions"],
             speech_to_text=draft_app_config["speech_to_text"],
@@ -514,36 +521,6 @@ class AppService(BaseService):
 
         return draft_app_config_record
 
-    def get_debug_conversation_summary(self, app_id: UUID, account: Account) -> str:
-        """根据传递的应用id+账号获取指定应用的调试会话长期记忆"""
-        # 1.获取应用信息并校验权限
-        app = self.get_app(app_id, account)
-
-        # 2.获取应用的草稿配置，并校验长期记忆是否启用
-        draft_app_config = self.get_draft_app_config(app_id, account)
-        if draft_app_config["long_term_memory"]["enable"] is False:
-            raise FailException("该应用并未开启长期记忆，无法获取")
-
-        return app.debug_conversation.summary
-
-    def update_debug_conversation_summary(
-        self, app_id: UUID, summary: str, account: Account
-    ) -> Conversation:
-        """根据传递的应用id+总结更新指定应用的调试长期记忆"""
-        # 1.获取应用信息并校验权限
-        app = self.get_app(app_id, account)
-
-        # 2.获取应用的草稿配置，并校验长期记忆是否启用
-        draft_app_config = self.get_draft_app_config(app_id, account)
-        if draft_app_config["long_term_memory"]["enable"] is False:
-            raise FailException("该应用并未开启长期记忆，无法获取")
-
-        # 3.更新应用长期记忆
-        debug_conversation = app.debug_conversation
-        self.update(debug_conversation, summary=summary)
-
-        return debug_conversation
-
     def delete_debug_conversation(self, app_id: UUID, account: Account) -> App:
         """根据传递的应用id，删除指定的应用调试会话"""
         # 1.获取应用信息并校验权限
@@ -588,14 +565,10 @@ class AppService(BaseService):
             draft_app_config.get("model_config", {}), account_id=account.id
         )
 
-        # 6.实例化TokenBufferMemory用于提取短期记忆
-        token_buffer_memory = TokenBufferMemory(
+        # 6.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
+        history = load_history_messages(
             db=self.db,
             conversation=debug_conversation,
-            model_instance=llm,
-        )
-        history = token_buffer_memory.get_history_prompt_messages(
-            message_limit=draft_app_config["dialog_round"],
         )
         # 7.将草稿配置中的tools转换成LangChain工具
         tools = self.app_config_service.get_langchain_tools_by_tools_config(
@@ -628,14 +601,33 @@ class AppService(BaseService):
             )
             tools.extend(workflow_tools)
 
-        # 11.统一用 BaseAgent（deepagents 0.6 内部按 model 自动选 function-call / ReACT，
-#     不再在 graph 层分支——master 老 FunctionCallAgent/ReACTAgent R0 已删）
+        runtime = self.agent_runtime_service.prepare(
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=debug_conversation.id,
+            created_by=account.id,
+            end_user_id=None,
+            query=req.query.data,
+            skill_bindings=draft_app_config["skills"],
+            subagents=draft_app_config["subagents"],
+        )
         agent = BaseAgent(
             llm=llm,
+            checkpointer=runtime.checkpointer,
+            workspace_backend=runtime.workspace_backend,
+            permissions=runtime.permissions,
+            skill_sources=runtime.skill_sources,
+            memory_sources=runtime.memory_sources,
+            subagent_skill_sources=runtime.subagent_skill_sources,
             agent_config=AgentConfig(
                 user_id=account.id,
                 invoke_from=InvokeFrom.DEBUGGER,
+                app_name=app.name,
+                app_description=app.description,
                 preset_prompt=draft_app_config["preset_prompt"],
+                opening_statement=(
+                    draft_app_config["opening_statement"] if not history else ""
+                ),
                 subagents=draft_app_config["subagents"],
                 tools=tools,
                 review_config=draft_app_config["review_config"],
@@ -648,7 +640,8 @@ class AppService(BaseService):
         agent_thoughts = {}
         for agent_thought in agent.stream(
             {
-                "messages": history + [
+                "history": history,
+                "messages": [
                     llm.convert_to_human_message(req.query.data, req.image_urls.data)
                 ],
             }
@@ -802,12 +795,12 @@ class AppService(BaseService):
             "model_config",
             "dialog_round",
             "preset_prompt",
+            "skills",
             "subagents",
             "tools",
             "workflows",
             "datasets",
             "retrieval_config",
-            "long_term_memory",
             "opening_statement",
             "opening_questions",
             "speech_to_text",
@@ -919,6 +912,32 @@ class AppService(BaseService):
                 )
             except SubAgentSpecError as exc:
                 raise ValidateErrorException(str(exc)) from exc
+
+        # 6.5 校验平台内置 Skill 绑定。AppConfig 只保存引用，不保存正文。
+        if "skills" in draft_app_config:
+            try:
+                draft_app_config["skills"] = self.skill_service.normalize_bindings(
+                    draft_app_config["skills"]
+                )
+            except FailException as exc:
+                raise ValidateErrorException(str(exc)) from exc
+        if (
+            "skills" in draft_app_config
+            and "subagents" in draft_app_config
+            and draft_app_config.get("subagents")
+        ):
+            root_skills = {
+                item["name"]
+                for item in draft_app_config.get("skills", [])
+                if item.get("enabled", True)
+            }
+            for subagent in draft_app_config["subagents"]:
+                missing = sorted(set(subagent.get("skills", [])) - root_skills)
+                if missing:
+                    raise ValidateErrorException(
+                        "SubAgent 只能选择主 Agent 已挂载的 Skills: "
+                        + ", ".join(missing)
+                    )
 
         # 7.校验tools工具
         if "tools" in draft_app_config:
@@ -1104,19 +1123,6 @@ class AppService(BaseService):
                 0 <= retrieval_config["score"] <= 1
             ):
                 raise ValidateErrorException("最小匹配范围为0-1")
-
-        # 10.校验long_term_memory长期记忆配置
-        if "long_term_memory" in draft_app_config:
-            long_term_memory = draft_app_config["long_term_memory"]
-
-            # 10.1 校验长期记忆格式
-            if not long_term_memory or not isinstance(long_term_memory, dict):
-                raise ValidateErrorException("长期记忆设置格式错误")
-            # 10.2 校验长期记忆属性
-            if set(long_term_memory.keys()) != {"enable"} or not isinstance(
-                long_term_memory["enable"], bool
-            ):
-                raise ValidateErrorException("长期记忆设置格式错误")
 
         # 11.校验opening_statement对话开场白
         if "opening_statement" in draft_app_config:

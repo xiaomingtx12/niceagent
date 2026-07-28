@@ -11,6 +11,12 @@ class EndUser(db.Model):
         PrimaryKeyConstraint("id", name="pk_end_user_id"),
         Index("end_user_tenant_id_idx", "tenant_id"),
         Index("end_user_app_id_idx", "app_id"),
+        Index(
+            "uq_end_user_app_external",
+            "app_id",
+            "external_user_id",
+            unique=True,
+        ),
     )
 
     id = Column(
@@ -18,6 +24,9 @@ class EndUser(db.Model):
     )  # 终端id
     tenant_id = Column(UUID, nullable=False)  # 归属的账号/空间id
     app_id = Column(UUID, nullable=False)  # 归属应用的id，终端用户只能在应用下使用
+    external_user_id = Column(
+        UUID, nullable=True
+    )  # WebApp 登录账号映射；OpenAPI/微信可为空
     updated_at = Column(
         DateTime,
         nullable=False,

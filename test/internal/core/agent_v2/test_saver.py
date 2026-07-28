@@ -1,4 +1,6 @@
 """saver 模块单测。"""
+import pytest
+
 from internal.core.agent_v2 import saver
 from internal.core.agent_v2.saver import build_thread_id, _pg_uri_for_langgraph
 
@@ -88,3 +90,18 @@ def test_get_postgres_saver_uses_long_lived_connection_pool(monkeypatch):
     pool = created["pool"]
     saver.close_postgres_saver()
     assert pool.closed is True
+
+
+def test_configured_memory_saver_is_process_stable(monkeypatch):
+    monkeypatch.setattr(saver, "_memory_saver_singleton", None)
+
+    first = saver.get_configured_checkpointer("memory")
+    second = saver.get_configured_checkpointer("memory")
+
+    assert first is second
+    assert saver.get_configured_checkpointer("disabled") is False
+
+
+def test_configured_saver_rejects_unknown_mode():
+    with pytest.raises(ValueError, match="postgres"):
+        saver.get_configured_checkpointer("sqlite")

@@ -30,6 +30,9 @@ from internal.handler import (
     PlatformHandler,
     WechatHandler,
     ProviderApiKeyHandler,
+    MemoryFactHandler,
+    SkillHandler,
+    WorkspaceFileHandler,
 )
 
 
@@ -64,6 +67,9 @@ class Router:
     platform_handler: PlatformHandler
     wechat_handler: WechatHandler
     provider_api_key_handler: ProviderApiKeyHandler
+    memory_fact_handler: MemoryFactHandler
+    skill_handler: SkillHandler
+    workspace_file_handler: WorkspaceFileHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -120,15 +126,6 @@ class Router:
             "/apps/<uuid:app_id>/fallback-history",
             methods=["POST"],
             view_func=self.app_handler.fallback_history_to_draft,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/summary",
-            view_func=self.app_handler.get_debug_conversation_summary,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/summary",
-            methods=["POST"],
-            view_func=self.app_handler.update_debug_conversation_summary,
         )
         bp.add_url_rule(
             "/apps/<uuid:app_id>/conversations/delete-debug-conversation",
@@ -655,6 +652,73 @@ class Router:
             view_func=self.wechat_handler.wechat,
         )
 
-        # 19.在应用上去注册蓝图
+        # 19.DeepAgents 平台资源
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/skills",
+            methods=["GET"],
+            view_func=self.skill_handler.list_skills,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/workspace/files",
+            methods=["GET"],
+            view_func=self.workspace_file_handler.list_app_files,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/workspace/files",
+            methods=["POST"],
+            view_func=self.workspace_file_handler.write_app_file,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/workspace/file",
+            methods=["GET"],
+            view_func=self.workspace_file_handler.read_app_file,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/workspace/file",
+            methods=["DELETE"],
+            view_func=self.workspace_file_handler.delete_app_file,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/memories",
+            methods=["GET"],
+            view_func=self.memory_fact_handler.list_app_memories,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memories",
+            methods=["GET"],
+            view_func=self.memory_fact_handler.list_my_memories,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memories",
+            methods=["POST"],
+            view_func=self.memory_fact_handler.create_my_memory,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memories/batch-delete",
+            methods=["POST"],
+            view_func=self.memory_fact_handler.batch_delete_my_memories,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memories/<uuid:fact_id>",
+            methods=["PATCH"],
+            view_func=self.memory_fact_handler.update_my_memory,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memories/<uuid:fact_id>",
+            methods=["DELETE"],
+            view_func=self.memory_fact_handler.delete_my_memory,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/files",
+            methods=["GET"],
+            view_func=self.workspace_file_handler.list_conversation_files,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/file",
+            methods=["GET"],
+            view_func=self.workspace_file_handler.read_conversation_file,
+        )
+
+        # 20.在应用上去注册蓝图
         app.register_blueprint(bp)
         app.register_blueprint(openapi_bp)

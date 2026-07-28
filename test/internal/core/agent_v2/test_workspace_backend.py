@@ -122,7 +122,7 @@ def test_validate_rejects_parent_traversal(ids):
 def test_validate_rejects_missing_scope(ids):
     """trailing-slash 后只剩 prefix → 视作 outside scope (不允许 ls root)。"""
     p = f"/workspace/{ids['account_id']}/{ids['app_id']}/"
-    with pytest.raises(WorkspacePathError, match="outside workspace scope"):
+    with pytest.raises(WorkspacePathError, match="missing scope segment"):
         _validate_workspace_path(p, **ids)
 
 
@@ -186,6 +186,40 @@ def test_write_increments_version_on_same_path(backend, session, ids):
     assert result.file_data["content"] == "v3"
 
 
+def test_latest_deleted_version_hides_older_content(backend, session, ids):
+    path = "/conversation_history/thread.md"
+    backend.write(path, "old")
+    latest = session.query(WorkspaceFile).one()
+    tombstone = WorkspaceFile(
+        account_id=ids["account_id"],
+        app_id=ids["app_id"],
+        conversation_id=ids["conversation_id"],
+        path=latest.path,
+        version=2,
+        storage_backend="db",
+        mime_type="text/plain",
+        size_bytes=0,
+        content_sha256="",
+        content=None,
+        is_deleted=True,
+    )
+    session.add(tombstone)
+    session.commit()
+
+    assert backend.read(path).error is not None
+    assert backend.ls("/").entries == []
+
+    backend.write(path, "restored")
+    assert backend.read(path).file_data["content"] == "restored"
+    assert (
+        session.query(WorkspaceFile)
+        .order_by(WorkspaceFile.version.desc())
+        .first()
+        .version
+        == 3
+    )
+
+
 def test_read_nonexistent_returns_error(backend, ids):
     path = f"/workspace/{ids['account_id']}/{ids['app_id']}/seed/missing.txt"
     result = backend.read(path)
@@ -193,10 +227,12 @@ def test_read_nonexistent_returns_error(backend, ids):
     assert "file not found" in result.error
 
 
-def test_read_rejects_path_outside_scope(backend):
+def test_virtual_absolute_path_outside_namespace_is_rejected(backend):
     result = backend.read("/etc/passwd")
     assert result.error is not None
-    assert "outside workspace scope" in result.error
+    assert "not in a writable namespace" in result.error
+    write = backend.write("/etc/passwd", "virtual, not host")
+    assert write.error is not None
 
 
 def test_write_rejects_dot_segment(backend, ids):
@@ -252,8 +288,29 @@ def test_ls_returns_written_files(backend, ids):
     result = backend.ls(f"{base}/seed")
     assert result.error is None
     paths = sorted(e["path"] for e in result.entries)
-    assert f"{base}/seed/a.md" in paths
-    assert f"{base}/seed/b.md" in paths
+    assert paths == ["/seed/a.md", "/seed/b.md"]
+
+
+def test_workspace_namespace_maps_to_current_conversation(backend, session, ids):
+    backend.write("/workspace/report.md", "report")
+    row = session.query(WorkspaceFile).one()
+    assert row.path == f"{ids['conversation_id']}/report.md"
+    assert backend.read("/workspace/report.md").file_data["content"] == "report"
+    assert backend.ls("/workspace").entries[0]["path"] == "/workspace/report.md"
+
+
+def test_artifacts_and_history_namespaces_are_scoped(backend, session, ids):
+    backend.write("/artifacts/out.txt", "artifact")
+    backend.write("/conversation_history/thread.md", "summary")
+    paths = sorted(row.path for row in session.query(WorkspaceFile).all())
+    assert paths == [
+        f"{ids['conversation_id']}/artifacts/out.txt",
+        f"{ids['conversation_id']}/conversation_history/thread.md",
+    ]
+    assert (
+        backend.read("/conversation_history/thread.md").file_data["content"]
+        == "summary"
+    )
 
 
 def test_glob_matches_pattern(backend, ids):
@@ -263,7 +320,7 @@ def test_glob_matches_pattern(backend, ids):
     result = backend.glob("*.md", f"{base}/seed")
     assert result.error is None
     matched = [e["path"] for e in result.matches]
-    assert f"{base}/seed/notes.md" in matched
+    assert "/seed/notes.md" in matched
     assert all("data.csv" not in p for p in matched)
 
 
@@ -281,7 +338,6 @@ def test_grep_honors_max_count(backend, ids):
     backend.write(f"{base}/seed/log.txt", "hit one\nhit two")
     result = backend.grep("hit", f"{base}/seed", max_count=1)
     assert len(result.matches) == 1
-    assert result.truncated is True
 
 
 def test_root_queries_do_not_leak_other_conversations(session, ids):

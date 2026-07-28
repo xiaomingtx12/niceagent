@@ -15,15 +15,18 @@ from .dataset_handler import DatasetHandler
 from .document_handler import DocumentHandler
 from .language_model_handler import LanguageModelHandler
 from .mcp_handler import MCPHandler
+from .memory_fact_handler import MemoryFactHandler
 from .oauth_handler import OAuthHandler
 from .openapi_handler import OpenAPIHandler
 from .platform_handler import PlatformHandler
 from .provider_api_key_handler import ProviderApiKeyHandler
 from .segment_handler import SegmentHandler
+from .skill_handler import SkillHandler
 from .upload_file_handler import UploadFileHandler
 from .web_app_handler import WebAppHandler
 from .wechat_handler import WechatHandler
 from .workflow_handler import WorkflowHandler
+from .workspace_file_handler import WorkspaceFileHandler
 
 __all__ = [
     "AppHandler",
@@ -53,4 +56,7 @@ __all__ = [
     "WechatHandler",
     "PlatformHandler",
     "ProviderApiKeyHandler",
+    "MemoryFactHandler",
+    "SkillHandler",
+    "WorkspaceFileHandler",
 ]

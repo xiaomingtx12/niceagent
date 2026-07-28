@@ -39,6 +39,46 @@ def test_build_deep_agent_returns_compiled_state_graph():
     assert isinstance(agent, CompiledStateGraph)
 
 
+def test_empty_team_does_not_expose_implicit_general_purpose_task():
+    agent = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={},
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        use_checkpointer=False,
+        subagents=[],
+    )
+
+    tool_names = set(agent.nodes["tools"].bound._tools_by_name)
+    assert "task" not in tool_names
+
+
+def test_explicit_sync_team_exposes_native_task_tool():
+    agent = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={},
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        use_checkpointer=False,
+        subagents=[
+            {
+                "name": "researcher",
+                "description": "research",
+                "system_prompt": "work carefully",
+            }
+        ],
+    )
+
+    tool_names = set(agent.nodes["tools"].bound._tools_by_name)
+    assert "task" in tool_names
+
+
 def test_build_deep_agent_with_review_enabled_keeps_going():
     """review enable=True 但没关键词时不影响调用。"""
     agent = build_deep_agent(
@@ -68,6 +108,15 @@ def test_build_deep_agent_with_review_enabled_keeps_going():
     assert "runtime_review_blocked" in all_channels
 
 
+def test_runtime_business_context_is_private_to_the_parent_agent():
+    from deepagents.middleware._state import private_state_field_names
+
+    private_fields = private_state_field_names(MyDifyDeepAgentState)
+
+    assert "runtime_workflow_variables" in private_fields
+    assert "runtime_end_user_id" in private_fields
+
+
 def test_build_deep_agent_routes_backend_through_native_contract(monkeypatch):
     from deepagents.backends import StateBackend
 
@@ -95,9 +144,48 @@ def test_build_deep_agent_routes_backend_through_native_contract(monkeypatch):
 
     assert result is sentinel
     assert captured["backend"] is backend
+    assert captured["memory"] is None
+    assert captured["permissions"] == []
     names = [middleware.name for middleware in captured["middleware"]]
+    assert "EventTranslationMiddleware" in names
     assert "FilesystemMiddleware" not in names
-    assert names.count("SummarizationMiddleware") == 1
+    # Filesystem/Summarization 均由 create_deep_agent 的默认栈安装。
+    assert "SummarizationMiddleware" not in names
+
+
+def test_build_deep_agent_passes_native_memory_and_permissions(monkeypatch):
+    from deepagents.middleware.filesystem import FilesystemPermission
+
+    captured = {}
+    sentinel = object()
+
+    def fake_create_deep_agent(**kwargs):
+        captured.update(kwargs)
+        return sentinel
+
+    permission = FilesystemPermission(
+        operations=["read"],
+        paths=["/memories/**"],
+        mode="allow",
+    )
+    monkeypatch.setattr(factory, "create_deep_agent", fake_create_deep_agent)
+
+    result = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={},
+        account_id="acct1",
+        app_id="app1",
+        conversation_id="cnv1",
+        memory_sources=["/memories/profile.md"],
+        permissions=[permission],
+        use_checkpointer=False,
+    )
+
+    assert result is sentinel
+    assert captured["memory"] == ["/memories/profile.md"]
+    assert captured["permissions"] == [permission]
 
 
 def test_build_deep_agent_rejects_conflicting_checkpointer_options():

@@ -90,8 +90,8 @@ def test_d_v2_single_head():
     )
 
 
-def test_d_v2_004_is_head():
-    """多 Agent 配置迁移是当前 d_v2 链末端。"""
+def test_d_v2_007_is_head():
+    """SubAgent list normalization migration is the current d_v2 head."""
     parsed = _parse_revisions()
     revs = {r for r, _, _ in parsed}
     incoming = set()
@@ -103,7 +103,7 @@ def test_d_v2_004_is_head():
         else:
             incoming.add(down)
     heads = revs - incoming
-    assert "d_v2_004_add_subagents" in heads
+    assert "d_v2_007_subagents_array" in heads
 
 
 def _is_master_head(rev: str) -> bool:

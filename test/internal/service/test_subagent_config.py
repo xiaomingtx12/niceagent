@@ -11,7 +11,7 @@ from internal.service.app_service import AppService
 
 
 def test_default_app_config_starts_with_empty_team():
-    assert DEFAULT_APP_CONFIG["subagents"] == {}
+    assert DEFAULT_APP_CONFIG["subagents"] == []
 
 
 def test_draft_validation_normalizes_subagents_without_other_dependencies():
@@ -27,10 +27,17 @@ def test_draft_validation_normalizes_subagents_without_other_dependencies():
         },
         account=None,
     )
-    assert result["subagents"]["researcher"] == {
-        "description": "负责搜索资料",
-        "system_prompt": "仅返回有来源的研究结论",
-    }
+    assert result["subagents"] == [
+        {
+            "name": "researcher",
+            "description": "负责搜索资料",
+            "system_prompt": "仅返回有来源的研究结论",
+            "mode": "sync",
+            "context_passing": "NONE",
+            "tools": [],
+            "skills": [],
+        }
+    ]
 
 
 def test_draft_validation_maps_subagent_error_to_api_validation_error():
@@ -55,12 +62,17 @@ def test_app_config_response_includes_persisted_team():
         id="config-id",
         dialog_round=3,
         preset_prompt="main",
-        subagents={
-            "researcher": {
+        subagents=[
+            {
+                "name": "researcher",
                 "description": "负责研究",
                 "system_prompt": "你是研究员",
+                "mode": "sync",
+                "context_passing": "NONE",
+                "tools": [],
+                "skills": [],
             }
-        },
+        ],
         retrieval_config={},
         long_term_memory={},
         opening_statement="",

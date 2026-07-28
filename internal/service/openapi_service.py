@@ -8,7 +8,7 @@ from injector import inject
 from internal.core.agent.agents import BaseAgent
 from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.agent.entities.queue_entity import QueueEvent
-from internal.core.memory import TokenBufferMemory
+from internal.core.memory import load_history_messages
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.entity.dataset_entity import RetrievalSource
@@ -18,6 +18,7 @@ from internal.schema.openapi_schema import OpenAPIChatReq
 from pkg.response import Response
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
+from .agent_runtime_service import AgentRuntimeService
 from .app_service import AppService
 from .base_service import BaseService
 from .conversation_service import ConversationService
@@ -37,6 +38,7 @@ class OpenAPIService(BaseService):
     app_config_service: AppConfigService
     conversation_service: ConversationService
     language_model_service: LanguageModelService
+    agent_runtime_service: AgentRuntimeService
 
     def chat(self, req: OpenAPIChatReq, account: Account):
         """根据传递的请求+账号信息发起聊天对话，返回数据为块内容或者生成器"""
@@ -106,14 +108,10 @@ class OpenAPIService(BaseService):
             account_id=account.id,
         )
 
-        # 10.实例化TokenBufferMemory用于提取短期记忆
-        token_buffer_memory = TokenBufferMemory(
+        # 10.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
+        history = load_history_messages(
             db=self.db,
             conversation=conversation,
-            model_instance=llm,
-        )
-        history = token_buffer_memory.get_history_prompt_messages(
-            message_limit=app_config["dialog_round"],
         )
 
         # 11.将草稿配置中的tools转换成LangChain工具
@@ -145,24 +143,46 @@ class OpenAPIService(BaseService):
             )
             tools.extend(workflow_tools)
 
-        # 15.统一 BaseAgent（R0 删除 FunctionCallAgent/ReACTAgent 分支）
+        runtime = self.agent_runtime_service.prepare(
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+            created_by=end_user.id,
+            end_user_id=end_user.id,
+            query=req.query.data,
+            skill_bindings=app_config["skills"],
+            subagents=app_config["subagents"],
+        )
         agent = BaseAgent(
             llm=llm,
+            checkpointer=runtime.checkpointer,
+            workspace_backend=runtime.workspace_backend,
+            permissions=runtime.permissions,
+            skill_sources=runtime.skill_sources,
+            memory_sources=runtime.memory_sources,
+            subagent_skill_sources=runtime.subagent_skill_sources,
             agent_config=AgentConfig(
                 user_id=end_user.id,
                 invoke_from=InvokeFrom.SERVICE_API,
+                app_name=app.name,
+                app_description=app.description,
                 preset_prompt=app_config["preset_prompt"],
+                opening_statement=(
+                    app_config["opening_statement"] if not history else ""
+                ),
                 subagents=app_config["subagents"],
                 tools=tools,
                 review_config=app_config["review_config"],
                 account_id=account.id,
                 app_id=app.id,
                 conversation_id=conversation.id,
+                end_user_id=end_user.id,
             ),
         )
         # 15.定义智能体状态基础数据
         agent_state = {
-            "messages": history + [
+            "history": history,
+            "messages": [
                 llm.convert_to_human_message(req.query.data, req.image_urls.data)
             ],
         }
@@ -236,6 +256,21 @@ class OpenAPIService(BaseService):
                         agent_thought for agent_thought in agent_thoughts_dict.values()
                     ],
                 )
+                answer = "".join(
+                    thought.answer
+                    for thought in agent_thoughts_dict.values()
+                    if thought.event == QueueEvent.AGENT_MESSAGE
+                )
+                self.agent_runtime_service.extract_and_store_facts(
+                    account_id=account.id,
+                    app_id=app.id,
+                    end_user_id=end_user.id,
+                    conversation_id=conversation.id,
+                    message_id=message.id,
+                    query=req.query.data,
+                    answer=answer,
+                    llm=llm,
+                )
 
             return handle_stream()
 
@@ -250,6 +285,16 @@ class OpenAPIService(BaseService):
             conversation_id=conversation.id,
             message_id=message.id,
             agent_thoughts=agent_result.agent_thoughts,
+        )
+        self.agent_runtime_service.extract_and_store_facts(
+            account_id=account.id,
+            app_id=app.id,
+            end_user_id=end_user.id,
+            conversation_id=conversation.id,
+            message_id=message.id,
+            query=req.query.data,
+            answer=agent_result.answer,
+            llm=llm,
         )
 
         return Response(

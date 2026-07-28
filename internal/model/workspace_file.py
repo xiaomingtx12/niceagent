@@ -92,3 +92,28 @@ class WorkspaceFile(db.Model):
         onupdate=datetime.now,
         nullable=False,
     )
+
+    def to_dict(self, *, include_content: bool = False) -> dict:
+        data = {
+            "id": str(self.id),
+            "app_id": str(self.app_id),
+            "conversation_id": (
+                str(self.conversation_id) if self.conversation_id else None
+            ),
+            "path": self.path,
+            "version": self.version,
+            "storage_backend": self.storage_backend,
+            "mime_type": self.mime_type,
+            "size_bytes": self.size_bytes,
+            "content_sha256": self.content_sha256,
+            "created_by": str(self.created_by) if self.created_by else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+        if include_content:
+            data["content"] = (
+                self.content.decode("utf-8", errors="replace")
+                if self.content is not None
+                else None
+            )
+        return data

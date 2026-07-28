@@ -1,5 +1,6 @@
 from .account_service import AccountService
 from .ai_service import AIService
+from .agent_runtime_service import AgentRuntimeService
 from .analysis_service import AnalysisService
 from .api_key_service import ApiKeyService
 from .api_tool_service import ApiToolService
@@ -31,10 +32,12 @@ from .process_rule_service import ProcessRuleService
 from .provider_api_key_service import ProviderApiKeyService
 from .retrieval_service import RetrievalService
 from .segment_service import SegmentService
+from .skill_service import SkillService
 from .upload_file_service import UploadFileService
 from .vector_database_service import VectorDatabaseService
 from .web_app_service import WebAppService
 from .wechat_service import WechatService
+from .workspace_file_service import WorkspaceFileService
 from .workflow_service import WorkflowService
 
 __all__ = [
@@ -54,12 +57,14 @@ __all__ = [
     "ProcessRuleService",
     "KeywordTableService",
     "SegmentService",
+    "SkillService",
     "RetrievalService",
     "ConversationService",
     "OAuthService",
     "JwtService",
     "AccountService",
     "AIService",
+    "AgentRuntimeService",
     "ApiKeyService",
     "AppConfigService",
     "OpenAPIService",
@@ -76,4 +81,5 @@ __all__ = [
     "WechatService",
     "PlatformService",
     "ProviderApiKeyService",
+    "WorkspaceFileService",
 ]

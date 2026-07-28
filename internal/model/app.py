@@ -192,8 +192,11 @@ class AppConfig(db.Model):
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 预设prompt
+    skills = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 平台内置 Skill 绑定引用
     subagents = Column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # DeepAgents 同步 sub-agent 团队配置
     tools = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
@@ -270,8 +273,11 @@ class AppConfigVersion(db.Model):
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 人设与回复逻辑
+    skills = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 平台内置 Skill 绑定引用
     subagents = Column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # DeepAgents 同步 sub-agent 团队配置
     tools = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")

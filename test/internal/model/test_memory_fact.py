@@ -19,7 +19,7 @@ def _fact(**overrides):
         end_user_id=None,
         fact_type="preference",
         content="用户喜欢简短回复",
-        confidence=0.9,
+        importance=0.9,
         source_conversation_id=None,
         auto_extracted=True,
         deleted_at=None,
@@ -78,6 +78,7 @@ def test_to_dict_includes_required_fields():
     assert "end_user_id" in d
     assert d["fact_type"] == "preference"
     assert d["content"] == "用户喜欢简短回复"
+    assert d["importance"] == 0.9
     assert d["confidence"] == 0.9
     assert d["auto_extracted"] is True
     assert d["created_at"] is not None
@@ -116,8 +117,8 @@ def test_tablename_is_memory_facts():
     assert MemoryFact.__tablename__ == "memory_facts"
 
 
-def test_has_confidence_check_constraint():
-    """confidence 必须在 [0.0, 1.0]; SQLAlchemy 层 CheckConstraint 校验."""
+def test_has_importance_check_constraint():
+    """importance 必须在 [0.0, 1.0]; SQLAlchemy 层 CheckConstraint 校验."""
     found = False
     for arg in MemoryFact.__table_args__:
         if arg.__class__.__name__ == "CheckConstraint":
@@ -126,10 +127,10 @@ def test_has_confidence_check_constraint():
             sql_text = (
                 arg.sqltext.text.lower() if arg.sqltext is not None else ""
             )
-            if "confidence" in sql_text:
+            if "importance" in sql_text:
                 found = True
                 break
-    assert found, "expected confidence range CheckConstraint"
+    assert found, "expected importance range CheckConstraint"
 
 
 def test_has_end_user_recall_index():
@@ -139,7 +140,7 @@ def test_has_end_user_recall_index():
 
 
 def test_has_recall_index_for_top_k():
-    """召回排序 (account_id, app_id, confidence, updated_at) 索引."""
+    """召回排序 (account_id, app_id, importance, updated_at) 索引."""
     index_names = {arg.name for arg in MemoryFact.__table_args__ if hasattr(arg, "name")}
     assert "idx_memory_facts_recall" in index_names
 
@@ -150,9 +151,9 @@ def test_has_deleted_at_index():
     assert "idx_memory_facts_deleted_at" in index_names
 
 
-def test_confidence_default_is_one():
-    """confidence 默认 1.0 (LLM 抽取器保证写入时填实际值; 默认兜底 = 完全可信)."""
-    col = MemoryFact.__table__.columns["confidence"]
+def test_importance_default_is_one():
+    """importance 默认 1.0."""
+    col = MemoryFact.__table__.columns["importance"]
     # server_default 在 columns definition 上
     assert col.server_default is not None
     assert "1.0" in str(col.server_default.arg)

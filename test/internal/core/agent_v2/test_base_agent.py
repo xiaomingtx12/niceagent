@@ -10,6 +10,7 @@
 - 本文件覆盖 BaseAgent 内部逻辑：构造、queue_manager 暴露、AgentConfig 字段、
   AgentState 字段回归。
 """
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -167,25 +168,8 @@ def test_invoke_uses_latest_human_message_as_query(monkeypatch):
     assert result.query == "当前问题"
 
 
-def test_run_stream_translates_graph_updates_and_adds_single_terminal_event():
+def test_run_stream_uses_event_middleware_and_adds_single_terminal_event():
     task_id = uuid4()
-
-    class FakeGraph:
-        def stream(self, input, config=None, **kwargs):
-            yield {
-                "model": {
-                    "messages": [
-                        AIMessage(
-                            content="完成",
-                            usage_metadata={
-                                "input_tokens": 2,
-                                "output_tokens": 1,
-                                "total_tokens": 3,
-                            },
-                        )
-                    ]
-                }
-            }
 
     class FakeQueueManager:
         def __init__(self):
@@ -197,8 +181,7 @@ def test_run_stream_translates_graph_updates_and_adds_single_terminal_event():
         def publish_error(self, _task_id, error):
             raise AssertionError(error)
 
-    agent = BaseAgent.model_construct(llm=_llm(), agent_config=_config())
-    agent._agent = FakeGraph()
+    agent = BaseAgent(llm=_llm("完成"), agent_config=_config())
     agent._agent_queue_manager = FakeQueueManager()
 
     agent._run_stream_in_thread(
@@ -211,3 +194,64 @@ def test_run_stream_translates_graph_updates_and_adds_single_terminal_event():
         QueueEvent.AGENT_END,
     ]
     assert agent._agent_queue_manager.events[0].answer == "完成"
+
+
+def test_run_stream_closes_all_unique_runtime_route_backends():
+    class ClosableBackend:
+        def __init__(self):
+            self.close_calls = 0
+
+        def close(self):
+            self.close_calls += 1
+
+    default = ClosableBackend()
+    workspace = ClosableBackend()
+    skills = ClosableBackend()
+    agent = BaseAgent.model_construct(llm=_llm(), agent_config=_config())
+    agent._workspace_backend = SimpleNamespace(
+        default=default,
+        routes={
+            "/workspace/": workspace,
+            "/artifacts/": workspace,
+            "/skills/": skills,
+        },
+    )
+
+    agent._close_runtime_backends()
+
+    assert default.close_calls == 1
+    assert workspace.close_calls == 1
+    assert skills.close_calls == 1
+
+
+def test_output_review_blocks_message_before_event_publication():
+    task_id = uuid4()
+
+    class FakeQueueManager:
+        def __init__(self):
+            self.events = []
+
+        def publish(self, _task_id, thought):
+            self.events.append(thought)
+
+    config = _config().model_copy(
+        update={
+            "review_config": {
+                "enable": True,
+                "keywords": ["敏感内容"],
+                "inputs_config": {"enable": False},
+                "outputs_config": {"enable": True},
+            }
+        }
+    )
+    agent = BaseAgent(llm=_llm("这里有敏感内容"), agent_config=config)
+    agent._agent_queue_manager = FakeQueueManager()
+
+    agent._run_stream_in_thread(
+        {"messages": [HumanMessage(content="问题")], "task_id": task_id},
+        None,
+    )
+
+    assert [event.event for event in agent._agent_queue_manager.events] == [
+        QueueEvent.ERROR,
+    ]

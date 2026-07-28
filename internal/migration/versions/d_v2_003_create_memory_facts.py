@@ -5,14 +5,13 @@ Revises: d_v2_002_create_workspace_files
 Create Date: 2026-07-28 20:00:00.000000
 
 R3 改造（[deepagents-v2-plan-user-memory-visibility] memory）：
-- master 老的 `token_buffer_memory` / `conversation.summary` 是对话级摘要，
-  end-user 看不到、不能管理、不能删除
+- 旧的对话级摘要只服务上下文压缩，end-user 看不到、不能管理、不能删除
 - R3 引入 `memory_facts` 表存 LLM 自动抽取的结构化事实（不是摘要）
   - fact 内容短（一句话），结构稳定
-  - 用于跨 session 注入到 system_prompt / 召回到 L3 动态上下文
+  - 用于跨 session 生成只读 Memory Profile，并通过 DeepAgents memory= 投影
 - 三类记忆分离（详见 plan §2.2）：
   - 压缩 (SummarizationMiddleware, 不落库)
-  - 摘要 (memory_summaries 表, R4+)
+  - 原始对话 (conversation/message 表, 冷启动和审计)
   - fact (本表, R3)
 
 字段说明：

@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, Sequence
+from typing import Annotated, Any, NotRequired, Sequence
 
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.graph import DeepAgentState
+from deepagents.middleware.filesystem import FilesystemPermission
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
+from langchain.agents.middleware.types import PrivateStateAttr
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from internal.core.agent_v2.middleware.event_translation_middleware import (
+    EventTranslationMiddleware,
+)
 from internal.core.agent_v2.middleware.model_compat_middleware import (
     ModelCompatMiddleware,
 )
@@ -18,11 +23,14 @@ from internal.core.agent_v2.middleware.project_context_middleware import (
     ProjectContextMiddleware,
 )
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
-from internal.core.agent_v2.middleware.summarization_middleware import (
-    build_summarization_middleware,
+from internal.core.agent_v2.harness_profile import (
+    disable_implicit_general_purpose,
 )
 from internal.core.agent_v2.saver import get_postgres_saver
-from internal.core.agent_v2.subagent_specs import build_subagent_specs
+from internal.core.agent_v2.subagent_specs import (
+    build_subagent_specs,
+    validate_platform_subagents,
+)
 
 
 class MyDifyDeepAgentState(DeepAgentState):
@@ -35,14 +43,19 @@ class MyDifyDeepAgentState(DeepAgentState):
       由 ReviewMiddleware.before_model 写入，BaseAgent 兜底处理
     """
 
-    runtime_account_id: NotRequired[str]
-    runtime_app_id: NotRequired[str]
-    runtime_conversation_id: NotRequired[str]
-    runtime_invoked_at: NotRequired[str]
-    runtime_recalled_facts: NotRequired[list[dict[str, Any]]]
-    runtime_review_blocked: NotRequired[bool]
-    runtime_review_hit_keyword: NotRequired[str]
-    runtime_review_preset_response: NotRequired[str]
+    runtime_account_id: NotRequired[Annotated[str, PrivateStateAttr]]
+    runtime_app_id: NotRequired[Annotated[str, PrivateStateAttr]]
+    runtime_conversation_id: NotRequired[Annotated[str, PrivateStateAttr]]
+    runtime_end_user_id: NotRequired[Annotated[str | None, PrivateStateAttr]]
+    runtime_invoked_at: NotRequired[Annotated[str, PrivateStateAttr]]
+    runtime_workflow_variables: NotRequired[
+        Annotated[dict[str, Any], PrivateStateAttr]
+    ]
+    runtime_review_blocked: NotRequired[Annotated[bool, PrivateStateAttr]]
+    runtime_review_hit_keyword: NotRequired[Annotated[str, PrivateStateAttr]]
+    runtime_review_preset_response: NotRequired[
+        Annotated[str, PrivateStateAttr]
+    ]
 
 
 def build_deep_agent(
@@ -57,8 +70,13 @@ def build_deep_agent(
     checkpointer: BaseCheckpointSaver | bool | None = None,
     use_checkpointer: bool | None = None,
     workspace_backend: BackendProtocol | None = None,
-    max_message_count: int = 20,
-    subagents: dict[str, dict] | None = None,
+    permissions: Sequence[FilesystemPermission] | None = None,
+    skill_sources: Sequence[str] = (),
+    memory_sources: Sequence[str] = (),
+    subagent_skill_sources: dict[str, Sequence[str]] | None = None,
+    end_user_id: str | None = None,
+    workflow_variables: dict[str, Any] | None = None,
+    subagents: list[dict[str, Any]] | dict[str, dict] | None = None,
 ) -> Any:
     """构造 deepagents `CompiledStateGraph`。
 
@@ -75,37 +93,26 @@ def build_deep_agent(
             ``False`` 显式关闭；新调用应优先传 ``checkpointer``。
         workspace_backend: 可选 DeepAgents backend。通过框架原生 ``backend=``
             路由给主 Agent、同步子 Agent、文件工具与摘要器。
-        max_message_count: 大于 0 时用业务阈值替换框架默认摘要器；否则保留
-            DeepAgents 默认摘要策略。
-        subagents: R3 业务 sub-agent 配置 (AgentConfig.subagents dict);
-            有 graph_id 的条目走 AsyncSubAgentMiddleware (远端异步),
-            其余走 SubAgentMiddleware (同步 task 工具); None / 空 dict 不挂
+        subagents: 平台同步 SubAgent 配置。委派使用 DeepAgents 原生
+            ``SubAgentMiddleware``；当前阶段不接受异步远端配置。
 
     Returns:
         CompiledStateGraph，可直接 `agent.invoke(input, config)` 或 `agent.stream(...)`
     """
+    normalized_subagents = validate_platform_subagents(subagents)
     middleware = [
-        # 事件直接从 LangGraph updates 翻译；middleware 只保留真正参与图执行
-        # 的业务逻辑。
+        # 事件翻译是 DeepAgents/LangChain 与 MyDify SSE 的唯一业务边界。
+        EventTranslationMiddleware(),
         ProjectContextMiddleware(
             account_id=account_id,
             app_id=app_id,
             conversation_id=conversation_id,
+            end_user_id=end_user_id,
+            workflow_variables=workflow_variables,
         ),
         ReviewMiddleware(review_config=review_config or {}),
         ModelCompatMiddleware(expected_chat_model=llm),
     ]
-
-    # DeepAgents 会按 middleware.name 原位替换 core middleware。自定义摘要器
-    # 使用原生名称，因此不会生成第二个 SummarizationMiddleware。
-    summarization_mw = build_summarization_middleware(
-        llm=llm,
-        max_message_count=max_message_count,
-        backend=workspace_backend,  # offload 超长 tool_call 内容
-    )
-    if summarization_mw is not None:
-        middleware.append(summarization_mw)
-
     if use_checkpointer is not None:
         if checkpointer is not None:
             raise ValueError(
@@ -113,18 +120,27 @@ def build_deep_agent(
             )
         checkpointer = get_postgres_saver() if use_checkpointer else False
 
-    # R3: 业务 subagents dict → deepagents SubAgent / AsyncSubAgent spec 列表.
-    # deepagents 靠 "graph_id" in spec 路由: 有 → AsyncSubAgentMiddleware,
-    # 无 → SubAgentMiddleware (task 工具). 上下文分离是 deepagents 原生行为
-    # (task 调 sub-agent 时排除 messages/todos, 只带 description).
-    subagent_specs = build_subagent_specs(subagents)
+    # The native profile switch prevents DeepAgents from silently adding its
+    # broad, parent-tool-inheriting ``general-purpose`` worker.
+    disable_implicit_general_purpose(llm)
+
+    # Persisted records are only a business adapter. DeepAgents owns dispatch,
+    # stateless context isolation, filesystem middleware and result plumbing.
+    subagent_specs = build_subagent_specs(
+        normalized_subagents,
+        available_tools=tools,
+        skill_sources_by_agent=subagent_skill_sources,
+    )
 
     return create_deep_agent(
         model=llm,
         tools=list(tools),
         system_prompt=system_prompt,
         middleware=middleware,
-        subagents=subagent_specs or None,
+        subagents=subagent_specs,
+        skills=list(skill_sources) or None,
+        memory=list(memory_sources) or None,
+        permissions=list(permissions or []),
         backend=workspace_backend,
         checkpointer=checkpointer,
         state_schema=MyDifyDeepAgentState,

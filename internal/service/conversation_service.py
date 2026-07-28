@@ -13,7 +13,6 @@ from sqlalchemy import desc
 from sqlalchemy.orm import joinedload
 
 from internal.entity.conversation_entity import (
-    SUMMARIZER_TEMPLATE,
     CONVERSATION_NAME_TEMPLATE,
     ConversationInfo,
     InvokeFrom,
@@ -53,54 +52,6 @@ class ConversationService(BaseService):
                 )
         except Exception as e:
             logging.warning(f"加载配置模型失败: {str(e)}，使用默认模型")
-
-    @classmethod
-    def summary(
-        cls,
-        human_message: str,
-        ai_message: str,
-        old_summary: str = "",
-        account_id: UUID = None,
-        model_config: dict = None,
-    ) -> str:
-        """根据传递的人类消息、AI消息还有原始的摘要信息总结生成一段新的摘要"""
-        from internal.service.language_model_service import LanguageModelService
-        from injector import Injector
-
-        # 1.加载模型：如果未传入model_config，使用默认的tongyi配置（需要用户自己的API Key）
-        if not model_config:
-            model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
-
-        llm = None
-        try:
-            if account_id:
-                language_model_service = Injector().get(LanguageModelService)
-                llm = language_model_service.load_language_model(
-                    model_config, account_id
-                )
-        except Exception as e:
-            logging.warning(f"加载模型失败: {str(e)}")
-            return old_summary
-
-        if llm is None:
-            logging.warning("模型加载结果为None，跳过摘要生成")
-            return old_summary
-
-        # 2.创建prompt
-        prompt = ChatPromptTemplate.from_template(SUMMARIZER_TEMPLATE)
-
-        # 3.构建链应用
-        summary_chain = prompt | llm | StrOutputParser()
-
-        # 4.调用链并获取新摘要信息
-        new_summary = summary_chain.invoke(
-            {
-                "summary": old_summary,
-                "new_lines": f"Human: {human_message}\nAI: {ai_message}",
-            }
-        )
-
-        return new_summary
 
     @classmethod
     def generate_conversation_name(
@@ -264,7 +215,6 @@ class ConversationService(BaseService):
         for agent_thought in agent_thoughts:
             # 4.存储长期记忆召回、推理、消息、动作、知识库检索等步骤
             if agent_thought.event in [
-                QueueEvent.LONG_TERM_MEMORY_RECALL,
                 QueueEvent.AGENT_THOUGHT,
                 QueueEvent.AGENT_MESSAGE,
                 QueueEvent.AGENT_ACTION,
@@ -325,21 +275,8 @@ class ConversationService(BaseService):
                     latency=latency,
                 )
 
-                # 9.检测是否开启长期记忆
-                if app_config["long_term_memory"]["enable"]:
-                    Thread(
-                        target=self._generate_summary_and_update,
-                        kwargs={
-                            "flask_app": current_app._get_current_object(),
-                            "conversation_id": conversation.id,
-                            "query": message.query,
-                            "answer": agent_thought.answer,
-                            "account_id": account_id,
-                            "model_config": app_config.get("model_config"),
-                        },
-                    ).start()
-
-                # 10.处理生成新会话名称
+                # 9.处理生成新会话名称。历史摘要由 DeepAgents 默认
+                # SummarizationMiddleware + workspace offload 接管。
                 if conversation.is_new:
                     Thread(
                         target=self._generate_conversation_name_and_update,
@@ -352,7 +289,7 @@ class ConversationService(BaseService):
                         },
                     ).start()
 
-            # 11.判断是否为停止或者错误，如果是则需要更新消息状态
+            # 10.判断是否为停止或者错误，如果是则需要更新消息状态
             if agent_thought.event in [
                 QueueEvent.TIMEOUT,
                 QueueEvent.STOP,
@@ -364,35 +301,6 @@ class ConversationService(BaseService):
                     error=agent_thought.observation,
                 )
                 break
-
-    def _generate_summary_and_update(
-        self,
-        flask_app: Flask,
-        conversation_id: UUID,
-        query: str,
-        answer: str,
-        account_id: UUID,
-        model_config: dict = None,
-    ):
-        with flask_app.app_context():
-
-            # 1.根据id获取会话
-            conversation = self.get(Conversation, conversation_id)
-
-            # 3.计算会话新摘要信息
-            new_summary = self.summary(
-                query,
-                answer,
-                conversation.summary,
-                account_id,
-                model_config,
-            )
-
-            # 4.更新会话的摘要信息
-            self.update(
-                conversation,
-                summary=new_summary,
-            )
 
     def _generate_conversation_name_and_update(
         self,
