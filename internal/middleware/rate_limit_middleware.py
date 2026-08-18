@@ -123,7 +123,8 @@ def get_rate_limiter() -> Optional[RateLimiter]:
 
 def get_rate_limit_key(
     identifier: str,
-    scope: str = "api"
+    scope: str = "api",
+    bucket: str = "default",
 ) -> str:
     """
     生成限流键
@@ -131,11 +132,12 @@ def get_rate_limit_key(
     Args:
         identifier: 标识符 (用户ID、IP地址等)
         scope: 限流范围 (api, chat, upload 等)
+        bucket: 同一范围内的限流配置名称，避免不同算法复用同一个 Redis Key
         
     Returns:
         str: 限流键
     """
-    return f"rate_limit:{scope}:{identifier}"
+    return f"rate_limit:{scope}:{bucket}:{identifier}"
 
 
 def get_client_identifier() -> str:
@@ -172,7 +174,8 @@ def get_client_identifier() -> str:
 def check_rate_limit(
     config: RateLimitConfig,
     scope: str = "api",
-    identifier: Optional[str] = None
+    identifier: Optional[str] = None,
+    bucket: str = "default",
 ) -> RateLimitResult:
     """
     检查限流
@@ -204,7 +207,7 @@ def check_rate_limit(
         identifier = get_client_identifier()
     
     # 生成限流键
-    key = get_rate_limit_key(identifier, scope)
+    key = get_rate_limit_key(identifier, scope, bucket)
     
     # 执行限流检查
     result = limiter.check_rate_limit(key, config)
@@ -277,8 +280,15 @@ def rate_limit(
                 # 使用默认配置
                 config = DEFAULT_RATE_LIMITS.get("user", DEFAULT_RATE_LIMITS["global"])
             
+            # 不同配置可能使用不同 Redis 数据类型：
+            # 滑动窗口使用 Sorted Set，令牌桶使用 Hash，必须隔离 Key。
+            bucket = config_key or (
+                f"custom:{config.strategy.value}:"
+                f"{config.max_requests}:{config.window_seconds}"
+            )
+
             # 2. 执行限流检查
-            check_rate_limit(config, scope)
+            check_rate_limit(config, scope, bucket=bucket)
             
             # 3. 执行原函数
             return func(*args, **kwargs)
