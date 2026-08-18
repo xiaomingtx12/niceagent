@@ -60,13 +60,14 @@
 | 当前实现状态 | 代码、迁移、测试和文档 `02` |
 | 线程短期状态、Todo、中断、摘要状态 | LangGraph checkpoint |
 | 原始用户和助手消息 | PostgreSQL `conversation` / `message` |
-| 用户长期事实 | PostgreSQL `memory_facts` |
+| 用户长期记忆 | DeepAgents `/memories/` + LangGraph `StoreBackend` |
 | 内置 Skill 正文和脚本 | 部署镜像内公共、版本化、只读目录 |
 | App/Agent 的 Skill 选择 | 已发布 AppConfig 的绑定引用 |
 | 会话文件和正式产物 | 作用域 Workspace/Artifact Backend |
 | 知识库文档 | 现有 Weaviate Dataset 集合 |
 
-Weaviate 以后可以作为长期事实的可重建检索投影，但不能成为事实权威源。项目不引入 pgvector。
+长期记忆由 Store namespace 隔离；项目不引入 `memory_facts`、pgvector 或第二套
+长期事实权威源。
 
 ## 4. 目标运行架构
 
@@ -75,8 +76,8 @@ flowchart TB
     Request["Creator / WebApp / API / WeChat 请求"] --> Runtime["AgentRuntimeService"]
     Runtime --> Scope["可信 RuntimeScope"]
     Runtime --> Config["已发布或草稿 AppConfig"]
-    Runtime --> Backend["CompositeBackend + DenyBackend"]
-    Runtime --> Memory["memory= 长期事实投影"]
+    Runtime --> Backend["CompositeBackend + StateBackend"]
+    Runtime --> Memory["memory= 长期文件记忆"]
     Runtime --> Skills["skills= 内置 Skill 绑定子集"]
     Runtime --> Checkpoint["checkpointer= 线程状态"]
     Runtime --> Permissions["permissions= 文件权限"]
@@ -105,23 +106,28 @@ flowchart TB
 
 - 身份与租户作用域来自服务端鉴权和数据库关联，不能接受模型或客户端覆盖。
 - checkpoint 是当前线程的短期工作记忆；原始消息只在线程无 checkpoint 时用于冷启动和灾难恢复。
-- `/conversation_history/{thread_id}.md` 是 DeepAgents 压缩产生的历史外置文件，不是长期用户记忆。
-- PostgreSQL `memory_facts` 是长期用户事实的权威源，通过只读 `/memories/profile.md` 和 `memory=` 进入 Agent。
+- DeepAgents 的摘要和大工具结果由原生 State/Backend 管理，不映射为 MyDify
+  的业务 `conversation_history` 文件。
+- `/memories/AGENTS.md` 是长期文件记忆入口，由 LangGraph `StoreBackend`
+  按服务端 namespace 隔离，不维护第二套业务事实表。
 - 压缩只使用 DeepAgents 原生 Summarization，不保留自定义阈值、窗口计算器或手工裁剪。
-- Workspace 文件不会自动晋升为长期记忆；长期事实写入必须经过显式 API 或受控异步提取。
+- Workspace 文件不会自动晋升为长期记忆；长期记忆只通过 `/memories/` 文件路径
+  和 Store namespace 管理。
 
 完整实现和删除语义见 `03-context-memory-compression-implementation.md`。
 
 ### 5.2 Skills、文件系统与 Backend
 
-- V1 只支持平台内置 Skill 和登记过的内置脚本。
+- V1 只支持平台内置 Skill 包。
 - 内置 Skill 正文保存在公共只读目录；Creator 只能绑定或解绑，不能上传、编辑或替换正文。
 - Web Creator 必须能查看内置 Skill 的名称、版本、描述、digest、是否包含登记脚本和当前挂载状态，并可把 Skill 挂载到主 Agent。
 - SubAgent 只能从主 Agent 已挂载的集合中选择自己的 Skill 子集；发布版本同时固化主 Agent 绑定和各 SubAgent 子集。
 - DeepAgents 原生 Skills 负责发现和懒加载；`SKILL.md` 不是权限授权文件。
-- `CompositeBackend.default` 必须是 `DenyBackend`，所有路径使用显式 route。
-- `/workspace/` 可读写，但其中内容不可执行；脚本只能通过窄工具 `run_builtin_skill_script` 在 Linux 隔离环境运行。
-- `permissions=`、Backend ACL、工具门控和进程沙箱是不同安全层，不能相互替代。
+- 非 Sandbox 模式下 `CompositeBackend.default` 使用 DeepAgents 原生
+  `StateBackend`，承载线程内临时文件和框架内部文件；业务目录通过显式 route
+  接入。
+- `/workspace/` 可读写；启用官方 Sandbox 时文件工具和原生 `execute` 访问同一隔离文件系统。
+- 未启用 Sandbox 时由 DeepAgents 原生 `FilesystemMiddleware` 根据 Backend 能力隐藏 `execute`；Harness Profile 只关闭隐式 `general-purpose` worker。`permissions=`、Backend ACL 和 Sandbox 是不同安全层，不能相互替代。
 
 完整方案见 `04-skill-filesystem-backend-permission-plan.md`。
 
@@ -184,9 +190,9 @@ HITL 暂不属于 V1 交付范围。本轮不实现对话接管、消息级修�
 3. 无 checkpoint 时从 PostgreSQL 原始消息冷启动；有 checkpoint 时直接恢复线程状态。
 4. 主 Agent 可直接调用工具，也可用 Todo 规划并通过 `task` 同步委派。
 5. 大内容写入受控 Workspace/Artifacts；模型只能使用虚拟路径。
-6. DeepAgents 在需要时压缩上下文并外置历史。
+6. DeepAgents 在需要时压缩上下文并管理内部外置文件。
 7. EventTranslation 产生统一事件，业务层保存 Message 和 Thought 并向客户端推流。
-8. 成功对话可触发异步长期事实提取；提取失败不影响本轮对话。
+8. 成功对话可以继续写入长期记忆文件；记忆写入失败不影响本轮对话。
 
 ## 7. 分阶段交付
 
@@ -194,7 +200,7 @@ HITL 暂不属于 V1 交付范围。本轮不实现对话接管、消息级修�
 |---|---|---|
 | R0 | DeepAgents 主图、统一 Runtime、checkpoint、事件翻译 | 文档 `02` |
 | R1 | Workspace、显式 Backend 路由、权限和生产安全 | 文档 `02`、`04` |
-| R2 | 内置 Skills、长期事实投影、原生压缩闭环 | 文档 `02`、`03`、`04` |
+| R2 | 内置 Skills、长期文件记忆、原生压缩闭环 | 文档 `02`、`03`、`04` |
 | R3 | 同步多 Agent、Todo 事件和委派轨迹 | 文档 `02`、`05` |
 | R4 | 安全、监控与上线门禁 | 文档 `02`、`04` |
 
@@ -205,11 +211,13 @@ HITL 暂不属于 V1 交付范围。本轮不实现对话接管、消息级修�
 以下组件属于必要业务边界，不视为重复造轮子：
 
 - `AgentRuntimeService`：运行作用域和原生参数装配。
-- `ProjectContextMiddleware`：可信身份和业务上下文。
+- `RuntimeContextMiddleware`：模型调用时追加运行时间。
 - `EventTranslationMiddleware`：事件协议翻译。
-- `BuiltinSkillBackend`、`ScopedWorkspaceBackend`、`MemoryProfileBackend`、`DenyBackend`：窄 Backend 适配和强制 ACL。
+- `SkillCatalogBackend`、`MyDifyWorkspaceBackend`、`StoreProvider`：
+  窄 Backend 适配和强制作用域。
 - 统一工具注册表与业务权限门控。
-- `BuiltinSkillScriptRunner`：登记脚本到隔离执行器的窄适配。
+- 官方 Sandbox provider 生命周期适配器：只负责创建、上传、回收和
+  Workspace 同步，不注册自定义脚本执行工具。
 - PostgreSQL 模型、服务、API、审计和清理任务。
 
 这些组件不能复制 DeepAgents 的文件工具、Skills 解析、MemoryMiddleware、Todo、SubAgent 或 Summarization 实现。
@@ -224,7 +232,7 @@ HITL 暂不属于 V1 交付范围。本轮不实现对话接管、消息级修�
 4. 默认 Backend 拒绝未路由路径且不暴露通用执行；Windows 生产执行关闭。
 5. Workspace 路径、租户、配额、并发版本和不可信文件测试通过。
 6. 内置 Skill 目录只读，绑定子集、digest 和脚本清单可验证。
-7. 长期记忆 CRUD、投影、敏感信息过滤、软删除和可选索引回退通过。
+7. 长期记忆 Store namespace 隔离、文件读写和删除语义通过。
 8. 同步 SubAgent 的零历史继承、工具子集、Skill 子集、只读默认和单层拓扑通过真实模型测试。
 9. Todo、委派、工具和结束事件可追踪到同一 Message/Conversation。
 10. 异步能力未完成时，API、配置和 UI 均明确拒绝异步字段。
@@ -233,8 +241,8 @@ HITL 暂不属于 V1 交付范围。本轮不实现对话接管、消息级修�
 
 - 不恢复旧 FunctionCall/ReACT Agent 主实现。
 - 不新增自定义摘要、token 窗口或对话裁剪机制。
-- 不把原始对话、压缩历史、Workspace、Skills 和长期事实混为同一类记忆。
-- 不引入 pgvector；不把 Weaviate 变成长期事实权威源。
+- 不把原始对话、框架摘要、Workspace、Skills 和长期文件记忆混为同一类数据。
+- 不引入 pgvector、`memory_facts` 或第二套长期事实权威源。
 - 不开放用户上传 Skill、用户脚本、任意 shell、任意 Python 或远程 Skill。
 - 不让 Todo 写操作直接产生绕过权限的执行副作用。
 - 不支持 `SUMMARY`、`RECENT_K` 父上下文复制。

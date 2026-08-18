@@ -10,8 +10,11 @@
 | [`01-business-flow-and-db-tables.md`](01-business-flow-and-db-tables.md) | 业务流程 + 数据库表盘点 + 新增/删除/修改表清单 |
 | [`02-implementation-progress-and-roadmap.md`](02-implementation-progress-and-roadmap.md) | 当前实现进度、验证状态、未闭环功能与后续更新顺序 |
 | [`03-context-memory-compression-implementation.md`](03-context-memory-compression-implementation.md) | 上下文装配、分层记忆、原生压缩的完整目标实现与验收规范 |
-| [`04-skill-filesystem-backend-permission-plan.md`](04-skill-filesystem-backend-permission-plan.md) | 内置 Skill 公共目录、虚拟文件系统、Backend 路由、权限门控与受控脚本沙箱规范 |
+| [`04-skill-filesystem-backend-permission-plan.md`](04-skill-filesystem-backend-permission-plan.md) | Skill、文件系统、Backend 分层、CompositeBackend 路由与权限重构基线 |
 | [`05-synchronous-multi-agent-implementation.md`](05-synchronous-multi-agent-implementation.md) | 同步多 Agent 当前实现、上下文隔离、工具/Skill/文件权限、事件、验收与异步阶段边界 |
+| [`06-agent-v2-code-guide.md`](06-agent-v2-code-guide.md) | Agent V2 当前代码导读、请求调用链、Backend、受限 Skill 执行、同步 SubAgent 与事件边界 |
+| [`07-agent-v2-runtime-architecture.md`](07-agent-v2-runtime-architecture.md) | Agent V2 State、上下文投影、运行时资源与迁移边界 |
+| [`08-service-handler-refactor-plan.md`](08-service-handler-refactor-plan.md) | Agent V2 后端 Service、Handler 和接口契约整理方案 |
 
 ## 文档原则
 

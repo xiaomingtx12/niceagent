@@ -144,7 +144,7 @@ SubAgent 永远不获得原生 `task` 委派工具，因此同步拓扑保持单
 1. API 从发布或草稿 AppConfig 读取 `subagents`。
 2. `AgentRuntimeService` 校验同步 schema，加载 App 的 enabled Skills，并生成角色级 Skill Backend 路由。
 3. `build_deep_agent()` 注册关闭默认 worker 的 Harness Profile。
-4. `build_subagent_specs()` 将工具名映射为父工具集合中的实际对象，始终传显式工具列表、角色 Skill source 和只读文件权限。
+4. `build_subagent_specs()` 将工具名映射为父工具集合中的实际对象，始终传显式工具列表和角色 Skill source；非 Sandbox 传只读文件权限，Sandbox 按 DeepAgents 0.6.x 约束传空规则。
 5. DeepAgents 原生 `SubAgentMiddleware` 注册 `task`；空团队时不注册。
 6. 主 Agent选择角色并发出 `task(description, subagent_type)`。
 7. EventTranslation 边界产生 `SUB_AGENT_DELEGATE`。
@@ -163,7 +163,7 @@ SubAgent 永远不获得原生 `task` 委派工具，因此同步拓扑保持单
 | 主 Agent发起 `task` | `SUB_AGENT_DELEGATE` | 角色名、任务描述、tool call id |
 | `task` 返回 Command/ToolMessage | `SUB_AGENT_END` | 角色名、最终结果、tool call id |
 
-后续仍需给现有单数表 `message_agent_thought` 增加 `agent_id`、`agent_type`、`parent_agent_id`、`delegation_id` 和可空 `task_id`，前端才能按委派树展示稳定轨迹。同步阶段使用 `delegation_id` 关联 DeepAgents tool call；`task_id` 只预留给未来后台异步任务。
+现有单数表 `message_agent_thought` 已通过 `d_v2_008` 增加 `agent_id`、`agent_type`、`parent_agent_id`、`delegation_id`、可空 `task_id` 和 Todo 快照。同步阶段使用 `delegation_id` 关联 DeepAgents tool call，`task_id` 只预留给未来后台异步任务；前端按 Agent 类型和委派关系展示轨迹。
 
 应采集的核心指标包括委派次数、各角色成功率、延迟、模型与工具 token、失败类型、结果大小和权限拒绝次数。
 
@@ -179,11 +179,12 @@ SubAgent 永远不获得原生 `task` 委派工具，因此同步拓扑保持单
 
 | 职责 | 文件 |
 |---|---|
-| 配置校验和 DeepAgents spec 适配 | `internal/core/agent_v2/subagent_specs.py` |
-| 关闭隐式 `general-purpose` | `internal/core/agent_v2/harness_profile.py` |
-| 原生图装配 | `internal/core/agent_v2/factory.py` |
+| 配置校验和 DeepAgents spec 适配 | `internal/core/agent_v2/subagents/specs.py` |
+| 关闭隐式 `general-purpose` | `internal/core/agent_v2/runtime/harness_profile.py` |
+| 原生图装配 | `internal/core/agent_v2/runtime/factory.py` |
 | Workspace、Skills 与角色 Skill 路由 | `internal/service/agent_runtime_service.py` |
-| task 事件翻译 | `internal/core/agent_v2/middleware/event_translation_middleware.py` |
+| LangChain Hook 适配 | `internal/core/agent_v2/middleware/event_translation_middleware.py` |
+| task/Todo 事件语义与关联 | `internal/core/agent_v2/events/` |
 | Creator 同步团队编辑 | `my-dify-ui/src/views/space/apps/components/abilities/SubagentsAbilityItem.vue` |
 
 已删除的自建机制包括 `SubagentPolicyMiddleware`、父历史 SUMMARY/RECENT_K 注入、同步线程池超时和进程内异步 Timer 取消。

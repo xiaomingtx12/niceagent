@@ -19,10 +19,11 @@
 | Message | Conversation | 原始用户输入和助手回复；用于展示、审计和冷启动 |
 | MessageAgentThought | Message | 工具、Todo、委派和 Agent 运行轨迹 |
 | WorkspaceFile | Account + App + Conversation | 会话文件、产物和框架历史外置内容的业务存储记录 |
-| MemoryFact | Account + App + EndUser | 可管理的长期用户事实 |
+| Long-term memory | Account + App + EndUser | `/memories/AGENTS.md` 对应的 Store namespace |
 | Builtin Skill | 平台 | 部署镜像内公共、版本化、只读内容 |
 
-任何 Handler、Service、Backend、后台任务或 Weaviate 查询都必须从服务端 RuntimeScope 获取作用域，不能信任模型或客户端提供的 account/app/conversation/end_user 标识。
+任何 Handler、Service、Backend 或后台任务都必须从服务端 RuntimeScope 获取作用域，
+不能信任模型或客户端提供的 account/app/conversation/end_user 标识。
 
 ## 2. Creator 业务流程
 
@@ -55,9 +56,10 @@ Creator 可以：
 - 管理 App 发布资源和测试输入。
 - 查看 Workspace/Artifacts 的受控文件列表、版本和审计信息。
 - 查看同步委派树、Todo 状态、工具调用和失败原因。
-- 查看长期记忆诊断信息；默认不能静默改写终端用户事实。
+- 查看长期记忆诊断信息；默认不能静默改写终端用户记忆文件。
 
-Creator 是否可以删除违规长期事实属于产品权限决策。落地前必须固定为独立权限，例如 `memory_fact:moderate`，不能把“Creator 可查看”解释成自动具有编辑和删除权限。
+长期记忆是否允许 Creator 管理属于产品权限决策；运行时仍只通过服务端
+Store namespace 访问，不能由模型或客户端指定租户路径。
 
 ## 3. 终端用户对话流程
 
@@ -82,15 +84,17 @@ sequenceDiagram
     A-->>API: DeepAgents/LangGraph 事件
     API->>DB: 保存 Message 与 MessageAgentThought
     API-->>U: SSE/同步回复
-    API-->>DB: 对话成功后异步提取候选长期事实
+    API-->>DB: 对话成功后按需写入长期记忆文件
 ```
 
 运行规则：
 
 1. 使用稳定 `thread_id = account_id:app_id:conversation_id:agent_id`。
 2. 有 checkpoint 时恢复短期线程状态；无 checkpoint 时才从原始 Message 冷启动。
-3. 长期事实通过只读 `/memories/profile.md` 和 `memory=` 投影，不直接拼接到 system prompt。
-4. DeepAgents 原生 Summarization 负责压缩，历史外置到 `/conversation_history/{thread_id}.md`。
+3. 长期记忆通过 `/memories/AGENTS.md`、StoreBackend 和 `memory=` 投影，
+   不直接拼接到 system prompt。
+4. DeepAgents 原生 Summarization 负责压缩，内部外置文件留在框架默认
+   StateBackend 或官方 Sandbox 中。
 5. Workspace 文件是数据，不是执行入口。
 6. 所有运行事件经过 `EventTranslationMiddleware` 翻译后再持久化和推流。
 
@@ -130,8 +134,8 @@ Todo 是计划与状态事实，可以驱动委派决策；真正的执行入口
 | WorkflowTool | 与 BaseTool 相同，注册为具名工具 | 只有通过 SubAgent 安全校验后才能进入子集 |
 | DeepAgents `task` | 有显式团队时由原生中间件提供 | 禁止，保持单层拓扑 |
 | 文件工具 | DeepAgents 原生提供，受 permissions 和 Backend ACL 限制 | V1 默认只读且只见授权目录 |
-| `run_builtin_skill_script` | 仅绑定可执行内置 Skill 且生产沙箱可用时提供 | 必须另外显式授权，不从 Skill 自动获得 |
-| 通用 `execute` | 线上禁止 | 线上禁止 |
+| 官方 Sandbox + 原生 `execute` | 仅 `AGENT_SANDBOX_PROVIDER=langsmith` 时提供 | Sandbox provider 不可用时失败关闭 |
+| 自定义脚本工具 | 不提供 | Skill 包内脚本使用 DeepAgents 原生 `execute` |
 
 ### 5.2 WorkflowTool 嵌套权限
 
@@ -219,7 +223,7 @@ Web/API 契约固定为：
 | `message_agent_thought` | 现有 Agent 工具和运行轨迹 | 复用并增加多 Agent 追踪字段；表名是单数 |
 | `end_user` | App 范围终端用户 | 复用并固定外部用户唯一性 |
 | `workspace_files` | 版本化 Workspace 文件 | 复用并完成命名空间、配额和 ACL |
-| `memory_facts` | 长期事实 | 复用并移除向量字段、补齐治理字段 |
+| LangGraph Store | 长期文件记忆 | 通过 `StoreProvider` 复用，不创建业务事实表 |
 | `skills` | 当前开发中的数据库 Skill 正文 | 不进入 V1；移除内容 CRUD 和未发布迁移 |
 
 LangGraph checkpoint 使用框架 saver 管理，不新增 my-dify 自定义 `agent_checkpoints` 模型。
@@ -247,29 +251,24 @@ LangGraph checkpoint 使用框架 saver 管理，不新增 my-dify 自定义 `ag
 - `(conversation_id, agent_id, created_at)`：按角色展示轨迹。
 - `task_id` 非空时的部分索引：仅在异步阶段真正启用后增加。
 
-### 8.2 `memory_facts`
+### 8.2 LangGraph Store
 
-目标表不保存 embedding。核心字段至少包括：
+长期记忆不再使用 `memory_facts` 业务表。DeepAgents 只看到稳定的虚拟文件：
 
-| 字段 | 作用 |
-|---|---|
-| `id`, `account_id`, `app_id`, `end_user_id` | 主键与租户/用户作用域 |
-| `fact_type`, `content`, `importance` | 事实内容与召回优先级 |
-| `normalized_key` | 同一作用域的去重和幂等更新 |
-| `status` | `pending / active / rejected / expired` |
-| `source_type`, `source_conversation_id`, `source_message_id` | 来源审计 |
-| `created_by` | 用户、系统任务或管理员来源 |
-| `expires_at`, `deleted_at` | 过期和软删除 |
-| `created_at`, `updated_at` | 生命周期 |
+```text
+/memories/AGENTS.md
+```
 
-约束和索引至少包括：
+Store namespace 由服务端运行上下文生成：
 
-- `(account_id, app_id, end_user_id, normalized_key)` 的作用域唯一性策略。
-- 可见事实查询索引覆盖 scope、status、deleted_at、expires_at、importance、updated_at。
-- source 字段支持自动提取幂等。
-- 删除、过期和拒绝事实不能进入 `/memories/profile.md`。
+```text
+("mydify", account_id, app_id, end_user_id_or_account)
+```
 
-Weaviate 仅可保存可重建候选索引和 `fact_id`；查询后必须回查 PostgreSQL。不得添加 pgvector 扩展、向量列或自定义余弦检索。
+同一个逻辑路径在不同 namespace 下是不同 Store item，因此不会把多个租户
+写入同一个文件。Store 的具体持久化由 `AGENT_MEMORY_BACKEND` 选择：
+生产使用 `PostgresStore`，开发可以使用 `InMemoryStore`，关闭时不声明长期
+记忆能力。项目不实现事实抽取、向量检索、事实 CRUD 或第二套记忆投影。
 
 ### 8.3 `workspace_files`
 
@@ -284,12 +283,12 @@ Weaviate 仅可保存可重建候选索引和 `fact_id`；查询后必须回查 
 
 ### 8.4 `skills`
 
-当前 `skills` 表包含正文并提供 Creator CRUD，但它不是 V1 最终权威源。整改规则：
+V1 不保留数据库 `skills` 正文表。当前实现规则：
 
 1. 运行时停止从该表读取 Skill 正文。
 2. Creator UI 和 `GET /apps/{app_id}/skills` 改为读取 `BuiltinSkillCatalog`，只提供查看和挂载状态。
 3. 移除 Creator Skill 正文的 create/edit/enable/delete API、Service、模型和前端编辑器。
-4. `d_v2_005_create_skills` 尚未进入共享生产基线，因此从 V1 迁移链删除，并把后续 revision 的 `down_revision` 接到前一个有效 revision。
+4. 历史文件名 `d_v2_005_create_skills` 仅增加 AppConfig/AppConfigVersion 的 Skill 绑定 JSON，不创建 `skills` 表或保存正文。
 5. Skill 绑定直接随 AppConfig/AppConfigVersion 版本化，不另建绑定表。
 
 以后如开放平台管理员上传包，必须设计独立的签名、扫描、审核和发布仓库；不能恢复当前租户可编辑正文表作为执行来源。
@@ -302,20 +301,20 @@ Weaviate 仅可保存可重建候选索引和 `fact_id`；查询后必须回查 
 |---|---|---|
 | `d_v2_001_drop_agent_checkpoints` | 删除旧自建 checkpoint 表 | 保留；使用 LangGraph saver |
 | `d_v2_002_create_workspace_files` | 创建 `workspace_files` | 保留并验证升降级 |
-| `d_v2_003_create_memory_facts` | 创建 `memory_facts` | 保留，字段由后续迁移补齐 |
+| `d_v2_003_create_memory_facts` | 历史版本创建旧表 | 保留以保证迁移链可回放 |
 | `d_v2_004_add_subagents` | 给 AppConfig/Version 增加 `subagents` | 保留 |
-| `d_v2_005_create_skills` | 创建数据库 `skills` 表 | 未发布旧实现；V1 删除该 revision 并重接迁移链 |
-| `d_v2_006_finalize_memory` | 当前包含 pgvector、embedding、来源字段和 EndUser 调整 | 合并前必须移除 pgvector/embedding，并补齐最终治理字段 |
+| `d_v2_005_create_skills` | 增加 AppConfig/Version 的内置 Skill 绑定 | 保留；不创建数据库 Skill 正文表 |
+| `d_v2_006_finalize_memory` | 补齐 Memory 来源、状态和 EndUser 约束 | 保留；不包含 pgvector/embedding |
 | `d_v2_007_subagents_array` | 把 SubAgent 配置规范化为数组 | 保留，确保只接受同步 schema |
+| `d_v2_008_agent_trace_fields` | 增加 Agent/委派字段和 Todo 快照 | 保留；同步 `task_id` 为空 |
+| `d_v2_009_remove_memory_facts` | 删除旧业务长期记忆表 | 保留；长期记忆改由 LangGraph Store 承载 |
 
-这些 revision 当前属于未完成开发链。执行规则：
+这些 revision 的维护规则：
 
-1. 在进入共享生产基线前，修正 `d_v2_006`，不把已否决的 vector 扩展和 embedding 列带入发布迁移。
-2. 已在个人开发数据库执行旧版 `d_v2_006` 时，使用可重复的开发清理步骤或重建开发库；不能据此保留错误生产设计。
-3. 已进入共享或生产环境的迁移不得改写历史，必须新增向前清理 revision。
-4. 删除未发布的 `d_v2_005_create_skills` 后，调整 `d_v2_006` 的 `down_revision`；最终 revision ID 必须连续、唯一且没有悬空依赖。
-5. 多 Agent 轨迹字段和 AppConfig Skill 绑定在实现时使用当前有效链的下一个连续 revision；不要预先跳号或创建空迁移。
-6. 每次迁移必须验证 PostgreSQL upgrade、downgrade、索引、约束和存量 JSON 兼容。
+1. 不得重新加入 vector 扩展、embedding 列或数据库 Skill 正文表。
+2. 已进入共享或生产环境的迁移不得改写历史，必须新增向前清理 revision。
+3. revision ID 必须连续、唯一且没有悬空依赖。
+4. 每次迁移必须验证 PostgreSQL upgrade、downgrade、索引、约束和存量 JSON 兼容。
 
 ## 10. 不新增的表和字段
 
@@ -326,7 +325,7 @@ Weaviate 仅可保存可重建候选索引和 `fact_id`；查询后必须回查 
 - `subagent_tasks`：同步阶段使用 Thought 轨迹和 delegation ID。
 - 自建 `agent_checkpoints`：使用 LangGraph saver。
 - 单独的 conversation summary 权威表：摘要属于 checkpoint/压缩状态，原始 Message 保持完整。
-- `memory_facts.embedding` 或 pgvector 相关表。
+- `memory_facts`、embedding 或 pgvector 相关表。
 - `skill_scripts`：V1 内置脚本来自受信只读 Skill 包清单。
 
 异步阶段若原生框架仍缺少业务任务注册，是否新增异步任务表必须单独设计，不能提前复用同步 `task_id` 字段冒充完整生命周期。
@@ -335,23 +334,22 @@ Weaviate 仅可保存可重建候选索引和 `fact_id`；查询后必须回查 
 
 | 操作 | 必须处理的数据 |
 |---|---|
-| 删除 Conversation | 原始消息、Thought、对应 checkpoint、会话 Workspace/Artifacts、conversation history；长期事实按产品策略单独判断 |
-| 删除 EndUser | 当前 App 范围的长期事实和可选 Weaviate 投影；保留合规审计所需记录 |
-| 删除 App | AppConfig/Version、绑定、会话、Workspace、长期事实和索引投影按异步清理流程处理 |
-| 删除 MemoryFact | PostgreSQL 先软删除，再异步删除索引投影；读取立即不可见 |
+| 删除 Conversation | 原始消息、Thought、对应 checkpoint、会话 Workspace/Artifacts；长期 Store 记忆不随会话删除 |
+| 删除 EndUser | 按 Store namespace 删除当前 App 范围的长期记忆文件 |
+| 删除 App | AppConfig/Version、绑定、会话、Workspace 和 Store namespace 按异步清理流程处理 |
 | 解绑 Skill | 新运行立即不可见；历史 AppConfigVersion 仍保留引用和 digest 供审计 |
 
-删除流程必须幂等，并记录失败重试和跨存储漂移。不能先删 PostgreSQL 权威事实再依赖已经丢失的作用域信息清理外部索引。
+删除流程必须幂等，并记录失败重试和 Store namespace 清理状态。
 
 ## 12. 数据层实施顺序
 
-1. 修正 `d_v2_006`，删除 pgvector/embedding，并把 `memory_facts` 对齐最终治理字段。
+1. 通过 `d_v2_009` 删除旧 `memory_facts` 表，初始化和运行时只使用 LangGraph Store。
 2. 给 AppConfig 和 AppConfigVersion 增加或确认内置 Skill 绑定快照，更新序列化、发布和回滚。
 3. 删除数据库 Skill 正文模型、CRUD、未发布迁移和前端编辑器；Creator 改为浏览并挂载公共目录条目。
-4. 给现有 `message_agent_thought` 增加同步委派追踪字段和索引。
-5. 统一 TODO_UPDATE、SUB_AGENT_DELEGATE、SUB_AGENT_END 的持久化字段和前端分组。
+4. 已通过 `d_v2_008` 给现有 `message_agent_thought` 增加同步委派追踪字段、Todo 快照和索引。
+5. 已统一 TODO_UPDATE、SUB_AGENT_DELEGATE、SUB_AGENT_END 的持久化、SSE 字段和前端分组。
 6. 完成 Workspace 作用域、版本、配额、审计和不可信内容约束。
-7. 验证所有运行入口、后台提取和删除任务的租户过滤。
+7. 验证所有运行入口和 Store namespace 的租户过滤。
 
 每一步都必须先更新模型和迁移，再更新 Service/API/UI，最后补自动化测试；不能只改 JSON schema 或只改前端表单。
 
@@ -363,7 +361,7 @@ Weaviate 仅可保存可重建候选索引和 `fact_id`；查询后必须回查 
 - 未配置团队时不出现 `task`；非法同步字段在 API 层明确拒绝。
 - Todo state 可恢复，TODO_UPDATE 与最终状态一致，且没有第二份 plans/todos 数据。
 - 同步委派可通过 `delegation_id` 关联开始、结束和角色轨迹。
-- MemoryFact 的用户隔离、幂等、状态、过期、软删除和 profile 投影通过。
+- 长期记忆 Store namespace 的租户隔离、文件读写和删除语义通过。
 - Workspace 路径穿越、跨租户、并发版本、配额和不可执行约束通过。
 - Skill 正文只能来自公共只读目录，数据库不能覆盖它。
 - WorkflowTool 和其内部节点均不能扩大父 Agent 或 SubAgent 权限。
