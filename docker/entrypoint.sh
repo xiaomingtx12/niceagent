@@ -3,6 +3,16 @@
 # 1.启用错误检查
 set -e
 
+# Fail closed before starting a production process. Script execution makes the
+# Bubblewrap smoke test mandatory.
+if [[ "${FLASK_ENV}" == "production" ]]; then
+  VALIDATION_ARGS=(--production)
+  if [[ "${BUILTIN_SCRIPT_EXECUTION_ENABLED,,}" == "true" ]]; then
+    VALIDATION_ARGS+=(--require-sandbox)
+  fi
+  python scripts/validate_deepagents_v2.py "${VALIDATION_ARGS[@]}"
+fi
+
 # 2.判断是否启用的迁移数据同步，如果是则将数据库迁移同步到数据库中
 if [[ "${MIGRATION_ENABLED}" == "true" ]]; then
   echo "Runnable migrations"

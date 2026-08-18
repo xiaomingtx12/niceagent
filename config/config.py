@@ -15,8 +15,20 @@ def _get_bool_env(key: str) -> bool:
     return value.lower() == "true" if value is not None else False
 
 
+def _get_workspace_limit(key: str) -> int:
+    """读取正数 Workspace 限制，生产环境要求显式配置。"""
+    raw = os.getenv(key)
+    if os.getenv("FLASK_ENV", "").lower() == "production" and raw is None:
+        raise ValueError(f"{key} is required in production")
+    value = int(raw if raw is not None else DEFAULT_CONFIG[key])
+    if value <= 0:
+        raise ValueError("Workspace limits must be greater than zero")
+    return value
+
+
 class Config:
     def __init__(self):
+        """从环境变量加载应用配置。"""
         # 关闭wtf的csrf保护
         self.WTF_CSRF_ENABLED = _get_bool_env("WTF_CSRF_ENABLED")
 
@@ -31,11 +43,25 @@ class Config:
         self.AGENT_CHECKPOINT_BACKEND = str(
             _get_env("AGENT_CHECKPOINT_BACKEND")
         ).lower()
-        self.AGENT_MEMORY_RECALL_K = int(_get_env("AGENT_MEMORY_RECALL_K"))
-        self.AGENT_AUTO_EXTRACT_MEMORY = _get_bool_env(
-            "AGENT_AUTO_EXTRACT_MEMORY"
+        self.AGENT_MEMORY_BACKEND = str(
+            _get_env("AGENT_MEMORY_BACKEND")
+        ).lower()
+        self.AGENT_SANDBOX_PROVIDER = str(
+            _get_env("AGENT_SANDBOX_PROVIDER")
+        ).lower()
+        self.AGENT_SANDBOX_SNAPSHOT_ID = _get_env(
+            "AGENT_SANDBOX_SNAPSHOT_ID"
+        ) or None
+        self.AGENT_SANDBOX_IDLE_TTL_SECONDS = int(
+            _get_env("AGENT_SANDBOX_IDLE_TTL_SECONDS")
+        )
+        self.AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS = int(
+            _get_env("AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS")
         )
         self.BUILTIN_SKILLS_ROOT = _get_env("BUILTIN_SKILLS_ROOT")
+        self.WORKSPACE_MAX_BYTES = _get_workspace_limit("WORKSPACE_MAX_BYTES")
+        self.WORKSPACE_MAX_FILES = _get_workspace_limit("WORKSPACE_MAX_FILES")
+        self._validate_agent_settings()
 
         # Redis配置
         self.REDIS_HOST = _get_env("REDIS_HOST")
@@ -88,3 +114,36 @@ class Config:
         self.TENCENT_SCF_REGION = _get_env("TENCENT_SCF_REGION")
         self.TENCENT_SCF_NAMESPACE = _get_env("TENCENT_SCF_NAMESPACE")
         self.TENCENT_SCF_FUNCTION_NAME = _get_env("TENCENT_SCF_FUNCTION_NAME")
+
+    def _validate_agent_settings(self) -> None:
+        """校验 Agent 持久化和记忆配置。"""
+        supported = {"postgres", "memory", "disabled", "false", "off", "none"}
+        if self.AGENT_CHECKPOINT_BACKEND not in supported:
+            raise ValueError(
+                "AGENT_CHECKPOINT_BACKEND 必须是 postgres、memory 或 disabled"
+            )
+        if self.AGENT_MEMORY_BACKEND not in supported:
+            raise ValueError(
+                "AGENT_MEMORY_BACKEND 必须是 postgres、memory 或 disabled"
+            )
+        if (
+            os.getenv("FLASK_ENV", "").lower() == "production"
+            and self.AGENT_CHECKPOINT_BACKEND != "postgres"
+        ):
+            raise ValueError("生产环境必须使用 postgres checkpoint")
+        if self.AGENT_SANDBOX_PROVIDER not in {"disabled", "langsmith"}:
+            raise ValueError(
+                "AGENT_SANDBOX_PROVIDER 必须是 disabled 或 langsmith"
+            )
+        if (
+            os.getenv("FLASK_ENV", "").lower() == "production"
+            and self.AGENT_MEMORY_BACKEND != "postgres"
+        ):
+            raise ValueError("生产环境必须使用 postgres memory store")
+        for name in (
+            "AGENT_SANDBOX_IDLE_TTL_SECONDS",
+            "AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS",
+        ):
+            value = getattr(self, name)
+            if value < 0 or value % 60 != 0:
+                raise ValueError(f"{name} 必须是 60 的倍数或 0")

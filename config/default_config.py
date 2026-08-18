@@ -9,9 +9,14 @@ DEFAULT_CONFIG = {
     "SQLALCHEMY_ECHO": "True",
     # DeepAgents runtime
     "AGENT_CHECKPOINT_BACKEND": "postgres",
-    "AGENT_MEMORY_RECALL_K": 5,
-    "AGENT_AUTO_EXTRACT_MEMORY": "True",
+    "AGENT_MEMORY_BACKEND": "disabled",
+    "AGENT_SANDBOX_PROVIDER": "disabled",
+    "AGENT_SANDBOX_SNAPSHOT_ID": "",
+    "AGENT_SANDBOX_IDLE_TTL_SECONDS": 600,
+    "AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS": 86400,
     "BUILTIN_SKILLS_ROOT": "resources/agent_skills/builtin",
+    "WORKSPACE_MAX_BYTES": 104857600,
+    "WORKSPACE_MAX_FILES": 1000,
     # Redis数据库配置
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
