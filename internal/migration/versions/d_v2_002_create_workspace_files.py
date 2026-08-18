@@ -34,7 +34,7 @@ import sqlalchemy as sa
 # revision identifiers, used by Alembic.
 revision = 'd_v2_002_create_workspace_files'
 down_revision = 'd_v2_001_drop_agent_checkpoints'
-branch_labels = ('deepagents_v2',)
+branch_labels = None
 depends_on = None
 
 

@@ -1,6 +1,8 @@
 from .account_service import AccountService
 from .ai_service import AIService
 from .agent_runtime_service import AgentRuntimeService
+from .agent_conversation_cleanup_service import AgentConversationCleanupService
+from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
 from .analysis_service import AnalysisService
 from .api_key_service import ApiKeyService
 from .api_tool_service import ApiToolService
@@ -24,7 +26,6 @@ from .jwt_service import JwtService
 from .keyword_table_service import KeywordTableService
 from .language_model_service import LanguageModelService
 from .mcp_service import MCPService
-from .memory_fact_service import MemoryFactService
 from .oauth_service import OAuthService
 from .openapi_service import OpenAPIService
 from .platform_service import PlatformService
@@ -65,13 +66,15 @@ __all__ = [
     "AccountService",
     "AIService",
     "AgentRuntimeService",
+    "AgentConversationCleanupService",
+    "AgentInvocationService",
+    "AgentInvocationSpec",
     "ApiKeyService",
     "AppConfigService",
     "OpenAPIService",
     "WorkflowService",
     "BuiltinAppService",
     "AssistantAgentService",
-    "MemoryFactService",
     "FaissService",
     "LanguageModelService",
     "MCPService",

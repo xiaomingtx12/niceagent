@@ -30,7 +30,6 @@ from internal.handler import (
     PlatformHandler,
     WechatHandler,
     ProviderApiKeyHandler,
-    MemoryFactHandler,
     SkillHandler,
     WorkspaceFileHandler,
 )
@@ -67,7 +66,6 @@ class Router:
     platform_handler: PlatformHandler
     wechat_handler: WechatHandler
     provider_api_key_handler: ProviderApiKeyHandler
-    memory_fact_handler: MemoryFactHandler
     skill_handler: SkillHandler
     workspace_file_handler: WorkspaceFileHandler
 
@@ -677,36 +675,6 @@ class Router:
             "/apps/<uuid:app_id>/workspace/file",
             methods=["DELETE"],
             view_func=self.workspace_file_handler.delete_app_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/memories",
-            methods=["GET"],
-            view_func=self.memory_fact_handler.list_app_memories,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memories",
-            methods=["GET"],
-            view_func=self.memory_fact_handler.list_my_memories,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memories",
-            methods=["POST"],
-            view_func=self.memory_fact_handler.create_my_memory,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memories/batch-delete",
-            methods=["POST"],
-            view_func=self.memory_fact_handler.batch_delete_my_memories,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memories/<uuid:fact_id>",
-            methods=["PATCH"],
-            view_func=self.memory_fact_handler.update_my_memory,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memories/<uuid:fact_id>",
-            methods=["DELETE"],
-            view_func=self.memory_fact_handler.delete_my_memory,
         )
         bp.add_url_rule(
             "/web-apps/<string:token>/conversations/<uuid:conversation_id>/files",

@@ -2,10 +2,27 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
-from uuid import UUID, uuid4
+from uuid import UUID
 
+from config.config import Config
+from injector import inject
+from internal.core.agent_v2.backends.workspace_path import (
+    contains_reserved_segment,
+)
+from internal.core.agent_v2.backends.workspace_quota import (
+    WorkspaceLimits,
+    WorkspaceQuotaExceeded,
+)
+from internal.core.agent_v2.persistence.workspace import (
+    WorkspaceRepository,
+    WorkspaceVersionConflict,
+)
+from internal.core.agent_v2.runtime.telemetry import (
+    AgentTelemetry,
+    LoggingAgentTelemetrySink,
+)
 from internal.exception import FailException
 from internal.model import Conversation, WorkspaceFile
 from pkg.sqlalchemy import SQLAlchemy
@@ -15,6 +32,7 @@ MAX_WORKSPACE_PATH_LENGTH = 512
 
 
 def _uuid(value, field: str) -> UUID:
+    """把字段值规范为 UUID，非法时抛业务异常。"""
     try:
         return value if isinstance(value, UUID) else UUID(str(value))
     except (TypeError, ValueError) as exc:
@@ -40,12 +58,16 @@ def normalize_workspace_relative_path(
         )
     ):
         raise FailException("Workspace 路径不合法")
+    if contains_reserved_segment(normalized):
+        raise FailException("Workspace 路径属于保留命名空间")
     allowed_root = "seed" if conversation_id is None else str(conversation_id)
     if segments[0] != allowed_root:
         raise FailException(f"Workspace 路径必须位于 {allowed_root}/ 下")
     return "/".join(segments)
 
 
+@inject
+@dataclass
 class WorkspaceFileService(BaseService):
     """Versioned file CRUD with creator/end-user visibility rules."""
 
@@ -59,6 +81,7 @@ class WorkspaceFileService(BaseService):
         conversation_id: str | UUID | None = None,
         prefix: str | None = None,
     ) -> list[WorkspaceFile]:
+        """列出 Creator 作用域内最新的可见文件。"""
         query = self.db.session.query(WorkspaceFile).filter(
             WorkspaceFile.account_id == _uuid(account_id, "account_id"),
             WorkspaceFile.app_id == _uuid(app_id, "app_id"),
@@ -72,7 +95,9 @@ class WorkspaceFileService(BaseService):
             normalized = prefix.strip("/")
             query = query.filter(WorkspaceFile.path.like(f"{normalized}%"))
         return [
-            row for row in self._latest(query.all()) if not row.is_deleted
+            row
+            for row in self._latest(query.all())
+            if not row.is_deleted and not contains_reserved_segment(row.path)
         ]
 
     def list_end_user_files(
@@ -83,6 +108,7 @@ class WorkspaceFileService(BaseService):
         conversation_id: str | UUID,
         prefix: str | None = None,
     ) -> list[WorkspaceFile]:
+        """列出终端用户会话下最新的文件。"""
         conversation_uuid = _uuid(conversation_id, "conversation_id")
         return [
             row
@@ -106,6 +132,7 @@ class WorkspaceFileService(BaseService):
         created_by: str | UUID,
         mime_type: str = "text/plain",
     ) -> WorkspaceFile:
+        """校验作用域并追加经配额检查的文本版本。"""
         account_uuid = _uuid(account_id, "account_id")
         app_uuid = _uuid(app_id, "app_id")
         conversation_uuid = (
@@ -129,28 +156,39 @@ class WorkspaceFileService(BaseService):
             path,
             conversation_id=conversation_uuid,
         )
-        latest = self._latest_one(account_uuid, app_uuid, relative)
-        encoded = content.encode("utf-8")
-        row = WorkspaceFile(
-            id=uuid4(),
+        config = Config()
+        repository = WorkspaceRepository(
+            session=self.db.session,
             account_id=account_uuid,
             app_id=app_uuid,
             conversation_id=conversation_uuid,
-            path=relative,
-            version=(latest.version + 1) if latest else 1,
-            storage_backend="db",
-            mime_type=mime_type,
-            size_bytes=len(encoded),
-            content_sha256=hashlib.sha256(encoded).hexdigest(),
-            content=encoded,
             created_by=_uuid(created_by, "created_by"),
-            is_deleted=False,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
+            limits=WorkspaceLimits(
+                max_bytes=config.WORKSPACE_MAX_BYTES,
+                max_files=config.WORKSPACE_MAX_FILES,
+            ),
+            telemetry=AgentTelemetry(
+                LoggingAgentTelemetrySink(),
+                attributes={
+                    "account_id": str(account_uuid),
+                    "app_id": str(app_uuid),
+                    "conversation_id": (
+                        str(conversation_uuid) if conversation_uuid else None
+                    ),
+                    "actor_id": str(created_by),
+                },
+            ),
         )
-        self.db.session.add(row)
-        self.db.session.commit()
-        return row
+        try:
+            return repository.write_text(
+                relative,
+                content,
+                mime_type=mime_type,
+            )
+        except WorkspaceQuotaExceeded as exc:
+            raise FailException(str(exc)) from exc
+        except WorkspaceVersionConflict as exc:
+            raise FailException("Workspace 文件版本冲突，请重试") from exc
 
     def read_owned(
         self,
@@ -160,10 +198,14 @@ class WorkspaceFileService(BaseService):
         path: str,
         end_user_conversation_id: str | UUID | None = None,
     ) -> WorkspaceFile:
+        """在校验归属后读取最新可见文件。"""
+        normalized_path = path.strip("/")
+        if contains_reserved_segment(normalized_path):
+            raise FailException("Workspace 文件不存在")
         row = self._latest_one(
             _uuid(account_id, "account_id"),
             _uuid(app_id, "app_id"),
-            path.strip("/"),
+            normalized_path,
         )
         if row is None or row.is_deleted:
             raise FailException("Workspace 文件不存在")
@@ -183,6 +225,7 @@ class WorkspaceFileService(BaseService):
         app_id: str | UUID,
         path: str,
     ) -> None:
+        """Hide the latest owned file version from subsequent reads."""
         row = self.read_owned(
             account_id=account_id,
             app_id=app_id,
@@ -198,6 +241,7 @@ class WorkspaceFileService(BaseService):
         app_id: UUID,
         path: str,
     ) -> WorkspaceFile | None:
+        """Return the newest version for one scoped storage path."""
         return (
             self.db.session.query(WorkspaceFile)
             .filter(
@@ -211,6 +255,7 @@ class WorkspaceFileService(BaseService):
 
     @staticmethod
     def _latest(rows: list[WorkspaceFile]) -> list[WorkspaceFile]:
+        """Collapse version rows to the latest row per path."""
         rows.sort(key=lambda row: (row.path, -row.version))
         latest: dict[str, WorkspaceFile] = {}
         for row in rows:

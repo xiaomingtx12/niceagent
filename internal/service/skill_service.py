@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 import hashlib
 import re
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
@@ -16,6 +18,8 @@ from .base_service import BaseService
 
 
 _SKILL_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
+_MAX_PACKAGE_FILES = 256
+_MAX_PACKAGE_BYTES = 20 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -25,6 +29,8 @@ class BuiltinSkill:
     version: str
     digest: str
     skill_md: str
+    package_root: Path
+    package_files: Mapping[str, str]
     enabled: bool = True
 
     def to_dict(self, *, enabled: bool | None = None) -> dict[str, Any]:
@@ -46,7 +52,8 @@ class SkillService(BaseService):
 
     def __init__(self, *args, **kwargs) -> None:
         del args, kwargs
-        self._root = Path(Config().BUILTIN_SKILLS_ROOT)
+        settings = Config()
+        self._root = Path(settings.BUILTIN_SKILLS_ROOT)
 
     def list_catalog(self) -> list[BuiltinSkill]:
         return sorted(self._scan().values(), key=lambda item: item.name)
@@ -143,6 +150,7 @@ class SkillService(BaseService):
             description = str(metadata.get("description", "")).strip()
             if not description:
                 raise FailException(f"Skill description 不能为空: {child.name}")
+            _validate_package_tree(child)
             version = str(
                 ((metadata.get("metadata") or {}).get("my_dify") or {}).get(
                     "version",
@@ -155,6 +163,8 @@ class SkillService(BaseService):
                 version=version,
                 digest=_digest_tree(child),
                 skill_md=skill_md,
+                package_root=child.resolve(),
+                package_files=MappingProxyType(_read_text_package(child)),
             )
         return catalog
 
@@ -175,7 +185,7 @@ def _parse_frontmatter(skill_md: str) -> dict[str, Any]:
 
 def _digest_tree(root: Path) -> str:
     hasher = hashlib.sha256()
-    for file in sorted(path for path in root.rglob("*") if path.is_file()):
+    for file in _iter_package_files(root):
         if file.is_symlink():
             raise FailException(f"内置 Skill 不允许符号链接: {file}")
         relative = file.relative_to(root).as_posix()
@@ -184,6 +194,55 @@ def _digest_tree(root: Path) -> str:
         hasher.update(file.read_bytes())
         hasher.update(b"\0")
     return f"sha256:{hasher.hexdigest()}"
+
+
+def _validate_package_tree(root: Path) -> None:
+    """拒绝符号链接、特殊文件和超限的内置包。"""
+    file_count = 0
+    total_bytes = 0
+    for entry in root.rglob("*"):
+        if _is_runtime_cache(entry, root):
+            continue
+        if entry.is_symlink():
+            raise FailException(f"内置 Skill 不允许符号链接: {entry}")
+        if entry.is_dir():
+            continue
+        if not entry.is_file():
+            raise FailException(f"内置 Skill 只允许普通文件: {entry}")
+        file_count += 1
+        total_bytes += entry.stat().st_size
+        if file_count > _MAX_PACKAGE_FILES or total_bytes > _MAX_PACKAGE_BYTES:
+            raise FailException(f"内置 Skill 包超过文件或字节上限: {root.name}")
+
+
+def _read_text_package(root: Path) -> dict[str, str]:
+    """加载安全的 UTF-8 包文件投影。"""
+    files: dict[str, str] = {}
+    for file in _iter_package_files(root):
+        if file.is_symlink():
+            raise FailException(f"内置 Skill 不允许符号链接: {file}")
+        try:
+            files[file.relative_to(root).as_posix()] = file.read_text(
+                encoding="utf-8"
+            )
+        except UnicodeDecodeError as exc:
+            raise FailException(f"内置 Skill 文件必须是 UTF-8 文本: {file}") from exc
+    return files
+
+
+def _iter_package_files(root: Path) -> list[Path]:
+    """返回排除运行时缓存的有序源文件。"""
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and not _is_runtime_cache(path, root)
+    )
+
+
+def _is_runtime_cache(path: Path, root: Path) -> bool:
+    """判断是否为不发布的 Python 缓存产物。"""
+    relative = path.relative_to(root)
+    return "__pycache__" in relative.parts or path.suffix == ".pyc"
 
 
 __all__ = ["BuiltinSkill", "SkillService"]

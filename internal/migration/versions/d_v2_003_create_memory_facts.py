@@ -44,12 +44,19 @@ import sqlalchemy as sa
 # revision identifiers, used by Alembic.
 revision = 'd_v2_003_create_memory_facts'
 down_revision = 'd_v2_002_create_workspace_files'
-branch_labels = ('deepagents_v2',)
+branch_labels = None
 depends_on = None
 
 
 def upgrade():
     """建 memory_facts 表 + 索引."""
+    # 旧版 Skill/V2 链已经创建过一张同名表，但字段模型完全不同。
+    # 后续 d_v2_006 只做兼容收敛，d_v2_009 会删除这张废弃表，因此
+    # 这里不能因为同名表存在而阻断从 b8c9d0e1f2a3 升级的数据库。
+    bind = op.get_bind()
+    if "memory_facts" in sa.inspect(bind).get_table_names():
+        return
+
     op.create_table(
         'memory_facts',
         sa.Column('id', sa.UUID(), nullable=False, server_default=sa.text('uuid_generate_v4()'), comment='主键ID'),

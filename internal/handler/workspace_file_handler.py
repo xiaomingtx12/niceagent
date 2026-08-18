@@ -7,18 +7,13 @@ from flask import request
 from flask_login import current_user, login_required
 from injector import inject
 
-from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import ForbiddenException
-from internal.model import Conversation
 from internal.service import AppService, WebAppService, WorkspaceFileService
 from pkg.response import success_json, success_message, validate_error_json
-from pkg.sqlalchemy import SQLAlchemy
 
 
 @inject
 @dataclass
 class WorkspaceFileHandler:
-    db: SQLAlchemy
     app_service: AppService
     web_app_service: WebAppService
     workspace_file_service: WorkspaceFileService
@@ -82,9 +77,10 @@ class WorkspaceFileHandler:
 
     @login_required
     def list_conversation_files(self, token: str, conversation_id: UUID):
-        app, end_user, conversation = self._owned_web_conversation(
-            token,
-            conversation_id,
+        app, end_user, conversation = self.web_app_service.get_owned_web_conversation(
+            token=token,
+            conversation_id=conversation_id,
+            account=current_user,
         )
         rows = self.workspace_file_service.list_end_user_files(
             account_id=app.account_id,
@@ -96,9 +92,10 @@ class WorkspaceFileHandler:
 
     @login_required
     def read_conversation_file(self, token: str, conversation_id: UUID):
-        app, _, conversation = self._owned_web_conversation(
-            token,
-            conversation_id,
+        app, _, conversation = self.web_app_service.get_owned_web_conversation(
+            token=token,
+            conversation_id=conversation_id,
+            account=current_user,
         )
         row = self.workspace_file_service.read_owned(
             account_id=app.account_id,
@@ -107,27 +104,5 @@ class WorkspaceFileHandler:
             end_user_conversation_id=conversation.id,
         )
         return success_json(row.to_dict(include_content=True))
-
-    def _owned_web_conversation(self, token: str, conversation_id: UUID):
-        app = self.web_app_service.get_web_app(token)
-        end_user = self.web_app_service.resolve_web_app_end_user(
-            app=app,
-            account=current_user,
-        )
-        conversation = (
-            self.db.session.query(Conversation)
-            .filter(
-                Conversation.id == conversation_id,
-                Conversation.app_id == app.id,
-                Conversation.invoke_from == InvokeFrom.WEB_APP,
-                Conversation.created_by.in_([end_user.id, current_user.id]),
-                Conversation.is_deleted.is_(False),
-            )
-            .one_or_none()
-        )
-        if conversation is None:
-            raise ForbiddenException("会话不存在或不属于当前用户")
-        return app, end_user, conversation
-
 
 __all__ = ["WorkspaceFileHandler"]

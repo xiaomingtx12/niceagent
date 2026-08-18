@@ -15,6 +15,7 @@ from wtforms.validators import (
 
 from internal.entity.app_entity import AppStatus
 from internal.lib.helper import datetime_to_timestamp
+from internal.schema.agent_thought_schema import dump_agent_thought
 from internal.model import App, Message
 from internal.model.app import AppConfigVersion
 from internal.schema import ListField
@@ -238,17 +239,7 @@ class GetDebugConversationMessagesWithPageResp(Schema):
             "total_token_count": data.total_token_count,
             "latency": data.latency,
             "agent_thoughts": [
-                {
-                    "id": agent_thought.id,
-                    "position": agent_thought.position,
-                    "event": agent_thought.event,
-                    "thought": agent_thought.thought,
-                    "observation": agent_thought.observation,
-                    "tool": agent_thought.tool,
-                    "tool_input": agent_thought.tool_input,
-                    "latency": agent_thought.latency,
-                    "created_at": datetime_to_timestamp(agent_thought.created_at),
-                }
+                dump_agent_thought(agent_thought)
                 for agent_thought in data.agent_thoughts
             ],
             "created_at": datetime_to_timestamp(data.created_at),

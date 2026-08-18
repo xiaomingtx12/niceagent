@@ -187,6 +187,17 @@ class MessageAgentThought(db.Model):
         Index("message_agent_thought_app_id_idx", "app_id"),
         Index("message_agent_thought_conversation_id_idx", "conversation_id"),
         Index("message_agent_thought_message_id_idx", "message_id"),
+        Index(
+            "message_agent_thought_conversation_delegation_idx",
+            "conversation_id",
+            "delegation_id",
+        ),
+        Index(
+            "message_agent_thought_conversation_agent_created_idx",
+            "conversation_id",
+            "agent_id",
+            "created_at",
+        ),
     )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
@@ -203,6 +214,16 @@ class MessageAgentThought(db.Model):
     created_by = Column(
         UUID, nullable=False
     )  # 消息的创建来源，有可能是LLMOps的用户，也有可能是开放API的终端用户
+
+    # 多 Agent 轨迹关联。task_id 仅预留给未来异步任务。
+    agent_id = Column(String(64), nullable=True)
+    agent_type = Column(String(16), nullable=True)
+    parent_agent_id = Column(String(64), nullable=True)
+    delegation_id = Column(String(128), nullable=True)
+    task_id = Column(String(128), nullable=True)
+    todos = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
     # 该步骤在消息中执行的位置
     position = Column(

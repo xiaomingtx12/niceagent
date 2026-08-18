@@ -1,7 +1,7 @@
 """drop agent_checkpoints table (R0 切到 LangGraph 原生 PostgresSaver)
 
 Revision ID: d_v2_001_drop_agent_checkpoints
-Revises: 223e8bdd31a6, 6837222596d1, fe593d5bb1ab
+Revises: 223e8bdd31a6, 6837222596d1, fe593d5bb1ab, b8c9d0e1f2a3
 Create Date: 2026-07-28 18:00:00.000000
 
 R0 改造（[deepagents-v2-plan-context-design] memory）：
@@ -18,15 +18,20 @@ R0 改造（[deepagents-v2-plan-context-design] memory）：
   阶段还在跑，没有存量历史 checkpoint 需要保留
 
 依赖：
-- 3 个 head 是 master 历史上同时存在的独立分支（不同 feature），本迁移
-  把它们 merge 进新 chain 头（alembic 支持多 down_revision 元组）
+    - 旧主链和 Skill/V2 资源链在 b8c9d0e1f2a3 汇合；本迁移继续把
+  它们合并进 Agent V2 新链（alembic 支持多 down_revision 元组）
 """
 from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'd_v2_001_drop_agent_checkpoints'
-down_revision = ('223e8bdd31a6', '6837222596d1', 'fe593d5bb1ab')
+down_revision = (
+    '223e8bdd31a6',
+    '6837222596d1',
+    'fe593d5bb1ab',
+    'b8c9d0e1f2a3',
+)
 branch_labels = ('deepagents_v2',)
 depends_on = None
 
