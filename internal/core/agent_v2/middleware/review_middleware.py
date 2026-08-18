@@ -1,24 +1,12 @@
-"""R0 内容审核中间件。
-
-master 老 review 流程在 service 层（_validate_draft_app_config 校验 +
-chat_service 在 invoke 前调关键词过滤）。deepagents 模型下，审核要嵌到
-graph 内部：
-- input 审核：`before_model` —— 拦截 user 输入，命中关键词就替换成
-  `inputs_config.preset_response`，不让 LLM 看原内容
-- output 审核：`after_model` —— LLM 输出命中关键词直接抛 `ReviewBlocked`
-  （由 BaseAgent 兜底成 message 状态 = MessageStatus.SENSITIVE）
-
-约束（硬约束 #5）：不复用 langchain 旧版审核组件（langchain 0.x 有
-ContentFilter，但跟 deepagents 1.x middleware 不兼容），直接实现纯函数
-`apply_keyword_filter` + 中间件调用，单测覆盖纯函数即可。
-"""
+"""处理模型输入和输出的关键词审核。"""
 
 from __future__ import annotations
 
 import re
 from typing import Any, Optional
 
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, hook_config
+from langchain_core.messages import AIMessage
 
 
 class ReviewBlocked(Exception):
@@ -31,14 +19,7 @@ def apply_keyword_filter(
     *,
     case_sensitive: bool = False,
 ) -> Optional[str]:
-    """关键词命中检测。
-
-    Returns:
-        - None: 未命中，原样放行
-        - str: 命中的关键词（用于埋点上报）
-
-    实现：re 编译 + 单词边界 \b，避免误命中（如 "app" 命中 "p"）。
-    """
+    """返回首个命中的关键词，未命中时返回 None。"""
     if not text or not keywords:
         return None
     flags = 0 if case_sensitive else re.IGNORECASE
@@ -53,14 +34,7 @@ def apply_keyword_filter(
 
 
 class ReviewMiddleware(AgentMiddleware):
-    """input/output 关键词审核。
-
-    state schema 字段：
-    - `runtime_review_blocked: bool` —— 是否被审核拦下（after_model 设置）
-    - `runtime_review_hit_keyword: str` —— 命中的关键词（埋点用）
-    """
-
-    state_schema = Any
+    """执行输入和输出关键词审核。"""
 
     def __init__(
         self,
@@ -68,6 +42,7 @@ class ReviewMiddleware(AgentMiddleware):
         review_config: dict,
         preset_response: str = "",
     ) -> None:
+        """编译输入和输出审核策略。"""
         super().__init__()
         cfg = review_config or {}
         self._enabled: bool = bool(cfg.get("enable", False))
@@ -82,15 +57,12 @@ class ReviewMiddleware(AgentMiddleware):
 
     @property
     def enabled(self) -> bool:
+        """返回是否启用任一审核策略。"""
         return self._enabled
 
+    @hook_config(can_jump_to=["end"])
     def before_model(self, state: dict, runtime: Any) -> dict | None:
-        """input 审核：拦截 user 输入。
-
-        当前实现只做"标记命中关键词" + 写入 preset_response 到 state 提示，
-        真正的"替换 user 消息"留给 BaseAgent invoke 前做（保持 middleware
-        只读 state 的约定，避免 middleware 篡改 messages 列表）。
-        """
+        """命中输入关键词时返回预设响应并结束图。"""
         if not self._enabled or not self._inputs_enabled or not self._keywords:
             return None
         messages = state.get("messages", [])
@@ -103,9 +75,12 @@ class ReviewMiddleware(AgentMiddleware):
         hit = apply_keyword_filter(text, self._keywords)
         if hit is not None:
             return {
-                "runtime_review_blocked": True,
-                "runtime_review_hit_keyword": hit,
-                "runtime_review_preset_response": self._preset_response,
+                "jump_to": "end",
+                "messages": [
+                    AIMessage(
+                        content=self._preset_response or "输入内容未通过审核。"
+                    )
+                ],
             }
         return None
 
