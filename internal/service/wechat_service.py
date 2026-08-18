@@ -11,13 +11,9 @@ from wechatpy.exceptions import InvalidSignatureException
 from wechatpy.replies import TextReply
 from wechatpy.utils import check_signature
 
-from internal.core.agent.agents import BaseAgent
-from internal.core.agent.entities.agent_entity import AgentConfig
 from internal.core.language_model.entities.model_entity import ModelFeature
-from internal.core.memory import load_history_messages
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import MessageStatus, InvokeFrom
-from internal.entity.dataset_entity import RetrievalSource
 from internal.entity.platform_entity import WechatConfigStatus
 from internal.exception import FailException
 from internal.model import (
@@ -30,11 +26,9 @@ from internal.model import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
-from .agent_runtime_service import AgentRuntimeService
+from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
 from .base_service import BaseService
-from .conversation_service import ConversationService
 from .language_model_service import LanguageModelService
-from .retrieval_service import RetrievalService
 
 
 @inject
@@ -43,11 +37,9 @@ class WechatService(BaseService):
     """微信公众号服务"""
 
     db: SQLAlchemy
-    retrieval_service: RetrievalService
     app_config_service: AppConfigService
-    conversation_service: ConversationService
     language_model_service: LanguageModelService
-    agent_runtime_service: AgentRuntimeService
+    agent_invocation_service: AgentInvocationService
 
     def wechat(self, app_id: UUID):
         """微信公众号(订阅号/服务号)校验与消息推送, 运行逻辑参考`Agent对接微信公众号思路.drawio`"""
@@ -223,106 +215,25 @@ class WechatService(BaseService):
                 account_id=app.account_id,
             )
 
-            # 2.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
             conversation = self.get(Conversation, conversation_id)
-            history = load_history_messages(
-                db=self.db,
-                conversation=conversation,
-            )
-
-            # 3.将草稿配置中的tools转换成LangChain工具
-            tools = self.app_config_service.get_langchain_tools_by_tools_config(
-                app_config["tools"]
-            )
-
-            # 4.检测是否关联了知识库
-            if app_config["datasets"]:
-                # 5.构建LangChain知识库检索工具
-                dataset_retrieval = (
-                    self.retrieval_service.create_langchain_tool_from_search(
-                        flask_app=flask_app._get_current_object(),
-                        dataset_ids=[
-                            dataset["id"] for dataset in app_config["datasets"]
-                        ],
-                        account_id=app.account_id,
-                        retrival_source=RetrievalSource.APP,
-                        source_app_id=app.id,
-                        **app_config["retrieval_config"],
-                    )
-                )
-                tools.append(dataset_retrieval)
-
-            # 6.检测是否关联工作流，如果关联了工作流则将工作流构建成工具添加到tools中
-            if app_config["workflows"]:
-                workflow_tools = (
-                    self.app_config_service.get_langchain_tools_by_workflow_ids(
-                        [workflow["id"] for workflow in app_config["workflows"]]
-                    )
-                )
-                tools.extend(workflow_tools)
 
             message = self.get(Message, message_id)
-            runtime = self.agent_runtime_service.prepare(
+            spec = AgentInvocationSpec(
                 account_id=app.account_id,
-                app_id=app.id,
-                conversation_id=conversation.id,
-                created_by=message.created_by,
-                end_user_id=message.created_by,
-                query=query,
-                skill_bindings=app_config["skills"],
-                subagents=app_config["subagents"],
-            )
-            agent = BaseAgent(
-                llm=llm,
-                checkpointer=runtime.checkpointer,
-                workspace_backend=runtime.workspace_backend,
-                permissions=runtime.permissions,
-                skill_sources=runtime.skill_sources,
-                memory_sources=runtime.memory_sources,
-                subagent_skill_sources=runtime.subagent_skill_sources,
-                agent_config=AgentConfig(
-                    user_id=message.created_by,
-                    invoke_from=InvokeFrom.SERVICE_API,
-                    app_name=app.name,
-                    app_description=app.description,
-                    preset_prompt=app_config["preset_prompt"],
-                    opening_statement=(
-                        app_config["opening_statement"] if not history else ""
-                    ),
-                    subagents=app_config["subagents"],
-                    tools=tools,
-                    review_config=app_config["review_config"],
-                    account_id=app.account_id,
-                    app_id=app.id,
-                    conversation_id=conversation.id,
-                    end_user_id=message.created_by,
-                ),
-            )
-
-            # 9.调用智能体获取执行结果
-            agent_result = agent.invoke(
-                {
-                    "history": history,
-                    "messages": [llm.convert_to_human_message(query, [])],
-                }
-            )
-
-            # 10.将数据存储到数据库中，包含会话、消息、推理过程
-            self.conversation_service.save_agent_thoughts(
-                account_id=app.account_id,
-                app_id=app.id,
+                app=app,
                 app_config=app_config,
                 conversation_id=conversation.id,
                 message_id=message_id,
-                agent_thoughts=agent_result.agent_thoughts,
-            )
-            self.agent_runtime_service.extract_and_store_facts(
-                account_id=app.account_id,
-                app_id=app.id,
+                created_by=message.created_by,
+                user_id=message.created_by,
                 end_user_id=message.created_by,
-                conversation_id=conversation.id,
-                message_id=message.id,
+                invoke_from=InvokeFrom.SERVICE_API,
                 query=query,
-                answer=agent_result.answer,
+                image_urls=[],
+                opening_statement=(
+                    app_config["opening_statement"] if conversation.is_new else ""
+                ),
                 llm=llm,
             )
+
+            self.agent_invocation_service.invoke(spec)

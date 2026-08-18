@@ -6,11 +6,17 @@ from flask import request
 from injector import inject
 from langchain_core.tools import BaseTool
 
+from internal.core.agent_v2.runtime.subagents import (
+    SubAgentSpecError,
+    validate_platform_subagents,
+)
 from internal.core.tools.api_tools.entities import ToolEntity
 from internal.core.tools.api_tools.providers import ApiProviderManager
 from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
 from internal.core.mcp import MCPRuntimeManager
 from internal.core.workflow import Workflow as WorkflowTool
+from internal.entity.audio_entity import ALLOWED_AUDIO_VOICES
+from internal.exception import FailException, ValidateErrorException
 from internal.lib.helper import datetime_to_timestamp, get_value_type
 from internal.model import (
     App,
@@ -30,6 +36,7 @@ from ..core.language_model.entities.model_entity import ModelParameterType
 from ..core.workflow.entities.workflow_entity import WorkflowConfig
 from ..entity.app_entity import DEFAULT_APP_CONFIG
 from ..entity.workflow_entity import WorkflowStatus
+from .skill_service import SkillService
 
 
 @inject
@@ -42,6 +49,402 @@ class AppConfigService(BaseService):
     builtin_provider_manager: BuiltinProviderManager
     language_model_manager: LanguageModelManager
     mcp_runtime_manager: MCPRuntimeManager
+    skill_service: SkillService
+
+    def validate_draft_app_config(
+        self,
+        draft_app_config: dict[str, Any],
+        account_id: UUID,
+    ) -> dict[str, Any]:
+        """校验并标准化可保存的应用草稿配置。"""
+        acceptable_fields = {
+            "model_config",
+            "dialog_round",
+            "preset_prompt",
+            "skills",
+            "subagents",
+            "tools",
+            "workflows",
+            "datasets",
+            "retrieval_config",
+            "opening_statement",
+            "opening_questions",
+            "speech_to_text",
+            "text_to_speech",
+            "suggested_after_answer",
+            "review_config",
+        }
+        if (
+            not isinstance(draft_app_config, dict)
+            or not draft_app_config
+            or set(draft_app_config) - acceptable_fields
+        ):
+            raise ValidateErrorException("草稿配置字段出错，请核实后重试")
+
+        normalized = dict(draft_app_config)
+        if "model_config" in normalized:
+            normalized["model_config"] = self._validate_strict_model_config(
+                normalized["model_config"]
+            )
+
+        if "dialog_round" in normalized:
+            value = normalized["dialog_round"]
+            if not isinstance(value, int) or not 0 <= value <= 100:
+                raise ValidateErrorException("携带上下文轮数范围为0-100")
+
+        if "preset_prompt" in normalized:
+            value = normalized["preset_prompt"]
+            if not isinstance(value, str) or len(value) > 2000:
+                raise ValidateErrorException(
+                    "人设与回复逻辑必须是字符串，长度在0-2000个字符"
+                )
+
+        if "subagents" in normalized:
+            try:
+                normalized["subagents"] = validate_platform_subagents(
+                    normalized["subagents"]
+                )
+            except SubAgentSpecError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+
+        if "skills" in normalized:
+            try:
+                normalized["skills"] = self.skill_service.normalize_bindings(
+                    normalized["skills"]
+                )
+            except FailException as exc:
+                raise ValidateErrorException(str(exc)) from exc
+
+        if "subagents" in normalized:
+            enabled_skills = {
+                item["name"]
+                for item in normalized.get("skills", [])
+                if item.get("enabled", True)
+            }
+            for subagent in normalized["subagents"]:
+                missing = sorted(
+                    set(subagent.get("skills", [])) - enabled_skills
+                )
+                if missing:
+                    raise ValidateErrorException(
+                        "SubAgent 只能选择主 Agent 已挂载的 Skills: "
+                        + ", ".join(missing)
+                    )
+
+        if "tools" in normalized:
+            normalized["tools"] = self._validate_tool_bindings(
+                normalized["tools"],
+                account_id=account_id,
+            )
+
+        if "workflows" in normalized:
+            normalized["workflows"] = self._validate_workflow_bindings(
+                normalized["workflows"],
+                account_id=account_id,
+            )
+
+        if "datasets" in normalized:
+            normalized["datasets"] = self._validate_dataset_bindings(
+                normalized["datasets"],
+                account_id=account_id,
+            )
+
+        if "retrieval_config" in normalized:
+            self._validate_retrieval_config(normalized["retrieval_config"])
+
+        self._validate_presentation_config(normalized)
+        if "review_config" in normalized:
+            self._validate_review_config(normalized["review_config"])
+        return normalized
+
+    def _validate_strict_model_config(
+        self,
+        model_config: Any,
+    ) -> dict[str, Any]:
+        """严格校验 provider/model，宽松标准化模型参数。"""
+        if not isinstance(model_config, dict):
+            raise ValidateErrorException("模型配置格式错误，请核实后重试")
+        required_keys = {"provider", "model", "parameters"}
+        if not required_keys.issubset(model_config) or (
+            set(model_config) - required_keys - {"features"}
+        ):
+            raise ValidateErrorException("模型键配置格式错误，请核实后重试")
+
+        provider_name = model_config["provider"]
+        model_name = model_config["model"]
+        parameters = model_config["parameters"]
+        if not isinstance(provider_name, str) or not provider_name:
+            raise ValidateErrorException("模型服务提供商类型必须为字符串")
+        if not isinstance(model_name, str) or not model_name:
+            raise ValidateErrorException("模型名字必须是字符串")
+        if not isinstance(parameters, dict):
+            raise ValidateErrorException("模型参数配置格式错误")
+
+        provider = self.language_model_manager.get_provider(provider_name)
+        if not provider:
+            raise ValidateErrorException("该模型服务提供商不存在，请核实后重试")
+        model_entity = provider.get_model_entity(model_name)
+        if not model_entity:
+            raise ValidateErrorException("该服务提供商下不存在该模型，请核实后重试")
+
+        normalized_parameters: dict[str, Any] = {}
+        for parameter in model_entity.parameters:
+            value = parameters.get(parameter.name, parameter.default)
+            if value is not None and get_value_type(value) != parameter.type.value:
+                value = parameter.default
+            if parameter.required and value is None:
+                value = parameter.default
+            if parameter.options and value not in parameter.options:
+                value = parameter.default
+            if (
+                parameter.type in [ModelParameterType.INT, ModelParameterType.FLOAT]
+                and value is not None
+                and (
+                    (parameter.min is not None and value < parameter.min)
+                    or (parameter.max is not None and value > parameter.max)
+                )
+            ):
+                value = parameter.default
+            normalized_parameters[parameter.name] = value
+
+        return {
+            "provider": provider_name,
+            "model": model_name,
+            "parameters": normalized_parameters,
+            "features": [feature.value for feature in model_entity.features],
+        }
+
+    def _validate_tool_bindings(
+        self,
+        tools: Any,
+        *,
+        account_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """校验工具引用并剔除当前租户不可见的工具。"""
+        if not isinstance(tools, list):
+            raise ValidateErrorException("工具列表必须是列表型数据")
+        if len(tools) > 5:
+            raise ValidateErrorException("Agent绑定的工具数不能超过5")
+
+        valid: list[dict[str, Any]] = []
+        for tool in tools:
+            if (
+                not isinstance(tool, dict)
+                or set(tool) != {"type", "provider_id", "tool_id", "params"}
+                or tool["type"] not in {"builtin_tool", "api_tool", "mcp_tool"}
+                or not isinstance(tool["provider_id"], str)
+                or not isinstance(tool["tool_id"], str)
+                or not tool["provider_id"]
+                or not tool["tool_id"]
+                or not isinstance(tool["params"], dict)
+            ):
+                raise ValidateErrorException("绑定插件工具参数出错")
+
+            tool_type = tool["type"]
+            if tool_type == "builtin_tool":
+                exists = self.builtin_provider_manager.get_tool(
+                    tool["provider_id"],
+                    tool["tool_id"],
+                )
+            elif tool_type == "api_tool":
+                exists = (
+                    self.db.session.query(ApiTool)
+                    .filter(
+                        ApiTool.provider_id == tool["provider_id"],
+                        ApiTool.name == tool["tool_id"],
+                        ApiTool.account_id == account_id,
+                    )
+                    .one_or_none()
+                )
+            else:
+                server = (
+                    self.db.session.query(MCPServer)
+                    .filter(
+                        MCPServer.id == tool["provider_id"],
+                        MCPServer.account_id == account_id,
+                        MCPServer.enabled.is_(True),
+                    )
+                    .one_or_none()
+                )
+                exists = (
+                    self.db.session.query(MCPTool)
+                    .filter(
+                        MCPTool.server_id == getattr(server, "id", None),
+                        MCPTool.name == tool["tool_id"],
+                        MCPTool.account_id == account_id,
+                    )
+                    .one_or_none()
+                    if server
+                    else None
+                )
+            if exists:
+                valid.append(dict(tool))
+
+        keys = [(item["provider_id"], item["tool_id"]) for item in valid]
+        if len(keys) != len(set(keys)):
+            raise ValidateErrorException("绑定插件存在重复")
+        return valid
+
+    def _validate_workflow_bindings(
+        self,
+        workflows: Any,
+        *,
+        account_id: UUID,
+    ) -> list[str]:
+        """校验已发布且属于当前租户的工作流引用。"""
+        if not isinstance(workflows, list):
+            raise ValidateErrorException("绑定工作流列表参数格式错误")
+        if len(workflows) > 5:
+            raise ValidateErrorException("Agent绑定的工作流数量不能超过5个")
+
+        normalized: list[str] = []
+        for workflow_id in workflows:
+            try:
+                normalized.append(str(UUID(str(workflow_id))))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValidateErrorException("工作流参数必须是UUID") from exc
+        if len(normalized) != len(set(normalized)):
+            raise ValidateErrorException("绑定工作流存在重复")
+
+        records = (
+            self.db.session.query(Workflow)
+            .filter(
+                Workflow.id.in_(normalized),
+                Workflow.account_id == account_id,
+                Workflow.status == WorkflowStatus.PUBLISHED,
+            )
+            .all()
+        )
+        visible = {str(record.id) for record in records}
+        return [workflow_id for workflow_id in normalized if workflow_id in visible]
+
+    def _validate_dataset_bindings(
+        self,
+        datasets: Any,
+        *,
+        account_id: UUID,
+    ) -> list[str]:
+        """校验属于当前租户的知识库引用。"""
+        if not isinstance(datasets, list):
+            raise ValidateErrorException("绑定知识库列表参数格式错误")
+        if len(datasets) > 5:
+            raise ValidateErrorException("Agent绑定的知识库数量不能超过5个")
+
+        normalized: list[str] = []
+        for dataset_id in datasets:
+            try:
+                normalized.append(str(UUID(str(dataset_id))))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise ValidateErrorException("知识库列表参数必须是UUID") from exc
+        if len(normalized) != len(set(normalized)):
+            raise ValidateErrorException("绑定知识库存在重复")
+
+        records = (
+            self.db.session.query(Dataset)
+            .filter(
+                Dataset.id.in_(normalized),
+                Dataset.account_id == account_id,
+            )
+            .all()
+        )
+        visible = {str(record.id) for record in records}
+        return [dataset_id for dataset_id in normalized if dataset_id in visible]
+
+    @staticmethod
+    def _validate_retrieval_config(value: Any) -> None:
+        """校验知识库检索参数。"""
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"retrieval_strategy", "k", "score"}
+            or value["retrieval_strategy"] not in {"semantic", "full_text", "hybrid"}
+            or not isinstance(value["k"], int)
+            or not 0 <= value["k"] <= 10
+            or not isinstance(value["score"], (int, float))
+            or not 0 <= value["score"] <= 1
+        ):
+            raise ValidateErrorException("检索配置格式错误")
+
+    @staticmethod
+    def _validate_presentation_config(config: dict[str, Any]) -> None:
+        """校验不参与 Agent Prompt 的前端展示配置。"""
+        if "opening_statement" in config and (
+            not isinstance(config["opening_statement"], str)
+            or len(config["opening_statement"]) > 2000
+        ):
+            raise ValidateErrorException("对话开场白的长度范围是0-2000")
+
+        if "opening_questions" in config:
+            questions = config["opening_questions"]
+            if (
+                not isinstance(questions, list)
+                or len(questions) > 3
+                or any(not isinstance(item, str) for item in questions)
+            ):
+                raise ValidateErrorException("开场建议问题格式错误")
+
+        if "speech_to_text" in config:
+            value = config["speech_to_text"]
+            if (
+                not isinstance(value, dict)
+                or set(value) != {"enable"}
+                or not isinstance(value["enable"], bool)
+            ):
+                raise ValidateErrorException("语音转文本设置格式错误")
+
+        if "text_to_speech" in config:
+            value = config["text_to_speech"]
+            if (
+                not isinstance(value, dict)
+                or set(value) != {"enable", "voice", "auto_play"}
+                or not isinstance(value["enable"], bool)
+                or value["voice"] not in ALLOWED_AUDIO_VOICES
+                or not isinstance(value["auto_play"], bool)
+            ):
+                raise ValidateErrorException("文本转语音设置格式错误")
+
+        if "suggested_after_answer" in config:
+            value = config["suggested_after_answer"]
+            if (
+                not isinstance(value, dict)
+                or set(value) != {"enable"}
+                or not isinstance(value["enable"], bool)
+            ):
+                raise ValidateErrorException("回答后建议问题设置格式错误")
+
+    @staticmethod
+    def _validate_review_config(value: Any) -> None:
+        """校验输入输出审核配置。"""
+        if (
+            not isinstance(value, dict)
+            or set(value) != {"enable", "keywords", "inputs_config", "outputs_config"}
+            or not isinstance(value["enable"], bool)
+            or not isinstance(value["keywords"], list)
+            or len(value["keywords"]) > 100
+            or any(not isinstance(item, str) for item in value["keywords"])
+        ):
+            raise ValidateErrorException("审核配置格式错误")
+
+        inputs = value["inputs_config"]
+        outputs = value["outputs_config"]
+        if (
+            not isinstance(inputs, dict)
+            or set(inputs) != {"enable", "preset_response"}
+            or not isinstance(inputs["enable"], bool)
+            or not isinstance(inputs["preset_response"], str)
+            or not isinstance(outputs, dict)
+            or set(outputs) != {"enable"}
+            or not isinstance(outputs["enable"], bool)
+        ):
+            raise ValidateErrorException("审核配置格式错误")
+        if value["enable"]:
+            if not value["keywords"]:
+                raise ValidateErrorException(
+                    "review.keywords非空且不能超过100个关键词"
+                )
+            if not inputs["enable"] and not outputs["enable"]:
+                raise ValidateErrorException("输入审核和输出审核至少需要开启一项")
+            if inputs["enable"] and not inputs["preset_response"].strip():
+                raise ValidateErrorException("输入审核预设响应不能为空")
 
     def get_draft_app_config(self, app: App) -> dict[str, Any]:
         """根据传递的应用获取该应用的草稿配置"""
@@ -56,7 +459,10 @@ class AppConfigService(BaseService):
             self.update(draft_app_config, model_config=validate_model_config)
 
         # 3.循环遍历工具列表删除已经被删除的工具信息
-        tools, validate_tools = self._process_and_validate_tools(draft_app_config.tools)
+        tools, validate_tools = self._process_and_validate_tools(
+            draft_app_config.tools,
+            account_id=app.account_id,
+        )
 
         # 4.判断是否需要更新草稿配置中的工具列表信息
         if draft_app_config.tools != validate_tools:
@@ -65,7 +471,8 @@ class AppConfigService(BaseService):
 
         # 5.校验知识库列表，如果引用了不存在/被删除的知识库，需要剔除数据并更新，同时获取知识库的额外信息
         datasets, validate_datasets = self._process_and_validate_datasets(
-            draft_app_config.datasets
+            draft_app_config.datasets,
+            account_id=app.account_id,
         )
 
         # 6.判断是否存在已删除的知识库，如果存在则更新
@@ -74,7 +481,8 @@ class AppConfigService(BaseService):
 
         # 7.校验工作流列表对应的数据
         workflows, validate_workflows = self._process_and_validate_workflows(
-            draft_app_config.workflows
+            draft_app_config.workflows,
+            account_id=app.account_id,
         )
         if set(validate_workflows) != set(draft_app_config.workflows):
             self.update(draft_app_config, workflows=validate_workflows)
@@ -100,7 +508,10 @@ class AppConfigService(BaseService):
             self.update(app_config, model_config=validate_model_config)
 
         # 3.循环遍历工具列表删除已经被删除的工具信息
-        tools, validate_tools = self._process_and_validate_tools(app_config.tools)
+        tools, validate_tools = self._process_and_validate_tools(
+            app_config.tools,
+            account_id=app.account_id,
+        )
 
         # 4.判断是否需要更新草稿配置中的工具列表信息
         if app_config.tools != validate_tools:
@@ -113,19 +524,22 @@ class AppConfigService(BaseService):
             str(app_dataset_join.dataset_id) for app_dataset_join in app_dataset_joins
         ]
         datasets, validate_datasets = self._process_and_validate_datasets(
-            origin_datasets
+            origin_datasets,
+            account_id=app.account_id,
         )
 
         # 6.判断是否存在已删除的知识库，如果存在则更新
         for dataset_id in set(origin_datasets) - set(validate_datasets):
             with self.db.auto_commit():
                 self.db.session.query(AppDatasetJoin).filter(
+                    AppDatasetJoin.app_id == app.id,
                     AppDatasetJoin.dataset_id == dataset_id
                 ).delete()
 
         # 7.校验工作流列表对应的数据
         workflows, validate_workflows = self._process_and_validate_workflows(
-            app_config.workflows
+            app_config.workflows,
+            account_id=app.account_id,
         )
         if set(validate_workflows) != set(app_config.workflows):
             self.update(app_config, workflows=validate_workflows)
@@ -140,7 +554,10 @@ class AppConfigService(BaseService):
         )
 
     def get_langchain_tools_by_tools_config(
-        self, tools_config: list[dict]
+        self,
+        tools_config: list[dict],
+        *,
+        account_id: UUID,
     ) -> list[BaseTool]:
         """根据传递的工具配置列表获取langchain工具列表"""
         # 1.循环遍历所有工具配置列表信息
@@ -156,7 +573,14 @@ class AppConfigService(BaseService):
                     continue
                 tools.append(builtin_tool(**tool["tool"]["params"]))
             elif tool["type"] == "mcp_tool":
-                server = self.get(MCPServer, tool["provider"]["id"])
+                server = (
+                    self.db.session.query(MCPServer)
+                    .filter(
+                        MCPServer.id == tool["provider"]["id"],
+                        MCPServer.account_id == account_id,
+                    )
+                    .one_or_none()
+                )
                 if not server or not server.enabled:
                     continue
                 try:
@@ -169,7 +593,14 @@ class AppConfigService(BaseService):
                     continue
             else:
                 # 4.API工具，首先根据id找到ApiTool记录，然后创建示例
-                api_tool = self.get(ApiTool, tool["tool"]["id"])
+                api_tool = (
+                    self.db.session.query(ApiTool)
+                    .filter(
+                        ApiTool.id == tool["tool"]["id"],
+                        ApiTool.account_id == account_id,
+                    )
+                    .one_or_none()
+                )
                 if not api_tool:
                     continue
                 tools.append(
@@ -189,7 +620,10 @@ class AppConfigService(BaseService):
         return tools
 
     def get_langchain_tools_by_workflow_ids(
-        self, workflow_ids: list[UUID]
+        self,
+        workflow_ids: list[UUID],
+        *,
+        account_id: UUID,
     ) -> list[BaseTool]:
         """根据传递的工作流配置列表获取langchain工具列表"""
         # 1.根据传递的工作流id查询工作流记录信息
@@ -197,6 +631,7 @@ class AppConfigService(BaseService):
             self.db.session.query(Workflow)
             .filter(
                 Workflow.id.in_(workflow_ids),
+                Workflow.account_id == account_id,
                 Workflow.status == WorkflowStatus.PUBLISHED,
             )
             .all()
@@ -254,7 +689,10 @@ class AppConfigService(BaseService):
         }
 
     def _process_and_validate_tools(
-        self, origin_tools: list[dict]
+        self,
+        origin_tools: list[dict],
+        *,
+        account_id: UUID,
     ) -> tuple[list[dict], list[dict]]:
         """根据传递的原始工具信息进行处理和校验"""
         # 1.循环遍历工具列表删除已被删除的工具
@@ -315,6 +753,7 @@ class AppConfigService(BaseService):
                     .filter(
                         ApiTool.provider_id == tool["provider_id"],
                         ApiTool.name == tool["tool_id"],
+                        ApiTool.account_id == account_id,
                     )
                     .one_or_none()
                 )
@@ -346,7 +785,14 @@ class AppConfigService(BaseService):
                     }
                 )
             elif tool["type"] == "mcp_tool":
-                server = self.get(MCPServer, tool["provider_id"])
+                server = (
+                    self.db.session.query(MCPServer)
+                    .filter(
+                        MCPServer.id == tool["provider_id"],
+                        MCPServer.account_id == account_id,
+                    )
+                    .one_or_none()
+                )
                 if not server or not server.enabled:
                     continue
 
@@ -355,6 +801,7 @@ class AppConfigService(BaseService):
                     .filter(
                         MCPTool.server_id == server.id,
                         MCPTool.name == tool["tool_id"],
+                        MCPTool.account_id == account_id,
                     )
                     .one_or_none()
                 )
@@ -385,13 +832,21 @@ class AppConfigService(BaseService):
         return tools, validate_tools
 
     def _process_and_validate_datasets(
-        self, origin_datasets: list[dict]
+        self,
+        origin_datasets: list[dict],
+        *,
+        account_id: UUID,
     ) -> tuple[list[dict], list[dict]]:
         """根据传递的知识库并返回知识库配置与校验后的数据"""
         # 1.校验知识库配置列表，如果引用了不存在的/被删除的知识库，则需要剔除数据并更新，同时获取知识库的额外信息
         datasets = []
         dataset_records = (
-            self.db.session.query(Dataset).filter(Dataset.id.in_(origin_datasets)).all()
+            self.db.session.query(Dataset)
+            .filter(
+                Dataset.id.in_(origin_datasets),
+                Dataset.account_id == account_id,
+            )
+            .all()
         )
         dataset_dict = {
             str(dataset_record.id): dataset_record for dataset_record in dataset_records
@@ -504,7 +959,10 @@ class AppConfigService(BaseService):
         return model_config
 
     def _process_and_validate_workflows(
-        self, origin_workflows: list[UUID]
+        self,
+        origin_workflows: list[UUID],
+        *,
+        account_id: UUID,
     ) -> tuple[list[dict], list[UUID]]:
         """根据传递的工作流列表并返回工作流配置和校验后的数据"""
         # 1.校验工作流配置列表，如果引用了不存在/被删除的工作流，则需要提出数据并更新，同时获取工作流的额外信息
@@ -513,6 +971,7 @@ class AppConfigService(BaseService):
             self.db.session.query(Workflow)
             .filter(
                 Workflow.id.in_(origin_workflows),
+                Workflow.account_id == account_id,
                 Workflow.status == WorkflowStatus.PUBLISHED,
             )
             .all()

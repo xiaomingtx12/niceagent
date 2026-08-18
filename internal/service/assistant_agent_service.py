@@ -9,11 +9,8 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 
-from internal.core.agent.agents import AgentQueueManager, BaseAgent
-from internal.core.agent.entities.agent_entity import AgentConfig
-from internal.core.agent.entities.queue_entity import QueueEvent
+from internal.core.agent_v2.agents import AgentQueueManager
 from internal.core.language_model.entities.model_entity import ModelFeature
-from internal.core.memory import load_history_messages
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.model import Account, Message
 from internal.schema.assistant_agent_schema import (
@@ -28,7 +25,7 @@ from internal.task.workflow_task import (
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
-from .agent_runtime_service import AgentRuntimeService
+from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
 from .conversation_service import ConversationService
 from .embeddings_service import EmbeddingsService
 from .faiss_service import FaissService
@@ -44,19 +41,24 @@ class AssistantAgentService(BaseService):
     faiss_service: FaissService
     embeddings_service: EmbeddingsService
     conversation_service: ConversationService
-    agent_runtime_service: AgentRuntimeService
+    agent_invocation_service: AgentInvocationService
 
     def chat(self, req: AssistantAgentChat, account: Account) -> Generator:
         """传递query与账号实现与辅助Agent进行会话"""
         from internal.lib.api_key_helper import get_api_key_for_provider
         from flask import current_app
+        from internal.exception import FailException
+
+        try:
+            self.embeddings_service.initialize_embeddings(account.id)
+            self.faiss_service.initialize_faiss()
+        except Exception as exc:
+            raise FailException(f"辅助智能体会话依赖初始化失败: {exc}") from exc
 
         # 1.获取用户配置的 tongyi API Key
         try:
             api_key = get_api_key_for_provider("tongyi", account.id)
         except Exception as e:
-            from internal.exception import FailException
-
             raise FailException(f"辅助智能体会话失败: {str(e)}")
 
         # 2.获取辅助Agent对应的id
@@ -87,13 +89,7 @@ class AssistantAgentService(BaseService):
             api_key=api_key,
         )
 
-        # 6.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
-        history = load_history_messages(
-            db=self.db,
-            conversation=conversation,
-        )
-
-        # 7.将草稿配置中的tools转换成LangChain工具
+        # 6.将草稿配置中的tools转换成LangChain工具
         tools = [
             self.faiss_service.convert_faiss_to_tool(),
             self.convert_create_app_to_tool(account.id),
@@ -101,109 +97,32 @@ class AssistantAgentService(BaseService):
             self.convert_app_with_workflow_generator_to_tool(account),
         ]
 
-        runtime = self.agent_runtime_service.prepare(
+        spec = AgentInvocationSpec(
             account_id=account.id,
-            app_id=assistant_agent_id,
-            conversation_id=conversation.id,
-            created_by=account.id,
-            end_user_id=None,
-            query=req.query.data,
-            skill_bindings=[],
-            subagents=[],
-        )
-        agent = BaseAgent(
-            llm=llm,
-            checkpointer=runtime.checkpointer,
-            workspace_backend=runtime.workspace_backend,
-            permissions=runtime.permissions,
-            skill_sources=runtime.skill_sources,
-            memory_sources=runtime.memory_sources,
-            subagent_skill_sources=runtime.subagent_skill_sources,
-            agent_config=AgentConfig(
-                user_id=account.id,
-                invoke_from=InvokeFrom.ASSISTANT_AGENT,
-                app_name="应用构建助手",
-                app_description="帮助 Creator 创建应用和工作流。",
-                tools=tools,
-                account_id=account.id,
-                app_id=assistant_agent_id,
-                conversation_id=conversation.id,
-            ),
-        )
-
-        agent_thoughts = {}
-        for agent_thought in agent.stream(
-            {
-                "history": history,
-                "messages": [
-                    llm.convert_to_human_message(req.query.data, req.image_urls.data)
-                ],
-            }
-        ):
-            # 9.提取thought以及answer
-            event_id = str(agent_thought.id)
-
-            # 9.将数据填充到agent_thought，便于存储到数据库服务中
-            if agent_thought.event != QueueEvent.PING:
-                # 10.除了agent_message数据为叠加，其他均为覆盖
-                if agent_thought.event == QueueEvent.AGENT_MESSAGE:
-                    if event_id not in agent_thoughts:
-                        # 11.初始化智能体消息事件
-                        agent_thoughts[event_id] = agent_thought
-                    else:
-                        # 12.叠加智能体消息
-                        agent_thoughts[event_id] = agent_thoughts[event_id].model_copy(
-                            update={
-                                "thought": agent_thoughts[event_id].thought
-                                + agent_thought.thought,
-                                # 消息相关数据
-                                "message": agent_thought.message,
-                                "message_token_count": agent_thought.message_token_count,
-                                "message_unit_price": agent_thought.message_unit_price,
-                                "message_price_unit": agent_thought.message_price_unit,
-                                # 答案相关字段
-                                "answer": agent_thoughts[event_id].answer
-                                + agent_thought.answer,
-                                "answer_token_count": agent_thought.answer_token_count,
-                                "answer_unit_price": agent_thought.answer_unit_price,
-                                "answer_price_unit": agent_thought.answer_price_unit,
-                                # Agent推理统计相关
-                                "total_token_count": agent_thought.total_token_count,
-                                "total_price": agent_thought.total_price,
-                                "latency": agent_thought.latency,
-                            }
-                        )
-                else:
-                    # 13.处理其他类型事件的消息
-                    agent_thoughts[event_id] = agent_thought
-            data = {
-                **agent_thought.model_dump(
-                    include={
-                        "event",
-                        "thought",
-                        "observation",
-                        "tool",
-                        "tool_input",
-                        "answer",
-                        "latency",
-                    }
-                ),
-                "id": event_id,
-                "conversation_id": str(conversation.id),
-                "message_id": str(message.id),
-                "task_id": str(agent_thought.task_id),
-            }
-            yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
-
-        # 22.将消息以及推理过程添加到数据库
-        self.conversation_service.save_agent_thoughts(
-            account_id=account.id,
-            app_id=assistant_agent_id,
+            app=None,
             app_config={},
             conversation_id=conversation.id,
             message_id=message.id,
-            agent_thoughts=[agent_thought for agent_thought in agent_thoughts.values()],
+            created_by=account.id,
+            user_id=account.id,
+            end_user_id=None,
+            invoke_from=InvokeFrom.ASSISTANT_AGENT,
+            query=req.query.data,
+            image_urls=req.image_urls.data,
+            app_id=assistant_agent_id,
+            extra_tools=tools,
+            llm=llm,
+            app_name="应用构建助手",
+            app_description="帮助 Creator 创建应用和工作流。",
         )
+
+        for agent_thought in self.agent_invocation_service.stream(spec):
+            data = self.agent_invocation_service.serialize_event(
+                agent_thought,
+                conversation_id=conversation.id,
+                message_id=message.id,
+            )
+            yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
 
     @classmethod
     def stop_chat(cls, task_id: UUID, account: Account) -> None:
@@ -241,6 +160,11 @@ class AssistantAgentService(BaseService):
 
     def delete_conversation(self, account: Account) -> None:
         """根据传递的账号，清空辅助Agent智能体会话消息列表"""
+        if account.assistant_agent_conversation_id:
+            self.conversation_service.delete_conversation(
+                account.assistant_agent_conversation_id,
+                account,
+            )
         self.update(account, assistant_agent_conversation_id=None)
 
     @classmethod

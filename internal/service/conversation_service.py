@@ -12,6 +12,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import desc
 from sqlalchemy.orm import joinedload
 
+from internal.core.agent_v2.agents.models import AgentThought, QueueEvent
 from internal.entity.conversation_entity import (
     CONVERSATION_NAME_TEMPLATE,
     ConversationInfo,
@@ -21,8 +22,8 @@ from internal.entity.conversation_entity import (
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .provider_api_key_service import ProviderApiKeyService
-from ..core.agent.entities.queue_entity import AgentThought, QueueEvent
 from ..exception import NotFoundException
 from ..model import Conversation, Message, MessageAgentThought, Account
 from ..schema.conversation_schema import GetConversationMessagesWithPageReq
@@ -35,6 +36,7 @@ class ConversationService(BaseService):
 
     db: SQLAlchemy
     provider_api_key_service: ProviderApiKeyService
+    agent_cleanup_service: AgentConversationCleanupService | None = None
 
     def _load_model_from_config(
         self, model_config: dict = None, account_id: UUID = None
@@ -201,8 +203,8 @@ class ConversationService(BaseService):
         conversation_id: UUID,
         message_id: UUID,
         agent_thoughts: list[AgentThought],
-    ):
-        """存储智能体推理步骤消息"""
+    ) -> None:
+        """持久化 Agent V2 轨迹事件并更新父消息。"""
         # 1.定义变量存储推理位置及总耗时
         position = 0
         latency = 0
@@ -219,6 +221,9 @@ class ConversationService(BaseService):
                 QueueEvent.AGENT_MESSAGE,
                 QueueEvent.AGENT_ACTION,
                 QueueEvent.DATASET_RETRIEVAL,
+                QueueEvent.TODO_UPDATE,
+                QueueEvent.SUB_AGENT_DELEGATE,
+                QueueEvent.SUB_AGENT_END,
             ]:
                 # 5.更新位置及总耗时
                 position += 1
@@ -230,7 +235,7 @@ class ConversationService(BaseService):
                     app_id=app_id,
                     conversation_id=conversation.id,
                     message_id=message.id,
-                    invoke_from=InvokeFrom.DEBUGGER,
+                    invoke_from=message.invoke_from,
                     created_by=account_id,
                     position=position,
                     event=agent_thought.event,
@@ -238,6 +243,12 @@ class ConversationService(BaseService):
                     observation=agent_thought.observation,
                     tool=agent_thought.tool,
                     tool_input=agent_thought.tool_input,
+                    agent_id=agent_thought.agent_id,
+                    agent_type=agent_thought.agent_type.value,
+                    parent_agent_id=agent_thought.parent_agent_id,
+                    delegation_id=agent_thought.delegation_id,
+                    task_id=agent_thought.task_id,
+                    todos=[todo.model_dump(mode="json") for todo in agent_thought.todos],
                     # 消息相关数据
                     message=agent_thought.message,
                     message_token_count=agent_thought.message_token_count,
@@ -392,6 +403,13 @@ class ConversationService(BaseService):
         conversation = self.get_conversation(conversation_id, account)
 
         # 2.更新会话的删除状态
+        if self.agent_cleanup_service is None:
+            raise RuntimeError("会话清理服务未配置")
+        self.agent_cleanup_service.cleanup_conversation(
+            account_id=account.id,
+            app_id=conversation.app_id,
+            conversation_id=conversation.id,
+        )
         self.update(conversation, is_deleted=True)
 
         return conversation
@@ -411,6 +429,14 @@ class ConversationService(BaseService):
             raise NotFoundException("该会话下不存在该消息，请核实后重试")
 
         # 4.校验通过修改消息is_deleted属性标记删除
+        if self.agent_cleanup_service is None:
+            raise RuntimeError("会话清理服务未配置")
+        self.agent_cleanup_service.cleanup_message(
+            account_id=account.id,
+            app_id=conversation.app_id,
+            conversation_id=conversation.id,
+            message_id=message.id,
+        )
         self.update(message, is_deleted=True)
 
         return message

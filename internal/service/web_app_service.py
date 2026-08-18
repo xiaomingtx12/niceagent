@@ -6,26 +6,19 @@ from uuid import UUID
 from flask import current_app
 from injector import inject
 from sqlalchemy import desc
+from sqlalchemy.dialects.postgresql import insert
 
-from internal.core.agent.agents import BaseAgent, AgentQueueManager
-from internal.core.agent.entities.agent_entity import AgentConfig
-from internal.core.agent.entities.queue_entity import QueueEvent
+from internal.core.agent_v2.agents import AgentQueueManager
 from internal.core.language_model import LanguageModelManager
-from internal.core.language_model.entities.model_entity import ModelFeature
-from internal.core.memory import load_history_messages
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
-from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, EndUser, Message
 from internal.schema.web_app_schema import WebAppChatReq
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
-from .agent_runtime_service import AgentRuntimeService
+from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
 from .base_service import BaseService
-from .conversation_service import ConversationService
-from .language_model_service import LanguageModelService
-from .retrieval_service import RetrievalService
 
 
 @inject
@@ -35,11 +28,8 @@ class WebAppService(BaseService):
 
     db: SQLAlchemy
     app_config_service: AppConfigService
-    retrieval_service: RetrievalService
-    conversation_service: ConversationService
-    language_model_service: LanguageModelService
     language_model_manager: LanguageModelManager
-    agent_runtime_service: AgentRuntimeService
+    agent_invocation_service: AgentInvocationService
 
     def resolve_web_app_end_user(
         self,
@@ -56,15 +46,67 @@ class WebAppService(BaseService):
             )
             .one_or_none()
         )
-        if end_user is None:
-            end_user = EndUser(
+
+        if end_user is not None:
+            if end_user.tenant_id != app.account_id:
+                raise ForbiddenException("终端用户不属于当前应用")
+            return end_user
+
+        # WebApp 页面会并发加载置顶和普通会话列表。两个请求可能同时
+        # 发现终端用户不存在，因此必须让数据库负责处理首次创建竞态。
+        statement = (
+            insert(EndUser)
+            .values(
                 tenant_id=app.account_id,
                 app_id=app.id,
                 external_user_id=account.id,
             )
-            self.db.session.add(end_user)
-            self.db.session.commit()
+            .on_conflict_do_nothing(
+                index_elements=[EndUser.app_id, EndUser.external_user_id]
+            )
+        )
+        self.db.session.execute(statement)
+        self.db.session.commit()
+
+        # 插入成功或发生冲突后统一重新查询，确保返回数据库中的真实记录。
+        end_user = (
+            self.db.session.query(EndUser)
+            .filter(
+                EndUser.app_id == app.id,
+                EndUser.external_user_id == account.id,
+            )
+            .one_or_none()
+        )
+        if end_user is None:
+            raise NotFoundException("无法初始化WebApp终端用户")
+        if end_user.tenant_id != app.account_id:
+            raise ForbiddenException("终端用户不属于当前应用")
         return end_user
+
+    def get_owned_web_conversation(
+        self,
+        *,
+        token: str,
+        conversation_id: UUID,
+        account: Account,
+    ) -> tuple[App, EndUser, Conversation]:
+        """获取当前登录账号可访问的 WebApp 会话及其终端用户。"""
+        app = self.get_web_app(token)
+        end_user = self.resolve_web_app_end_user(app=app, account=account)
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app.id,
+                Conversation.invoke_from == InvokeFrom.WEB_APP,
+                Conversation.created_by.in_([end_user.id, account.id]),
+                Conversation.is_deleted.is_(False),
+            )
+            .one_or_none()
+        )
+        if conversation is None:
+            raise ForbiddenException("会话不存在或不属于当前用户")
+        return app, end_user, conversation
 
     def get_web_app(self, token: str) -> App:
         """根据传递的token获取WebApp实例"""
@@ -169,179 +211,37 @@ class WebAppService(BaseService):
             status=MessageStatus.NORMAL,
         )
 
-        # 6.从语言模型管理器中加载大语言模型
-        llm = self.language_model_service.load_language_model(
-            app_config.get("model_config", {}),
+        spec = AgentInvocationSpec(
             account_id=app.account_id,
-        )
-
-        # 7.完整历史交给 DeepAgents 原生 SummarizationMiddleware 管理
-        history = load_history_messages(
-            db=self.db,
-            conversation=conversation,
-        )
-
-        # 8.将草稿配置中的tools转换成LangChain工具
-        tools = self.app_config_service.get_langchain_tools_by_tools_config(
-            app_config["tools"]
-        )
-
-        # 9.检测是否关联了知识库
-        if app_config["datasets"]:
-            # 10.构建LangChain知识库检索工具
-            dataset_retrieval = (
-                self.retrieval_service.create_langchain_tool_from_search(
-                    flask_app=current_app._get_current_object(),
-                    dataset_ids=[dataset["id"] for dataset in app_config["datasets"]],
-                    account_id=app.account_id,
-                    retrival_source=RetrievalSource.APP,
-                    source_app_id=app.id,
-                    **app_config["retrieval_config"],
-                )
-            )
-            tools.append(dataset_retrieval)
-
-        # 11.检测是否关联工作流，如果关联了工作流则将工作流构建成工具添加到tools中
-        if app_config["workflows"]:
-            workflow_tools = (
-                self.app_config_service.get_langchain_tools_by_workflow_ids(
-                    [workflow["id"] for workflow in app_config["workflows"]]
-                )
-            )
-            tools.extend(workflow_tools)
-
-        runtime = self.agent_runtime_service.prepare(
-            account_id=app.account_id,
-            app_id=app.id,
-            conversation_id=conversation.id,
-            created_by=end_user.id,
-            end_user_id=end_user.id,
-            query=req.query.data,
-            skill_bindings=app_config["skills"],
-            subagents=app_config["subagents"],
-        )
-        agent = BaseAgent(
-            llm=llm,
-            checkpointer=runtime.checkpointer,
-            workspace_backend=runtime.workspace_backend,
-            permissions=runtime.permissions,
-            skill_sources=runtime.skill_sources,
-            memory_sources=runtime.memory_sources,
-            subagent_skill_sources=runtime.subagent_skill_sources,
-            agent_config=AgentConfig(
-                user_id=end_user.id,
-                invoke_from=InvokeFrom.WEB_APP,
-                app_name=app.name,
-                app_description=app.description,
-                preset_prompt=app_config["preset_prompt"],
-                opening_statement=(
-                    app_config["opening_statement"] if not history else ""
-                ),
-                subagents=app_config["subagents"],
-                tools=tools,
-                review_config=app_config["review_config"],
-                account_id=app.account_id,
-                app_id=app.id,
-                conversation_id=conversation.id,
-                end_user_id=end_user.id,
-            ),
-        )
-
-        # 13.定义字典存储推理过程，并调用智能体获取消息
-        # 注意：将历史消息和当前消息合并到messages字段中（AgentState已移除history字段）
-        agent_thoughts = {}
-        for agent_thought in agent.stream(
-            {
-                "history": history,
-                "messages": [
-                    llm.convert_to_human_message(
-                        req.query.data,
-                        req.image_urls.data,
-                    )
-                ],
-            }
-        ):
-            # 14.提取thought以及answer
-            event_id = str(agent_thought.id)
-
-            # 15.将数据填充到agent_thought，便于存储到数据库服务中
-            if agent_thought.event != QueueEvent.PING:
-                # 16.除了agent_message数据为叠加，其他均为覆盖
-                if agent_thought.event == QueueEvent.AGENT_MESSAGE:
-                    if event_id not in agent_thoughts:
-                        # 17.初始化智能体消息事件
-                        agent_thoughts[event_id] = agent_thought
-                    else:
-                        # 18.叠加智能体消息
-                        agent_thoughts[event_id] = agent_thoughts[event_id].model_copy(
-                            update={
-                                "thought": agent_thoughts[event_id].thought
-                                + agent_thought.thought,
-                                # 消息相关数据
-                                "message": agent_thought.message,
-                                "message_token_count": agent_thought.message_token_count,
-                                "message_unit_price": agent_thought.message_unit_price,
-                                "message_price_unit": agent_thought.message_price_unit,
-                                # 答案相关数据
-                                "answer": agent_thoughts[event_id].answer
-                                + agent_thought.answer,
-                                "answer_token_count": agent_thought.answer_token_count,
-                                "answer_unit_price": agent_thought.answer_unit_price,
-                                "answer_price_unit": agent_thought.answer_price_unit,
-                                # Agent推理统计相关
-                                "total_token_count": agent_thought.total_token_count,
-                                "total_price": agent_thought.total_price,
-                                "latency": agent_thought.latency,
-                            }
-                        )
-                else:
-                    # 19.处理其他类型事件的消息
-                    agent_thoughts[event_id] = agent_thought
-            data = {
-                **agent_thought.model_dump(
-                    include={
-                        "event",
-                        "thought",
-                        "observation",
-                        "tool",
-                        "tool_input",
-                        "answer",
-                        "total_token_count",
-                        "total_price",
-                        "latency",
-                    }
-                ),
-                "id": event_id,
-                "conversation_id": str(conversation.id),
-                "message_id": str(message.id),
-                "task_id": str(agent_thought.task_id),
-            }
-            yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
-
-        # 20.将消息以及推理过程添加到数据库
-        self.conversation_service.save_agent_thoughts(
-            account_id=app.account_id,
-            app_id=app.id,
+            app=app,
             app_config=app_config,
             conversation_id=conversation.id,
             message_id=message.id,
-            agent_thoughts=[agent_thought for agent_thought in agent_thoughts.values()],
-        )
-        answer = "".join(
-            thought.answer
-            for thought in agent_thoughts.values()
-            if thought.event == QueueEvent.AGENT_MESSAGE
-        )
-        self.agent_runtime_service.extract_and_store_facts(
-            account_id=app.account_id,
-            app_id=app.id,
+            created_by=end_user.id,
+            user_id=end_user.id,
             end_user_id=end_user.id,
-            conversation_id=conversation.id,
-            message_id=message.id,
+            invoke_from=InvokeFrom.WEB_APP,
             query=req.query.data,
-            answer=answer,
-            llm=llm,
+            image_urls=req.image_urls.data,
+            opening_statement=(
+                app_config["opening_statement"] if conversation.is_new else ""
+            ),
         )
+
+        # 提前构建 Agent，确保模型/API Key/工具装配异常发生在 Flask
+        # 创建 SSE 响应之前，异常可以转换为正常业务 JSON 响应。
+        agent_stream = self.agent_invocation_service.stream(spec)
+
+        def generate() -> Generator:
+            for agent_thought in agent_stream:
+                data = self.agent_invocation_service.serialize_event(
+                    agent_thought,
+                    conversation_id=conversation.id,
+                    message_id=message.id,
+                )
+                yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
+
+        return generate()
 
     def stop_web_app_chat(self, token: str, task_id: UUID, account: Account):
         """根据传递的token+task_id停止与指定WebApp对话"""
