@@ -1,8 +1,12 @@
-"""saver 模块单测。"""
+"""Checkpoint Provider 单测。"""
+
 import pytest
 
-from internal.core.agent_v2 import saver
-from internal.core.agent_v2.saver import build_thread_id, _pg_uri_for_langgraph
+from internal.core.agent_v2.persistence.checkpoint import (
+    CheckpointProvider,
+    _pg_uri_for_langgraph,
+    build_thread_id,
+)
 
 
 def test_build_thread_id_main_agent():
@@ -23,7 +27,7 @@ def test_build_thread_id_subagent():
 
 
 def test_pg_uri_for_langgraph_strips_psycopg_prefix():
-    """SQLAlchemy 的 postgresql+psycopg:// → postgresql://。"""
+    """SQLAlchemy 的 postgresql+psycopg:// 转成 psycopg URI。"""
     assert _pg_uri_for_langgraph(
         "postgresql+psycopg://user:pass@host/db"
     ) == "postgresql://user:pass@host/db"
@@ -33,15 +37,15 @@ def test_pg_uri_for_langgraph_strips_psycopg_prefix():
 
 
 def test_pg_uri_for_langgraph_passthrough():
-    """已经是 postgresql:// 直接返回。"""
     assert (
         _pg_uri_for_langgraph("postgresql://user:pass@host/db")
         == "postgresql://user:pass@host/db"
     )
 
 
-def test_get_postgres_saver_uses_long_lived_connection_pool(monkeypatch):
+def test_provider_uses_long_lived_connection_pool():
     created = {}
+    registered = []
 
     class FakePool:
         def __init__(self, **kwargs):
@@ -63,21 +67,17 @@ def test_get_postgres_saver_uses_long_lived_connection_pool(monkeypatch):
         SQLALCHEMY_DATABASE_URI = (
             "postgresql+psycopg://user:pass@database/mydify"
         )
+        AGENT_CHECKPOINT_BACKEND = "postgres"
 
-    monkeypatch.setattr(saver, "_saver_singleton", None)
-    monkeypatch.setattr(saver, "_saver_pool", None)
-    monkeypatch.setattr(saver, "_close_registered", False)
-    monkeypatch.setattr(saver, "ConnectionPool", FakePool)
-    monkeypatch.setattr(saver, "PostgresSaver", FakeSaver)
-    monkeypatch.setattr(saver, "Config", FakeConfig)
-    monkeypatch.setattr(
-        saver.atexit,
-        "register",
-        lambda fn: created.setdefault("registered", fn),
+    provider = CheckpointProvider(
+        config_factory=FakeConfig,
+        connection_pool_factory=FakePool,
+        saver_factory=FakeSaver,
+        register_exit=registered.append,
     )
 
-    first = saver.get_postgres_saver()
-    second = saver.get_postgres_saver()
+    first = provider.get_configured_checkpointer()
+    second = provider.get_configured_checkpointer()
 
     assert first is second
     assert first.setup_calls == 1
@@ -85,23 +85,32 @@ def test_get_postgres_saver_uses_long_lived_connection_pool(monkeypatch):
         "postgresql://user:pass@database/mydify"
     )
     assert created["pool_kwargs"]["kwargs"]["autocommit"] is True
-    assert created["registered"] is saver.close_postgres_saver
+    assert registered == [provider.close_postgres_saver]
 
     pool = created["pool"]
-    saver.close_postgres_saver()
+    provider.close_postgres_saver()
     assert pool.closed is True
 
 
-def test_configured_memory_saver_is_process_stable(monkeypatch):
-    monkeypatch.setattr(saver, "_memory_saver_singleton", None)
+def test_configured_memory_saver_is_provider_stable():
+    class FakeConfig:
+        AGENT_CHECKPOINT_BACKEND = "memory"
 
-    first = saver.get_configured_checkpointer("memory")
-    second = saver.get_configured_checkpointer("memory")
+    provider = CheckpointProvider(config_factory=FakeConfig)
+    first = provider.get_configured_checkpointer()
+    second = provider.get_configured_checkpointer()
 
     assert first is second
-    assert saver.get_configured_checkpointer("disabled") is False
+    assert provider.get_configured_checkpointer("disabled") is False
 
 
 def test_configured_saver_rejects_unknown_mode():
+    provider = CheckpointProvider(
+        config_factory=lambda: type(
+            "FakeConfig",
+            (),
+            {"AGENT_CHECKPOINT_BACKEND": "memory"},
+        )()
+    )
     with pytest.raises(ValueError, match="postgres"):
-        saver.get_configured_checkpointer("sqlite")
+        provider.get_configured_checkpointer("sqlite")

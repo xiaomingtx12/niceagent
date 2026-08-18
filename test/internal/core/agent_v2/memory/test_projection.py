@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from internal.core.agent_v2.memory_profile_backend import (
+from internal.core.agent_v2.memory.projection import (
     MemoryProfileBackend,
     MemoryProfileRenderer,
 )
@@ -34,8 +34,9 @@ def test_memory_profile_backend_is_read_only():
     assert backend.edit("/profile.md", "fact", "other").error is not None
 
 
-def test_memory_profile_backend_lists_only_profile_file():
+def test_memory_profile_backend_lists_official_and_legacy_paths():
     backend = MemoryProfileBackend("content")
 
-    assert backend.ls("/").entries[0]["path"] == "/profile.md"
+    paths = {entry["path"] for entry in backend.ls("/").entries}
+    assert paths == {"/AGENTS.md", "/profile.md"}
     assert backend.read("/missing.md").error is not None

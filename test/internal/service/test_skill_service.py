@@ -78,3 +78,36 @@ def test_list_enabled_latest_returns_only_bound_enabled_skills(service):
     )
 
     assert [row.name for row in rows] == ["research"]
+
+
+def test_scan_reads_skill_package_files(tmp_path):
+    root = tmp_path / "builtin"
+    skill = root / "csv-analysis"
+    (skill / "scripts").mkdir(parents=True)
+    (skill / "scripts" / "run.py").write_text("print('ok')", encoding="utf-8")
+    (skill / "SKILL.md").write_text(
+        """---
+name: csv-analysis
+description: Analyze CSV files
+metadata:
+  my_dify:
+    version: 1.0.0
+    scripts:
+      - id: run
+        path: scripts/run.py
+        runtime: python3
+        timeout_seconds: 10
+        max_output_bytes: 1024
+        input_count: 0
+        output_kind: json
+---
+""",
+        encoding="utf-8",
+    )
+    instance = SkillService.__new__(SkillService)
+    instance._root = root
+
+    row = instance.list_catalog()[0]
+
+    assert "scripts/run.py" in row.package_files
+    assert row.package_root == skill.resolve()

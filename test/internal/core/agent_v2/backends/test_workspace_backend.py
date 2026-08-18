@@ -14,15 +14,32 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from internal.core.agent_v2.workspace_backend import (
+from internal.core.agent_v2.backends.workspace import (
     MyDifyWorkspaceBackend,
+)
+from internal.core.agent_v2.backends.workspace_path import (
     WorkspacePathError,
-    _normalize,
-    _validate_workspace_path,
-    _scope_to_conversation_id,
-    build_workspace_backend,
+    normalize_workspace_path as _normalize,
+    scope_to_conversation_id as _scope_to_conversation_id,
+    validate_workspace_path as _validate_workspace_path,
+)
+from internal.core.agent_v2.backends.workspace_quota import WorkspaceLimits
+from internal.core.agent_v2.runtime.telemetry import (
+    AgentTelemetry,
+    AgentTelemetryEvent,
 )
 from internal.model.workspace_file import WorkspaceFile
+
+
+class _RecordingSink:
+    """保存测试观察到的遥测事件。"""
+
+    def __init__(self):
+        self.events = []
+
+    def record(self, event: AgentTelemetryEvent) -> None:
+        """记录一个事件。"""
+        self.events.append(event)
 
 
 @pytest.fixture()
@@ -242,6 +259,44 @@ def test_write_rejects_dot_segment(backend, ids):
     assert "illegal segment" in result.error
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["/workspace/.audit/log.json", "/workspace/.system/state.json"],
+)
+def test_reserved_namespaces_are_hidden(backend, path):
+    """Model-facing workspace paths cannot enter private namespaces."""
+    assert "reserved namespace" in backend.write(path, "secret").error
+    assert "reserved namespace" in backend.read(path).error
+    assert backend.ls(path).error
+
+
+def test_workspace_quota_allows_replacement_but_rejects_growth(session, ids):
+    """Quota projections account for replacement rather than old versions."""
+    sink = _RecordingSink()
+    limited = MyDifyWorkspaceBackend(
+        session=session,
+        **ids,
+        limits=WorkspaceLimits(max_bytes=5, max_files=1),
+        telemetry=AgentTelemetry(sink),
+    )
+
+    assert limited.write("/workspace/a.txt", "12345").error is None
+    assert limited.write("/workspace/a.txt", "1234").error is None
+    assert "file quota exceeded" in limited.write(
+        "/workspace/b.txt", "x"
+    ).error
+    assert "byte quota exceeded" in limited.write(
+        "/workspace/a.txt", "123456"
+    ).error
+    assert limited.read("/workspace/a.txt").file_data["content"] == "1234"
+    assert [event.name for event in sink.events] == [
+        "workspace.write",
+        "workspace.write",
+        "workspace.quota_rejected",
+        "workspace.quota_rejected",
+    ]
+
+
 # ---------- edit ----------
 
 
@@ -420,18 +475,6 @@ def test_async_write_equals_sync_write(backend, ids):
     result = asyncio.run(backend.awrite(path, "async content"))
     assert result.error is None
     assert backend.read(path).file_data["content"] == "async content"
-
-
-# ---------- factory ----------
-
-
-def test_build_workspace_backend_returns_instance(session, ids):
-    backend = build_workspace_backend(session, **ids)
-    assert isinstance(backend, MyDifyWorkspaceBackend)
-    assert backend._session is session
-    assert backend._account_id == ids["account_id"]
-    assert backend._app_id == ids["app_id"]
-    assert backend._conversation_id == ids["conversation_id"]
 
 
 # ---------- 多租户隔离 ----------

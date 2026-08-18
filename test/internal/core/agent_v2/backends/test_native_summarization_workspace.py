@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from internal.core.agent_v2.workspace_backend import MyDifyWorkspaceBackend
+from internal.core.agent_v2.backends.workspace import MyDifyWorkspaceBackend
 from internal.model import WorkspaceFile
 
 

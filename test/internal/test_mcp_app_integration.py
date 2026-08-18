@@ -127,6 +127,9 @@ def test_app_service_accepts_mcp_tool_in_draft_config():
         language_model_service=None,
         language_model_manager=None,
         provider_api_key_service=None,
+        agent_runtime_service=None,
+        agent_cleanup_service=None,
+        skill_service=None,
     )
     app_service.get = lambda model, primary_key: (
         SimpleNamespace(id=server_id, account_id=account_id, enabled=True)

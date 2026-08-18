@@ -5,12 +5,14 @@ from uuid import uuid4
 
 from langchain.agents.middleware.types import ModelResponse
 from langchain_core.messages import AIMessage, ToolMessage
+from langgraph.types import Command
 
-from internal.core.agent.entities.queue_entity import QueueEvent
+from internal.core.agent_v2.entities.queue_entity import AgentType, QueueEvent
 from internal.core.agent_v2.middleware.event_translation_middleware import (
     EventTranslationMiddleware,
     bind_event_translation,
 )
+from internal.core.agent_v2.events.serialization import serialize_agent_thought
 
 
 def test_task_tool_call_emits_subagent_boundaries():
@@ -50,8 +52,119 @@ def test_task_tool_call_emits_subagent_boundaries():
         QueueEvent.SUB_AGENT_END,
     ]
     assert events[0].tool == "researcher"
+    assert events[0].agent_id == "main"
+    assert events[0].agent_type == AgentType.MAIN
+    assert events[0].delegation_id == "call-1"
     assert events[1].tool == "researcher"
+    assert events[1].agent_id == "researcher"
+    assert events[1].agent_type == AgentType.SUBAGENT
+    assert events[1].parent_agent_id == "main"
+    assert events[1].delegation_id == "call-1"
     assert events[1].observation == "已完成调研并整理出三条结论"
+
+
+def test_write_todos_emits_authoritative_todo_snapshot():
+    """Successful native write_todos commands become one TODO_UPDATE event."""
+    task_id = uuid4()
+    events = []
+    middleware = EventTranslationMiddleware()
+    todos = [
+        {"content": "分析需求", "status": "completed"},
+        {"content": "实现功能", "status": "in_progress"},
+    ]
+    tool_call = {
+        "id": "todo-1",
+        "name": "write_todos",
+        "args": {"todos": todos},
+    }
+
+    with bind_event_translation(
+        task_id=task_id,
+        publisher=lambda _task_id, thought: events.append(thought),
+    ):
+        middleware.wrap_model_call(
+            None,
+            lambda _request: ModelResponse(
+                result=[AIMessage(content="", tool_calls=[tool_call])]
+            ),
+        )
+        middleware.after_model({}, None)
+        middleware.wrap_tool_call(
+            SimpleNamespace(tool_call=tool_call),
+            lambda _request: Command(
+                update={
+                    "todos": todos,
+                    "messages": [
+                        ToolMessage(
+                            content="Updated todo list",
+                            tool_call_id="todo-1",
+                        )
+                    ],
+                }
+            ),
+        )
+
+    assert [event.event for event in events] == [QueueEvent.TODO_UPDATE]
+    assert [todo.model_dump() for todo in events[0].todos] == todos
+    assert events[0].tool_input == {"todos": todos}
+    assert events[0].agent_id == "main"
+
+
+def test_failed_write_todos_result_does_not_publish_snapshot():
+    """Tool errors without a state update must not masquerade as Todo state."""
+    task_id = uuid4()
+    events = []
+    middleware = EventTranslationMiddleware()
+    tool_call = {
+        "id": "todo-2",
+        "name": "write_todos",
+        "args": {"todos": []},
+    }
+
+    with bind_event_translation(
+        task_id=task_id,
+        publisher=lambda _task_id, thought: events.append(thought),
+    ):
+        middleware.wrap_tool_call(
+            SimpleNamespace(tool_call=tool_call),
+            lambda _request: ToolMessage(
+                content="parallel update rejected",
+                tool_call_id="todo-2",
+                status="error",
+            ),
+        )
+
+    assert events == []
+
+
+def test_live_event_serializer_includes_p2_trace_fields():
+    """Every streaming entrypoint receives one shared public event contract."""
+    task_id = uuid4()
+    events = []
+    middleware = EventTranslationMiddleware()
+    tool_call = {
+        "id": "call-serialized",
+        "name": "task",
+        "args": {"subagent_type": "writer", "description": "整理结果"},
+    }
+
+    with bind_event_translation(
+        task_id=task_id,
+        publisher=lambda _task_id, thought: events.append(thought),
+    ):
+        middleware.wrap_model_call(
+            None,
+            lambda _request: ModelResponse(
+                result=[AIMessage(content="", tool_calls=[tool_call])]
+            ),
+        )
+        middleware.after_model({}, None)
+
+    payload = serialize_agent_thought(events[0])
+    assert payload["agent_id"] == "main"
+    assert payload["agent_type"] == "main"
+    assert payload["delegation_id"] == "call-serialized"
+    assert payload["todos"] == []
 
 
 def test_ordinary_tool_keeps_agent_action_event():

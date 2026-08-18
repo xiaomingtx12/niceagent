@@ -8,7 +8,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 from pydantic import Field
 
-from internal.core.agent_v2.factory import build_deep_agent, build_thread_config
+from internal.core.agent_v2.runtime.factory import build_deep_agent, build_thread_config
 
 
 class RecordingChatModel(BaseChatModel):
@@ -39,9 +39,6 @@ def test_same_thread_restores_prior_state_and_adds_only_current_message():
         tools=[],
         system_prompt="stable identity",
         review_config={},
-        account_id="account",
-        app_id="app",
-        conversation_id="conversation",
         checkpointer=InMemorySaver(),
     )
     config = build_thread_config(

@@ -9,7 +9,7 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from pydantic import Field
 
-from internal.core.agent_v2.subagent_specs import (
+from internal.core.agent_v2.subagents.specs import (
     SubAgentSpecError,
     build_subagent_specs,
     validate_platform_subagents,
@@ -180,17 +180,14 @@ def test_factory_compiles_native_synchronous_subagent():
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
     from langgraph.graph.state import CompiledStateGraph
 
-    from internal.core.agent_v2.factory import build_deep_agent
+    from internal.core.agent_v2.runtime.factory import build_deep_agent
 
     agent = build_deep_agent(
         llm=FakeListChatModel(responses=["ok"]),
         tools=[],
         system_prompt="main agent",
         review_config={},
-        account_id="acc",
-        app_id="app",
-        conversation_id="cnv",
-        use_checkpointer=False,
+        checkpointer=False,
         subagents=[_sync()],
     )
 
@@ -231,7 +228,7 @@ class DelegationChatModel(BaseChatModel):
 
 
 def test_native_synchronous_task_delegation_executes_without_parent_history():
-    from internal.core.agent_v2.factory import build_deep_agent
+    from internal.core.agent_v2.runtime.factory import build_deep_agent
 
     model = DelegationChatModel()
     agent = build_deep_agent(
@@ -239,10 +236,7 @@ def test_native_synchronous_task_delegation_executes_without_parent_history():
         tools=[],
         system_prompt="main agent",
         review_config={},
-        account_id="acc",
-        app_id="app",
-        conversation_id="cnv",
-        use_checkpointer=False,
+        checkpointer=False,
         subagents=[_sync()],
     )
 

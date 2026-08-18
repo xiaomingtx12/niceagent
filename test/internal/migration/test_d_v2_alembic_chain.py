@@ -90,8 +90,8 @@ def test_d_v2_single_head():
     )
 
 
-def test_d_v2_007_is_head():
-    """SubAgent list normalization migration is the current d_v2 head."""
+def test_d_v2_008_is_head():
+    """Agent trace migration is the current d_v2 head."""
     parsed = _parse_revisions()
     revs = {r for r, _, _ in parsed}
     incoming = set()
@@ -103,7 +103,19 @@ def test_d_v2_007_is_head():
         else:
             incoming.add(down)
     heads = revs - incoming
-    assert "d_v2_007_subagents_array" in heads
+    assert "d_v2_008_agent_trace_fields" in heads
+
+
+def test_alembic_native_revision_map_loads_with_one_head():
+    """Load the real Alembic graph to catch duplicate labels and bad links."""
+    from alembic.script import ScriptDirectory
+
+    script = ScriptDirectory("internal/migration")
+
+    assert script.get_heads() == ["d_v2_008_agent_trace_fields"]
+    assert script.get_revision("deepagents_v2").revision == (
+        "d_v2_001_drop_agent_checkpoints"
+    )
 
 
 def _is_master_head(rev: str) -> bool:

@@ -202,6 +202,8 @@ def test_workspace_rejects_conversation_from_another_app(service):
         "seed/../escape",
         "seed/\x00bad",
         "seed/\ncontrol",
+        "seed/.audit/private.json",
+        "seed/.system/private.json",
         "seed/" + ("a" * 600),
     ],
 )
@@ -215,3 +217,30 @@ def test_workspace_rejects_unsafe_paths(service, path):
             content="x",
             created_by=uuid4(),
         )
+
+
+def test_workspace_service_enforces_configured_quota(service, monkeypatch):
+    """Creator writes use the same byte and file quota as Agent writes."""
+    monkeypatch.setenv("WORKSPACE_MAX_BYTES", "5")
+    monkeypatch.setenv("WORKSPACE_MAX_FILES", "1")
+    account_id, app_id, creator_id = uuid4(), uuid4(), uuid4()
+
+    service.write_text(
+        account_id=account_id,
+        app_id=app_id,
+        conversation_id=None,
+        path="seed/one.txt",
+        content="12345",
+        created_by=creator_id,
+    )
+
+    with pytest.raises(FailException) as exc_info:
+        service.write_text(
+            account_id=account_id,
+            app_id=app_id,
+            conversation_id=None,
+            path="seed/two.txt",
+            content="x",
+            created_by=creator_id,
+        )
+    assert "file quota exceeded" in exc_info.value.message

@@ -9,8 +9,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import Field
 
-from internal.core.agent_v2.factory import build_deep_agent
-from internal.core.agent_v2.skill_backend import SkillCatalogBackend
+from internal.core.agent_v2.runtime.factory import build_deep_agent
+from internal.core.agent_v2.context.skill_backend import SkillCatalogBackend
 
 
 class RecordingChatModel(BaseChatModel):
@@ -67,12 +67,9 @@ def test_native_skills_middleware_discovers_builtin_catalog():
         tools=[],
         system_prompt="main identity",
         review_config={},
-        account_id="account",
-        app_id="app",
-        conversation_id="conversation",
-        workspace_backend=backend,
+        backend=backend,
         skill_sources=["/skills/"],
-        use_checkpointer=False,
+        checkpointer=False,
     )
 
     graph.invoke({"messages": [HumanMessage(content="research this")]})

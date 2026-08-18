@@ -1,13 +1,17 @@
 """Unified DeepAgents runtime assembly tests."""
 
 from pathlib import Path
+import re
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock
 from uuid import uuid4
 
 import pytest
+from deepagents.backends.protocol import SandboxBackendProtocol
 from sqlalchemy import create_engine, event
 
+from config.config import Config
+from internal.core.agent_v2.backends.deny import DenyBackend
 from internal.model import WorkspaceFile
 from internal.service.agent_runtime_service import AgentRuntimeService
 
@@ -60,7 +64,7 @@ def test_prepare_assembles_workspace_facts_and_scoped_subagent_skills(
         lambda: checkpointer,
     )
 
-    bundle = service.prepare(
+    resources = service.prepare(
         account_id=uuid4(),
         app_id=uuid4(),
         conversation_id=uuid4(),
@@ -78,36 +82,46 @@ def test_prepare_assembles_workspace_facts_and_scoped_subagent_skills(
         ],
     )
 
-    assert bundle.checkpointer is checkpointer
-    assert bundle.skill_sources == ["/skills/"]
-    assert bundle.memory_sources == ["/memories/profile.md"]
-    assert bundle.permissions[-1].mode == "deny"
+    assert resources.checkpointer is checkpointer
+    assert resources.skill_sources == ["/skills/"]
+    assert resources.memory_sources == ["/memories/AGENTS.md"]
+    assert resources.context_sources == ["/context/request.md"]
+    assert resources.permissions[-1].mode == "deny"
+    assert isinstance(resources.backend.default, DenyBackend)
+    assert not isinstance(
+        resources.backend.default,
+        SandboxBackendProtocol,
+    )
+    assert all(
+        not isinstance(backend, SandboxBackendProtocol)
+        for backend in resources.backend.routes.values()
+    )
     service.skill_service.list_enabled_latest.assert_called_once_with(
         account_id=ANY,
         app_id=ANY,
         bindings=[{"name": "research"}],
     )
     service.memory_fact_service.recall_top_k.assert_called_once()
-    assert "用户偏好中文" in bundle.workspace_backend.read(
-        "/memories/profile.md"
-    ).file_data["content"]
-    assert bundle.subagent_skill_sources == {
+    assert resources.subagent_skill_sources == {
         "researcher": ["/subagent_skills/researcher/"]
     }
-    assert "Research carefully" in bundle.workspace_backend.read(
+    assert "Research carefully" in resources.backend.read(
         "/skills/research/SKILL.md"
     ).file_data["content"]
-    assert "Research carefully" in bundle.workspace_backend.read(
+    assert "Research carefully" in resources.backend.read(
         "/subagent_skills/researcher/research/SKILL.md"
     ).file_data["content"]
-    assert bundle.workspace_backend.read("/unknown.txt").error is not None
-    runtime_workspace = bundle.workspace_backend.routes["/workspace/"]
+    assert "用户偏好中文" in resources.backend.read(
+        "/memories/AGENTS.md"
+    ).file_data["content"]
+    assert resources.backend.read("/unknown.txt").error is not None
+    runtime_workspace = resources.backend.routes["/workspace/"]
     runtime_workspace.close()
     engine.dispose()
 
 
 def test_prepare_rejects_subagent_skill_outside_enabled_app_catalog():
-    from internal.core.agent_v2.subagent_specs import SubAgentSpecError
+    from internal.core.agent_v2.subagents.specs import SubAgentSpecError
 
     engine = create_engine("sqlite:///:memory:")
     WorkspaceFile.__table__.create(engine)
@@ -133,6 +147,37 @@ def test_prepare_rejects_subagent_skill_outside_enabled_app_catalog():
             ],
         )
     engine.dispose()
+
+
+def test_prepare_closes_runtime_session_when_assembly_fails(monkeypatch):
+    """运行时装配失败时关闭独立数据库 Session。"""
+    import internal.service.agent_runtime_service as runtime_module
+
+    runtime_session = MagicMock()
+    service = _runtime_service(SimpleNamespace())
+    service.skill_service.list_enabled_latest.return_value = []
+    monkeypatch.setattr(
+        runtime_module,
+        "sessionmaker",
+        lambda **_kwargs: lambda: runtime_session,
+    )
+    monkeypatch.setattr(
+        service,
+        "_assemble_resources",
+        MagicMock(side_effect=RuntimeError("装配失败")),
+    )
+
+    with pytest.raises(RuntimeError, match="装配失败"):
+        service.prepare(
+            account_id=uuid4(),
+            app_id=uuid4(),
+            conversation_id=uuid4(),
+            created_by=uuid4(),
+            end_user_id=None,
+            query="question",
+        )
+
+    runtime_session.close.assert_called_once_with()
 
 
 def test_extract_and_store_facts_accepts_structured_dict_and_creator_scope(
@@ -183,7 +228,7 @@ def test_extract_and_store_facts_accepts_structured_dict_and_creator_scope(
     assert "embedding" not in call
 
 
-def test_all_agent_entrypoints_use_the_runtime_bundle_contract():
+def test_all_agent_entrypoints_use_the_runtime_resources_contract():
     root = Path(__file__).resolve().parents[3]
     entrypoints = [
         root / "internal" / "service" / "app_service.py",
@@ -196,11 +241,14 @@ def test_all_agent_entrypoints_use_the_runtime_bundle_contract():
         "self.agent_runtime_service.prepare(",
         "BaseAgent(",
         "checkpointer=runtime.checkpointer",
-        "workspace_backend=runtime.workspace_backend",
+        "backend=runtime.backend",
+        "store=runtime.store",
         "permissions=runtime.permissions",
         "skill_sources=runtime.skill_sources",
         "memory_sources=runtime.memory_sources",
+        "context_sources=runtime.context_sources",
         "subagent_skill_sources=runtime.subagent_skill_sources",
+        "telemetry=runtime.telemetry",
         "skill_bindings=",
         "subagents=",
     ]
@@ -209,3 +257,74 @@ def test_all_agent_entrypoints_use_the_runtime_bundle_contract():
         source = path.read_text(encoding="utf-8")
         missing = [token for token in required_tokens if token not in source]
         assert not missing, f"{path.name} missing runtime tokens: {missing}"
+
+
+def test_internal_code_has_no_legacy_agent_imports():
+    """All executable imports resolve through the consolidated Agent V2 tree."""
+    root = Path(__file__).resolve().parents[3] / "internal"
+    legacy_import = re.compile(
+        r"(?:from\s+internal\.core\.agent\s+import|"
+        r"import\s+internal\.core\.agent(?:\s|$))"
+    )
+
+    matches = [
+        str(path.relative_to(root))
+        for path in root.rglob("*.py")
+        if legacy_import.search(path.read_text(encoding="utf-8"))
+    ]
+
+    assert matches == []
+
+
+def test_filesystem_permissions_end_with_global_deny():
+    """Unknown paths and private namespaces remain fail-closed."""
+    from internal.service.agent_runtime_service import build_filesystem_permissions
+
+    permissions = build_filesystem_permissions()
+
+    assert permissions[-1].mode == "deny"
+    assert permissions[-1].paths == ["/**"]
+    assert set(permissions[-1].operations) == {"read", "write"}
+    assert "/workspace/.audit/**" in permissions[0].paths
+    assert "/workspace/.system/**" in permissions[0].paths
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("WORKSPACE_MAX_BYTES", "0"), ("WORKSPACE_MAX_FILES", "-1")],
+)
+def test_invalid_workspace_security_config_fails_fast(monkeypatch, key, value):
+    """Disabled Workspace limits cannot silently enter runtime config."""
+    monkeypatch.setenv(key, value)
+
+    with pytest.raises(ValueError, match="Workspace limits"):
+        Config()
+
+
+def test_production_requires_explicit_workspace_limits(monkeypatch):
+    """Production startup cannot inherit development quota defaults."""
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.delenv("WORKSPACE_MAX_BYTES", raising=False)
+    monkeypatch.delenv("WORKSPACE_MAX_FILES", raising=False)
+
+    with pytest.raises(ValueError, match="required in production"):
+        Config()
+
+
+def test_invalid_sandbox_provider_fails_fast(monkeypatch):
+    """Unknown Sandbox providers cannot enter runtime configuration."""
+    monkeypatch.setenv("FLASK_ENV", "production")
+    monkeypatch.setenv("WORKSPACE_MAX_BYTES", "1024")
+    monkeypatch.setenv("WORKSPACE_MAX_FILES", "10")
+    monkeypatch.setenv("AGENT_SANDBOX_PROVIDER", "bubblewrap")
+
+    with pytest.raises(ValueError, match="AGENT_SANDBOX_PROVIDER"):
+        Config()
+
+
+def test_invalid_memory_backend_fails_fast(monkeypatch):
+    """Unknown memory stores cannot enter runtime configuration."""
+    monkeypatch.setenv("AGENT_MEMORY_BACKEND", "sqlite")
+
+    with pytest.raises(ValueError, match="AGENT_MEMORY_BACKEND"):
+        Config()

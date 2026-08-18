@@ -7,8 +7,7 @@
 - BaseAgent(stream/invoke) 完整跑 deepagent stream 需要 LLM 支持 bind_tools +
   ChatResult 完整流程，超出单测能力（langchain_anthropic 等中间件 import 链
   在 hang）。完整 deepagent 流程覆盖在 test_factory.py + test_review_middleware.py。
-- 本文件覆盖 BaseAgent 内部逻辑：构造、queue_manager 暴露、AgentConfig 字段、
-  AgentState 字段回归。
+- 本文件覆盖 BaseAgent 构造、调用、审核和线程配置契约。
 """
 from types import SimpleNamespace
 from uuid import uuid4
@@ -17,10 +16,11 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.messages import HumanMessage
+from pydantic import Field
 
-from internal.core.agent.agents.base_agent import BaseAgent
-from internal.core.agent.entities.agent_entity import AgentConfig, AgentState
-from internal.core.agent.entities.queue_entity import QueueEvent
+from internal.core.agent_v2.agents.base_agent import BaseAgent
+from internal.core.agent_v2.entities.agent_entity import AgentConfig, AgentState
+from internal.core.agent_v2.entities.queue_entity import QueueEvent
 from internal.entity.conversation_entity import InvokeFrom
 
 
@@ -28,6 +28,7 @@ class _BindToolsFakeChatModel(BaseChatModel):
     """Fake 模型：bind_tools 返回自己，_generate 返回 AIMessage。"""
 
     response_text: str = "fake"
+    call_count: int = Field(default=0)
 
     @property
     def _llm_type(self) -> str:
@@ -37,6 +38,7 @@ class _BindToolsFakeChatModel(BaseChatModel):
         return self
 
     def _generate(self, messages, stop=None, **kwargs):
+        self.call_count += 1
         from langchain_core.outputs import ChatGeneration, ChatResult
         return ChatResult(
             generations=[ChatGeneration(message=AIMessage(content=self.response_text))]
@@ -77,20 +79,40 @@ def _llm(text: str = "hello from fake model"):
     return _BindToolsFakeChatModel(response_text=text)
 
 
-def test_base_agent_exposes_queue_manager():
-    """BaseAgent.queue_manager property 暴露 AgentQueueManager。"""
-    agent = BaseAgent(llm=_llm(), agent_config=_config())
-    assert agent.queue_manager is not None
-    assert agent.queue_manager.user_id == agent.agent_config.user_id
-    assert agent.queue_manager.invoke_from == InvokeFrom.DEBUGGER
-
-
 def test_base_agent_invokes_build_deep_agent_in_init():
     """构造时 _agent 已是 CompiledStateGraph。"""
     from langgraph.graph.state import CompiledStateGraph
 
     agent = BaseAgent(llm=_llm(), agent_config=_config())
     assert isinstance(agent._agent, CompiledStateGraph)
+
+
+def test_constructor_closes_runtime_backends_when_graph_build_fails(monkeypatch):
+    """构图失败时立即释放本次运行的 Backend。"""
+    import internal.core.agent_v2.agents.base_agent as base_agent_module
+
+    backend = SimpleNamespace(close_calls=0)
+
+    def close():
+        """记录资源释放次数。"""
+        backend.close_calls += 1
+
+    backend.close = close
+    composite = SimpleNamespace(default=backend, routes={"/workspace/": backend})
+    monkeypatch.setattr(
+        base_agent_module,
+        "build_deep_agent",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("构图失败")),
+    )
+
+    with pytest.raises(RuntimeError, match="构图失败"):
+        BaseAgent(
+            llm=_llm(),
+            agent_config=_config(),
+            backend=composite,
+        )
+
+    assert backend.close_calls == 1
 
 
 def test_base_agent_no_long_term_memory_in_agent_state():
@@ -110,23 +132,7 @@ def test_base_agent_run_stream_in_thread_signature():
     assert callable(agent._run_stream_in_thread)
 
 
-def test_base_agent_publish_call_does_not_raise_with_mock_redis():
-    """queue_manager.publish 用 MockRedis 不抛错（验证 mock 桩足够）。"""
-    from uuid import uuid4 as _u
-
-    agent = BaseAgent(llm=_llm(), agent_config=_config())
-    # 直接构造 AgentThought 推给 queue；不应抛 Redis 相关异常
-    from internal.core.agent.entities.queue_entity import AgentThought, QueueEvent
-
-    thought = AgentThought(
-        id=_u(),
-        task_id=_u(),
-        event=QueueEvent.PING,
-    )
-    agent.queue_manager.publish(_u(), thought)  # 不抛错即可
-
-
-def test_merge_thread_config_adds_defaults_and_preserves_overrides():
+def test_merge_thread_config_keeps_tenant_identity_stable():
     config = _config().model_copy(
         update={
             "account_id": uuid4(),
@@ -139,12 +145,19 @@ def test_merge_thread_config_adds_defaults_and_preserves_overrides():
     merged = agent._merge_thread_config(
         {
             "tags": ["chat"],
-            "metadata": {"request_id": "req-1"},
-            "configurable": {"checkpoint_ns": "custom"},
+            "metadata": {
+                "request_id": "req-1",
+                "conversation_id": "forged",
+            },
+            "configurable": {
+                "checkpoint_ns": "custom",
+                "thread_id": "forged",
+            },
         }
     )
 
     assert merged["configurable"]["thread_id"].endswith(",main)")
+    assert merged["configurable"]["thread_id"] != "forged"
     assert merged["configurable"]["checkpoint_ns"] == "custom"
     assert merged["metadata"]["request_id"] == "req-1"
     assert merged["metadata"]["conversation_id"] == str(config.conversation_id)
@@ -178,8 +191,8 @@ def test_run_stream_uses_event_middleware_and_adds_single_terminal_event():
         def publish(self, _task_id, thought):
             self.events.append(thought)
 
-        def publish_error(self, _task_id, error):
-            raise AssertionError(error)
+        def is_stopped(self, _task_id):
+            return False
 
     agent = BaseAgent(llm=_llm("完成"), agent_config=_config())
     agent._agent_queue_manager = FakeQueueManager()
@@ -196,34 +209,6 @@ def test_run_stream_uses_event_middleware_and_adds_single_terminal_event():
     assert agent._agent_queue_manager.events[0].answer == "完成"
 
 
-def test_run_stream_closes_all_unique_runtime_route_backends():
-    class ClosableBackend:
-        def __init__(self):
-            self.close_calls = 0
-
-        def close(self):
-            self.close_calls += 1
-
-    default = ClosableBackend()
-    workspace = ClosableBackend()
-    skills = ClosableBackend()
-    agent = BaseAgent.model_construct(llm=_llm(), agent_config=_config())
-    agent._workspace_backend = SimpleNamespace(
-        default=default,
-        routes={
-            "/workspace/": workspace,
-            "/artifacts/": workspace,
-            "/skills/": skills,
-        },
-    )
-
-    agent._close_runtime_backends()
-
-    assert default.close_calls == 1
-    assert workspace.close_calls == 1
-    assert skills.close_calls == 1
-
-
 def test_output_review_blocks_message_before_event_publication():
     task_id = uuid4()
 
@@ -233,6 +218,9 @@ def test_output_review_blocks_message_before_event_publication():
 
         def publish(self, _task_id, thought):
             self.events.append(thought)
+
+        def is_stopped(self, _task_id):
+            return False
 
     config = _config().model_copy(
         update={
@@ -255,3 +243,47 @@ def test_output_review_blocks_message_before_event_publication():
     assert [event.event for event in agent._agent_queue_manager.events] == [
         QueueEvent.ERROR,
     ]
+
+
+def test_input_review_ends_graph_without_calling_model():
+    """输入命中审核词时直接返回预设响应。"""
+    task_id = uuid4()
+
+    class FakeQueueManager:
+        def __init__(self):
+            self.events = []
+
+        def publish(self, _task_id, thought):
+            self.events.append(thought)
+
+        def is_stopped(self, _task_id):
+            return False
+
+    config = _config().model_copy(
+        update={
+            "review_config": {
+                "enable": True,
+                "keywords": ["敏感输入"],
+                "inputs_config": {
+                    "enable": True,
+                    "preset_response": "请求未通过审核",
+                },
+                "outputs_config": {"enable": False},
+            }
+        }
+    )
+    model = _llm("不应生成")
+    agent = BaseAgent(llm=model, agent_config=config)
+    agent._agent_queue_manager = FakeQueueManager()
+
+    agent._run_stream_in_thread(
+        {"messages": [HumanMessage(content="包含敏感输入")], "task_id": task_id},
+        None,
+    )
+
+    assert model.call_count == 0
+    assert [event.event for event in agent._agent_queue_manager.events] == [
+        QueueEvent.AGENT_MESSAGE,
+        QueueEvent.AGENT_END,
+    ]
+    assert agent._agent_queue_manager.events[0].answer == "请求未通过审核"
