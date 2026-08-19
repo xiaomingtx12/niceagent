@@ -442,6 +442,11 @@ class Router:
             view_func=self.provider_api_key_handler.update_provider_api_key,
         )
         bp.add_url_rule(
+            "/provider-api-keys/<uuid:provider_api_key_id>/models",
+            methods=["POST"],
+            view_func=self.provider_api_key_handler.update_provider_api_key_models,
+        )
+        bp.add_url_rule(
             "/provider-api-keys/<uuid:provider_api_key_id>/delete",
             methods=["POST"],
             view_func=self.provider_api_key_handler.delete_provider_api_key,
@@ -538,6 +543,11 @@ class Router:
             view_func=self.language_model_handler.get_language_models,
         )
         bp.add_url_rule(
+            "/language-models/discover",
+            methods=["POST"],
+            view_func=self.language_model_handler.discover_language_models,
+        )
+        bp.add_url_rule(
             "/language-models/<string:provider_name>/icon",
             view_func=self.language_model_handler.get_language_model_icon,
         )
@@ -590,6 +600,25 @@ class Router:
         bp.add_url_rule(
             "/web-apps/<string:token>/conversations",
             view_func=self.web_app_handler.get_conversations,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/messages",
+            view_func=self.web_app_handler.get_web_app_conversation_messages_with_page,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/delete",
+            methods=["POST"],
+            view_func=self.web_app_handler.delete_web_app_conversation,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/name",
+            methods=["POST"],
+            view_func=self.web_app_handler.update_web_app_conversation_name,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/is-pinned",
+            methods=["POST"],
+            view_func=self.web_app_handler.update_web_app_conversation_is_pinned,
         )
 
         # 16.会话模块

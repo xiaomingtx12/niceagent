@@ -50,6 +50,7 @@ from internal.schema.workflow_schema import CreateWorkflowReq, GetWorkflowsWithP
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from .language_model_service import LanguageModelService
 
 
 @inject
@@ -59,6 +60,7 @@ class WorkflowService(BaseService):
 
     db: SQLAlchemy
     builtin_provider_manager: BuiltinProviderManager
+    language_model_service: LanguageModelService
 
     def create_workflow(self, req: CreateWorkflowReq, account: Account) -> Workflow:
         """根据传递的请求信息创建工作流"""
@@ -394,6 +396,7 @@ class WorkflowService(BaseService):
         """调试指定的工作流API接口，该接口为流式事件输出"""
         # 1.根据传递的id获取工作流并校验权限
         workflow = self.get_workflow(workflow_id, account)
+        draft_graph = self._validate_graph(workflow.draft_graph, account)
 
         # 2.创建工作流工具
         workflow_tool = WorkflowTool(
@@ -401,8 +404,8 @@ class WorkflowService(BaseService):
                 account_id=account.id,
                 name=workflow.tool_call_name,
                 description=workflow.description,
-                nodes=workflow.draft_graph.get("nodes", []),
-                edges=workflow.draft_graph.get("edges", []),
+                nodes=draft_graph.get("nodes", []),
+                edges=draft_graph.get("edges", []),
             )
         )
 
@@ -422,7 +425,7 @@ class WorkflowService(BaseService):
                     "app_id": None,
                     "account_id": account.id,
                     "workflow_id": workflow.id,
-                    "graph": workflow.draft_graph,
+                    "graph": draft_graph,
                     "state": [],
                     "latency": 0,
                     "status": WorkflowResultStatus.RUNNING,
@@ -499,6 +502,7 @@ class WorkflowService(BaseService):
         """根据传递的工作流id，发布指定的工作流"""
         # 1.根据传递的id获取工作流并校验权限
         workflow = self.get_workflow(workflow_id, account)
+        draft_graph = self._validate_graph(workflow.draft_graph, account)
 
         # 2.校验工作流是否调试通过
         if workflow.is_debug_passed is False:
@@ -510,8 +514,8 @@ class WorkflowService(BaseService):
                 account_id=account.id,
                 name=workflow.tool_call_name,
                 description=workflow.description,
-                nodes=workflow.draft_graph.get("nodes", []),
-                edges=workflow.draft_graph.get("edges", []),
+                nodes=draft_graph.get("nodes", []),
+                edges=draft_graph.get("edges", []),
             )
         except Exception:
             self.update(
@@ -526,7 +530,7 @@ class WorkflowService(BaseService):
         self.update(
             workflow,
             **{
-                "graph": workflow.draft_graph,
+                "graph": draft_graph,
                 "status": WorkflowStatus.PUBLISHED,
                 "is_debug_passed": False,
             },
@@ -591,6 +595,19 @@ class WorkflowService(BaseService):
                 node_data_cls = node_data_classes.get(node_type, None)
                 if node_data_cls is None:
                     raise ValidateErrorException("工作流节点类型出错，请核实后重试")
+
+                if node_type == NodeType.LLM:
+                    model_config = node.get("model_config")
+                    if not isinstance(model_config, dict) or not self.language_model_service.get_enabled_model_entity(
+                        model_config.get("provider", ""),
+                        model_config.get("model", ""),
+                        account.id,
+                    ):
+                        node["model_config"] = (
+                            self.language_model_service.get_default_model_config(
+                                account.id
+                            )
+                        )
 
                 # 6.实例化节点数据类型，如果出错则跳过当前数据
                 node_data = node_data_cls(**node)

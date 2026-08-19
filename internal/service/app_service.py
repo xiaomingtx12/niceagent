@@ -53,10 +53,9 @@ from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .base_service import BaseService
 from .cos_service import CosService
 from ..core.language_model import LanguageModelManager
-from ..core.language_model.entities.model_entity import ModelFeature
-from ..core.language_model.providers.tongyi.chat import Chat
 from ..entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
 from ..lib.helper import remove_fields, generate_random_string
+from .language_model_service import LanguageModelService
 
 
 @inject
@@ -70,24 +69,16 @@ class AppService(BaseService):
     app_config_service: AppConfigService
     agent_invocation_service: AgentInvocationService
     language_model_manager: LanguageModelManager
+    language_model_service: LanguageModelService
     agent_cleanup_service: AgentConversationCleanupService
 
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
-        from internal.lib.api_key_helper import get_api_key_for_provider
-
-        # 1.获取用户配置的 API Key（如果未配置会抛出异常）
-        try:
-            api_key = get_api_key_for_provider("tongyi", account_id)
-        except Exception as e:
-            raise ValidateErrorException(f"创建应用失败: {str(e)}")
-
-        # 2.创建LLM，用于生成icon提示与预设提示词
-        llm = Chat(
-            model="qwen-max",
-            features=[ModelFeature.TOOL_CALL, ModelFeature.AGENT_THOUGHT],
-            metadata={},
-            api_key=api_key,
+        # 1.使用当前账号已激活的模型生成应用配置
+        model_config = self.language_model_service.get_default_model_config(account_id)
+        llm = self.language_model_service.load_language_model(
+            model_config,
+            account_id,
         )
 
         # 2.创建QwenImageGenerationTool包装器

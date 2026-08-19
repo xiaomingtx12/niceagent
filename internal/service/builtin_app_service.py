@@ -11,6 +11,7 @@ from internal.exception import NotFoundException
 from internal.model import Account, App, AppConfigVersion
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from .language_model_service import LanguageModelService
 
 
 @inject
@@ -20,6 +21,7 @@ class BuiltinAppService(BaseService):
 
     db: SQLAlchemy
     builtin_app_manager: BuiltinAppManager
+    language_model_service: LanguageModelService
 
     def get_categories(self) -> list[CategoryEntity]:
         """获取分类列表信息"""
@@ -50,7 +52,9 @@ class BuiltinAppService(BaseService):
             # 4.创建草稿配置信息
             draft_app_config = AppConfigVersion(
                 app_id=app.id,
-                model_config=builtin_app.language_model_config,
+                model_config=self.language_model_service.get_default_model_config(
+                    account.id
+                ),
                 config_type=AppConfigType.DRAFT,
                 **builtin_app.model_dump(
                     include={

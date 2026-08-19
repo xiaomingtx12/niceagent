@@ -7,7 +7,35 @@ from pydantic import BaseModel, Field, model_validator  # Updated imports
 from internal.exception import FailException, NotFoundException
 from internal.lib.helper import dynamic_import
 from .default_model_parameter_template import DEFAULT_MODEL_PARAMETER_TEMPLATE
-from .model_entity import ModelType, ModelEntity, BaseLanguageModel
+from .model_entity import (
+    BaseLanguageModel,
+    ModelEntity,
+    ModelFeature,
+    ModelType,
+)
+
+
+class ModelDiscoveryConfig(BaseModel):
+    """第三方模型目录发现配置。"""
+
+    enabled: bool = False
+    endpoint: str = "/models"
+    fallback_endpoints: list[str] = Field(
+        default_factory=lambda: ["/v1/models"]
+    )
+    timeout_seconds: float = Field(default=5.0, gt=0, le=30)
+    cache_ttl_seconds: int = Field(default=300, ge=0, le=86400)
+    api_key_header: str = "Authorization"
+    api_key_prefix: str = "Bearer "
+    model_type: ModelType = ModelType.CHAT
+    default_features: list[ModelFeature] = Field(
+        default_factory=lambda: [
+            ModelFeature.TOOL_CALL,
+            ModelFeature.AGENT_THOUGHT,
+        ]
+    )
+    default_context_window: int = Field(default=0, ge=0)
+    default_max_output_tokens: int = Field(default=0, ge=0)
 
 
 class ProviderEntity(BaseModel):
@@ -18,6 +46,11 @@ class ProviderEntity(BaseModel):
     description: str = ""  # 提供商的描述信息
     icon: str = ""  # 提供商的图标
     background: str = ""  # 提供商的图标背景
+    model_provider: str = "openai"  # LangChain 模型 provider 标识
+    base_url: str = ""  # OpenAI-compatible 服务地址
+    model_discovery: ModelDiscoveryConfig = Field(
+        default_factory=ModelDiscoveryConfig
+    )
     supported_model_types: list[ModelType] = Field(
         default_factory=list
     )  # 支持的模型类型
@@ -111,10 +144,27 @@ class Provider(BaseModel):
         return values  # Return mutated values
 
     def get_model_class(
-        self, model_type: ModelType
+        self,
+        model_type: ModelType,
+        model_entity: ModelEntity | None = None,
     ) -> Optional[Type[BaseLanguageModel]]:
         """根据传递的模型类型获取该提供者的模型类"""
-        model_class = self.model_class_map.get(model_type, None)
+        if model_entity is not None and model_entity.is_dynamic:
+            # 动态模型的 endpoint 来自供应商配置，不能使用供应商子类中的固定地址。
+            module_name = (
+                "chat"
+                if model_type == ModelType.CHAT
+                else "completion"
+            )
+            return dynamic_import(
+                f"internal.core.language_model.providers.openai.{module_name}",
+                "Chat" if module_name == "chat" else "Completion",
+            )
+
+        model_type_key = (
+            model_type.value if isinstance(model_type, ModelType) else str(model_type)
+        )
+        model_class = self.model_class_map.get(model_type_key, None)
         if model_class is None:
             raise NotFoundException("该模型类不存在，请核实后重试")
         return model_class

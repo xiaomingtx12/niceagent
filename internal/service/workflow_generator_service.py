@@ -10,7 +10,6 @@ from injector import inject
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from internal.core.language_model import LanguageModelManager
 from internal.core.workflow.entities.edge_entity import BaseEdgeData
 from internal.core.workflow.entities.node_entity import NodeType, BaseNodeData
 from internal.core.workflow.nodes import (
@@ -34,6 +33,7 @@ from internal.lib.helper import convert_model_to_dict
 from internal.model import Account, Workflow
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
+from .language_model_service import LanguageModelService
 
 
 @inject
@@ -42,7 +42,7 @@ class WorkflowGeneratorService(BaseService):
     """工作流生成服务"""
 
     db: SQLAlchemy
-    language_model_manager: LanguageModelManager
+    language_model_service: LanguageModelService
 
     def generate_workflow_from_requirements(
         self,
@@ -132,28 +132,10 @@ class WorkflowGeneratorService(BaseService):
             WORKFLOW_GENERATION_PROMPT_TEMPLATE
         )
 
-        # 4. 获取LLM（使用通义千问）
-        provider = self.language_model_manager.get_provider("tongyi")
-        if not provider:
-            raise FailException("未找到通义千问模型提供者")
-
-        model_entity = provider.get_model_entity("qwen-max")
-        if not model_entity:
-            raise FailException("未找到qwen-max模型")
-
-        # 获取模型类并实例化
-        model_class = provider.get_model_class(model_entity.model_type)
-
-        # 获取用户的 API Key
-        from internal.lib.api_key_helper import get_api_key_for_provider
-
-        api_key = get_api_key_for_provider("tongyi", account.id)
-
-        llm = model_class(
-            **model_entity.attributes,
-            dashscope_api_key=api_key,
-            features=model_entity.features,
-            metadata=model_entity.metadata,
+        # 4.使用当前账号已激活的模型生成工作流
+        llm = self.language_model_service.load_language_model(
+            self.language_model_service.get_default_model_config(account.id),
+            account.id,
         )
 
         # 5. 构建生成链
@@ -260,6 +242,12 @@ class WorkflowGeneratorService(BaseService):
                 # 2.3 确保有title
                 if "title" not in node or not node["title"]:
                     node["title"] = f"{node['node_type']}节点"
+
+                # 所有生成的 LLM 节点统一绑定当前账号已激活的模型。
+                if node["node_type"] == NodeType.LLM:
+                    node["model_config"] = (
+                        self.language_model_service.get_default_model_config(account.id)
+                    )
 
                 # 2.4 确保有description
                 if "description" not in node:
@@ -482,8 +470,8 @@ class WorkflowGeneratorService(BaseService):
                     "position": {"x": 350, "y": 200},
                     "prompt": "请分析以下内容：{{ user_input }}",
                     "model_config": {
-                        "provider": "tongyi",
-                        "model": "qwen-plus",
+                        "provider": "",
+                        "model": "",
                         "parameters": {"temperature": 0.7, "max_tokens": 2000},
                     },
                     "inputs": [

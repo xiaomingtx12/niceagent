@@ -70,6 +70,7 @@ class ModelEntity(BaseModel):
     model_name: str = Field(default="", alias="model")  # 模型名字，使用model作为别名
     label: str = ""  # 模型标签
     model_type: ModelType = ModelType.CHAT  # 模型类型
+    is_dynamic: bool = False  # 是否由第三方模型目录动态发现
     features: list[ModelFeature] = Field(default_factory=list)  # 模型特征信息
     context_window: int = 0  # 上下文窗口长度(输入+输出的总长度)
     max_output_tokens: int = 0  # 最大输出内容长度(输出)

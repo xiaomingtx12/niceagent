@@ -43,12 +43,12 @@ class ConversationService(BaseService):
     ):
         """从模型配置加载模型实例，如果失败则使用默认模型"""
         from internal.service.language_model_service import LanguageModelService
-        from injector import Injector
+        from app.http.module import injector
 
         try:
             if model_config and account_id:
                 # 使用应用配置的模型
-                language_model_service = Injector().get(LanguageModelService)
+                language_model_service = injector.get(LanguageModelService)
                 return language_model_service.load_language_model(
                     model_config, account_id
                 )
@@ -61,16 +61,16 @@ class ConversationService(BaseService):
     ) -> str:
         """根据传递的query生成对应的会话名字，并且语言与用户的输入保持一致"""
         from internal.service.language_model_service import LanguageModelService
-        from injector import Injector
-
-        # 1.加载模型：如果未传入model_config，使用默认的tongyi配置（需要用户自己的API Key）
-        if not model_config:
-            model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
+        from app.http.module import injector
 
         llm = None
         try:
             if account_id:
-                language_model_service = Injector().get(LanguageModelService)
+                language_model_service = injector.get(LanguageModelService)
+                if not model_config:
+                    model_config = language_model_service.get_default_model_config(
+                        account_id
+                    )
                 llm = language_model_service.load_language_model(
                     model_config, account_id
                 )
@@ -122,17 +122,17 @@ class ConversationService(BaseService):
         """根据传递的历史信息生成最多不超过3个的建议问题"""
         import json as json_module
         from internal.service.language_model_service import LanguageModelService
-        from injector import Injector
+        from app.http.module import injector
 
         try:
-            # 1.加载模型：如果未传入model_config，使用默认的tongyi配置（需要用户自己的API Key）
-            if not model_config:
-                model_config = {"provider": "tongyi", "model": "qwen-plus", "parameters": {}}
-
             llm = None
             try:
                 if account_id:
-                    language_model_service = Injector().get(LanguageModelService)
+                    language_model_service = injector.get(LanguageModelService)
+                    if not model_config:
+                        model_config = language_model_service.get_default_model_config(
+                            account_id
+                        )
                     llm = language_model_service.load_language_model(
                         model_config, account_id
                     )

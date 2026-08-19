@@ -27,16 +27,18 @@ from internal.model import (
     AppConfig,
     AppConfigVersion,
     AppDatasetJoin,
+    ProviderApiKey,
     Workflow,
 )
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from ..core.language_model import LanguageModelManager
-from ..core.language_model.entities.model_entity import ModelParameterType
+from ..core.language_model.entities.model_entity import ModelEntity, ModelParameterType
 from ..core.workflow.entities.workflow_entity import WorkflowConfig
 from ..entity.app_entity import DEFAULT_APP_CONFIG
 from ..entity.workflow_entity import WorkflowStatus
 from .skill_service import SkillService
+from .language_model_service import LanguageModelService
 
 
 @inject
@@ -48,6 +50,7 @@ class AppConfigService(BaseService):
     api_provider_manager: ApiProviderManager
     builtin_provider_manager: BuiltinProviderManager
     language_model_manager: LanguageModelManager
+    language_model_service: LanguageModelService
     mcp_runtime_manager: MCPRuntimeManager
     skill_service: SkillService
 
@@ -84,7 +87,8 @@ class AppConfigService(BaseService):
         normalized = dict(draft_app_config)
         if "model_config" in normalized:
             normalized["model_config"] = self._validate_strict_model_config(
-                normalized["model_config"]
+                normalized["model_config"],
+                account_id=account_id,
             )
 
         if "dialog_round" in normalized:
@@ -160,6 +164,8 @@ class AppConfigService(BaseService):
     def _validate_strict_model_config(
         self,
         model_config: Any,
+        *,
+        account_id: UUID | None = None,
     ) -> dict[str, Any]:
         """严格校验 provider/model，宽松标准化模型参数。"""
         if not isinstance(model_config, dict):
@@ -180,12 +186,20 @@ class AppConfigService(BaseService):
         if not isinstance(parameters, dict):
             raise ValidateErrorException("模型参数配置格式错误")
 
-        provider = self.language_model_manager.get_provider(provider_name)
-        if not provider:
-            raise ValidateErrorException("该模型服务提供商不存在，请核实后重试")
-        model_entity = provider.get_model_entity(model_name)
+        try:
+            self.language_model_manager.get_provider(provider_name)
+        except Exception as exc:
+            raise ValidateErrorException("该模型服务提供商不存在，请核实后重试") from exc
+
+        model_entity = self.language_model_service.get_enabled_model_entity(
+            provider_name,
+            model_name,
+            account_id,
+        )
         if not model_entity:
-            raise ValidateErrorException("该服务提供商下不存在该模型，请核实后重试")
+            raise ValidateErrorException(
+                "该模型未激活，请先在 API 密钥设置中发现并激活后再使用"
+            )
 
         normalized_parameters: dict[str, Any] = {}
         for parameter in model_entity.parameters:
@@ -453,7 +467,8 @@ class AppConfigService(BaseService):
 
         # 2.校验model_config信息，如果使用了不存在的提供者或者模型，则使用默认值(宽松校验)
         validate_model_config = self._process_and_validate_model_config(
-            draft_app_config.model_config
+            draft_app_config.model_config,
+            account_id=app.account_id,
         )
         if draft_app_config.model_config != validate_model_config:
             self.update(draft_app_config, model_config=validate_model_config)
@@ -502,7 +517,8 @@ class AppConfigService(BaseService):
 
         # 2.校验model_config信息，如果运行时配置里的model_config发生变化则进行更新
         validate_model_config = self._process_and_validate_model_config(
-            app_config.model_config
+            app_config.model_config,
+            account_id=app.account_id,
         )
         if app_config.model_config != validate_model_config:
             self.update(app_config, model_config=validate_model_config)
@@ -873,12 +889,18 @@ class AppConfigService(BaseService):
         return datasets, validate_datasets
 
     def _process_and_validate_model_config(
-        self, origin_model_config: dict[str, Any]
+        self,
+        origin_model_config: dict[str, Any],
+        *,
+        account_id: UUID | None = None,
     ) -> dict[str, Any]:
         """根据传递的模型配置处理并校验，随后返回校验后的信息"""
+        def default_active_model_config() -> dict[str, Any]:
+            return self.language_model_service.get_default_model_config(account_id)
+
         # 1.判断model_config是否为字典，如果不是则直接返回默认值
         if not isinstance(origin_model_config, dict):
-            return DEFAULT_APP_CONFIG["model_config"]
+            return default_active_model_config()
 
         # 2.提取origin_model_config中provider、model、parameters对应的信息
         model_config = {
@@ -891,17 +913,22 @@ class AppConfigService(BaseService):
         if not model_config["provider"] or not isinstance(
             model_config["provider"], str
         ):
-            return DEFAULT_APP_CONFIG["model_config"]
-        provider = self.language_model_manager.get_provider(model_config["provider"])
-        if not provider:
-            return DEFAULT_APP_CONFIG["model_config"]
+            return default_active_model_config()
+        try:
+            self.language_model_manager.get_provider(model_config["provider"])
+        except Exception:
+            return default_active_model_config()
 
         # 4.判断model是否存在、类型是否正确，如果不符合则返回默认值
         if not model_config["model"] or not isinstance(model_config["model"], str):
-            return DEFAULT_APP_CONFIG["model_config"]
-        model_entity = provider.get_model_entity(model_config["model"])
+            return default_active_model_config()
+        model_entity = self.language_model_service.get_enabled_model_entity(
+            model_config["provider"],
+            model_config["model"],
+            account_id,
+        )
         if not model_entity:
-            return DEFAULT_APP_CONFIG["model_config"]
+            return default_active_model_config()
 
         # 5.判断parameters信息类型是否错误，如果错误则设置为默认值
         if not isinstance(model_config["parameters"], dict):
@@ -957,6 +984,17 @@ class AppConfigService(BaseService):
         model_config["features"] = [f.value for f in model_entity.features]
 
         return model_config
+
+    def _get_enabled_discovered_models(
+        self,
+        provider_name: str,
+        account_id: UUID | None,
+    ) -> list[ModelEntity]:
+        """兼容旧调用名，统一读取当前账号已激活的模型。"""
+        return self.language_model_service.get_enabled_model_entities(
+            provider_name,
+            account_id,
+        )
 
     def _process_and_validate_workflows(
         self,

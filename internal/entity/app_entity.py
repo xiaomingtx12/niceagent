@@ -27,17 +27,8 @@ class AppConfigType(str, Enum):
 
 # 应用默认配置信息
 DEFAULT_APP_CONFIG = {
-    "model_config": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "parameters": {
-            "temperature": 0.5,
-            "top_p": 0.85,
-            "frequency_penalty": 0.2,
-            "presence_penalty": 0.2,
-            "max_tokens": 8192,
-        },
-    },
+    # 模型配置由当前账号已激活的模型注入，不能使用全局固定模型。
+    "model_config": {},
     "dialog_round": 3,
     "preset_prompt": "",
     "skills": [],

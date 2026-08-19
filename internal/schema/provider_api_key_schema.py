@@ -52,6 +52,12 @@ class GetProviderApiKeysResp(Schema):
     remark = fields.String(dump_default="")
     updated_at = fields.Integer(dump_default=0)
     created_at = fields.Integer(dump_default=0)
+    discovered_model_count = fields.Integer(dump_default=0)
+    enabled_model_count = fields.Integer(dump_default=0)
+    enabled_models = fields.List(fields.String(), dump_default=list)
+    discovered_models = fields.List(
+        fields.Dict(), dump_default=list
+    )
 
     @pre_dump
     def process_data(self, data: ProviderApiKey, **kwargs):
@@ -70,4 +76,8 @@ class GetProviderApiKeysResp(Schema):
             "remark": data.remark,
             "updated_at": datetime_to_timestamp(data.updated_at),
             "created_at": datetime_to_timestamp(data.created_at),
+            "discovered_model_count": len(data.discovered_models or []),
+            "enabled_model_count": len(data.enabled_models or []),
+            "enabled_models": data.enabled_models or [],
+            "discovered_models": data.discovered_models or [],
         }

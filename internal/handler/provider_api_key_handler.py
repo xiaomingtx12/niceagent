@@ -4,6 +4,7 @@ from uuid import UUID
 from flask import request
 from flask_login import login_required, current_user
 from injector import inject
+from werkzeug.datastructures import MultiDict
 
 from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.provider_api_key_schema import (
@@ -28,12 +29,37 @@ class ProviderApiKeyHandler:
     def create_provider_api_key(self):
         """创建提供商API密钥"""
         # 1.提取请求并校验
-        req = CreateProviderApiKeyReq()
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return validate_error_json({"request": ["请求数据格式错误"]})
+
+        req = CreateProviderApiKeyReq(formdata=MultiDict(payload))
         if not req.validate():
             return validate_error_json(req.errors)
 
+        discovered_models = payload.get("discovered_models", [])
+        enabled_models = payload.get("enabled_models")
+        if not isinstance(discovered_models, list) or not all(
+            isinstance(model, dict) for model in discovered_models
+        ):
+            return validate_error_json(
+                {"discovered_models": ["发现模型必须是对象数组"]}
+            )
+        if enabled_models is not None and (
+            not isinstance(enabled_models, list)
+            or not all(isinstance(model_name, str) for model_name in enabled_models)
+        ):
+            return validate_error_json(
+                {"enabled_models": ["激活模型必须是字符串数组"]}
+            )
+
         # 2.调用服务创建密钥
-        self.provider_api_key_service.create_provider_api_key(req, current_user)
+        self.provider_api_key_service.create_provider_api_key(
+            req,
+            current_user,
+            discovered_models=discovered_models,
+            enabled_models=enabled_models,
+        )
 
         return success_message("创建提供商API密钥成功")
 
@@ -60,6 +86,10 @@ class ProviderApiKeyHandler:
             "api_key_masked": api_key_masked,
             "is_active": provider_api_key.is_active,
             "remark": provider_api_key.remark,
+            "discovered_model_count": len(provider_api_key.discovered_models or []),
+            "enabled_model_count": len(provider_api_key.enabled_models or []),
+            "enabled_models": provider_api_key.enabled_models or [],
+            "discovered_models": provider_api_key.discovered_models or [],
         })
 
     @rate_limit(config_key="user")
@@ -67,7 +97,10 @@ class ProviderApiKeyHandler:
     def update_provider_api_key(self, provider_api_key_id: UUID):
         """更新提供商API密钥"""
         # 1.提取请求并校验
-        req = UpdateProviderApiKeyReq()
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            return validate_error_json({"request": ["请求数据格式错误"]})
+        req = UpdateProviderApiKeyReq(formdata=MultiDict(payload))
         if not req.validate():
             return validate_error_json(req.errors)
 
@@ -79,11 +112,11 @@ class ProviderApiKeyHandler:
             update_data["api_key"] = req.api_key.data.strip()
         
         # 只有当 is_active 字段在请求中存在时才更新
-        if "is_active" in request.form or "is_active" in request.json:
+        if "is_active" in request.form or "is_active" in payload:
             update_data["is_active"] = req.is_active.data
         
         # 只有当 remark 字段在请求中存在时才更新
-        if "remark" in request.form or "remark" in request.json:
+        if "remark" in request.form or "remark" in payload:
             update_data["remark"] = req.remark.data or ""
 
         # 3.调用服务更新密钥
@@ -92,6 +125,26 @@ class ProviderApiKeyHandler:
         )
 
         return success_message("更新提供商API密钥成功")
+
+    @rate_limit(config_key="user")
+    @login_required
+    def update_provider_api_key_models(self, provider_api_key_id: UUID):
+        """更新供应商 API Key 下已激活的动态模型。"""
+        payload = request.get_json(silent=True) or {}
+        enabled_models = payload.get("enabled_models")
+        if not isinstance(enabled_models, list) or not all(
+            isinstance(model_name, str) for model_name in enabled_models
+        ):
+            return validate_error_json(
+                {"enabled_models": ["已激活模型必须是字符串数组"]}
+            )
+
+        self.provider_api_key_service.update_enabled_models(
+            provider_api_key_id,
+            current_user,
+            enabled_models,
+        )
+        return success_message("模型激活状态更新成功")
 
     @rate_limit(config_key="sensitive")
     @login_required

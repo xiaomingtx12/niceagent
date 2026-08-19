@@ -35,10 +35,7 @@ class GetBuiltinAppsResp(Schema):
             **data.model_dump(
                 include={"id", "category", "name", "icon", "description", "created_at"}
             ),
-            "model_config": {
-                "provider": data.language_model_config.get("provider", ""),
-                "model": data.language_model_config.get("model", ""),
-            },
+            "model_config": {},
         }
 
 

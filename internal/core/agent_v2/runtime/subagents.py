@@ -15,7 +15,6 @@ class SubAgentSpecError(ValueError):
     """持久化 SubAgent 配置不安全或无效时抛出。"""
 
 
-MAX_PLATFORM_SUBAGENTS = 8
 MAX_SUBAGENT_DESCRIPTION_LENGTH = 500
 MAX_SUBAGENT_SYSTEM_PROMPT_LENGTH = 8000
 _NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
@@ -51,8 +50,6 @@ def validate_platform_subagents(
         subagents = converted
     if not isinstance(subagents, list):
         raise SubAgentSpecError("subagents 必须是数组")
-    if len(subagents) > MAX_PLATFORM_SUBAGENTS:
-        raise SubAgentSpecError(f"subagents 数量不能超过 {MAX_PLATFORM_SUBAGENTS}")
 
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -237,7 +234,6 @@ def _normalize_name_list(value: Any, *, name: str, field: str) -> list[str]:
 
 
 __all__ = [
-    "MAX_PLATFORM_SUBAGENTS",
     "SubAgentSpecError",
     "build_subagent_specs",
     "validate_platform_subagents",

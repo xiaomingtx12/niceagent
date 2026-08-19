@@ -8,6 +8,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     Index,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 
 from internal.extension.database_extension import db
 from .account import Account
@@ -39,6 +40,12 @@ class ProviderApiKey(db.Model):
     remark = Column(
         String(255), nullable=False, server_default=text("''::character varying")
     )  # 备注信息
+    discovered_models = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 最近一次显式发现的模型快照
+    enabled_models = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 用户激活使用的动态模型名字
     updated_at = Column(
         DateTime,
         nullable=False,

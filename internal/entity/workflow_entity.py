@@ -73,7 +73,8 @@ WORKFLOW_GENERATION_PROMPT_TEMPLATE = """你是一个工作流配置生成专家
 - 必须有且只有一个end节点
 
 ### 5. 模型配置
-- 默认使用通义千问：provider="tongyi", model="qwen-plus"
+- 输出 `model_config` 的结构即可，系统保存时会替换为当前账号已激活的模型。
+- 不要假设某个固定的 provider 或 model。
 - temperature范围：0-1
 - max_tokens范围：1-4000
 

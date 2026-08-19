@@ -11,7 +11,14 @@ from internal.schema.web_app_schema import (
     GetConversationsReq,
     GetConversationsResp,
 )
+from internal.schema.conversation_schema import (
+    GetConversationMessagesWithPageReq,
+    GetConversationMessagesWithPageResp,
+    UpdateConversationNameReq,
+    UpdateConversationIsPinnedReq,
+)
 from internal.service import WebAppService
+from pkg.paginator import PageModel
 from pkg.response import (
     success_json,
     validate_error_json,
@@ -77,3 +84,69 @@ class WebAppHandler:
         resp = GetConversationsResp(many=True)
 
         return success_json(resp.dump(conversations))
+
+    @rate_limit(config_key="database_intensive")
+    @login_required
+    def get_web_app_conversation_messages_with_page(
+        self,
+        token: str,
+        conversation_id: UUID,
+    ):
+        """获取当前 WebApp 用户在指定会话中的消息。"""
+        req = GetConversationMessagesWithPageReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        messages, paginator = (
+            self.web_app_service.get_web_app_conversation_messages_with_page(
+                token,
+                conversation_id,
+                req,
+                current_user,
+            )
+        )
+        resp = GetConversationMessagesWithPageResp(many=True)
+        return success_json(PageModel(list=resp.dump(messages), paginator=paginator))
+
+    @rate_limit(config_key="sensitive")
+    @login_required
+    def delete_web_app_conversation(self, token: str, conversation_id: UUID):
+        """删除当前 WebApp 用户在指定会话中的会话。"""
+        self.web_app_service.delete_web_app_conversation(
+            token,
+            conversation_id,
+            current_user,
+        )
+        return success_message("删除会话成功")
+
+    @rate_limit(config_key="user")
+    @login_required
+    def update_web_app_conversation_name(self, token: str, conversation_id: UUID):
+        """修改当前 WebApp 用户在指定会话中的会话名称。"""
+        req = UpdateConversationNameReq()
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        self.web_app_service.update_web_app_conversation(
+            token,
+            conversation_id,
+            current_user,
+            name=req.name.data,
+        )
+        return success_message("修改会话名称成功")
+
+    @rate_limit(config_key="user")
+    @login_required
+    def update_web_app_conversation_is_pinned(self, token: str, conversation_id: UUID):
+        """修改当前 WebApp 用户在指定会话中的置顶状态。"""
+        req = UpdateConversationIsPinnedReq()
+        if not req.validate():
+            return validate_error_json(req.errors)
+
+        self.web_app_service.update_web_app_conversation(
+            token,
+            conversation_id,
+            current_user,
+            is_pinned=req.is_pinned.data,
+        )
+        return success_message("修改会话置顶状态成功")

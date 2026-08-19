@@ -1,22 +1,25 @@
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Generator, Any
 from uuid import UUID
 
-from flask import current_app
 from injector import inject
 from sqlalchemy import desc
+from sqlalchemy.orm import joinedload
 from sqlalchemy.dialects.postgresql import insert
 
 from internal.core.agent_v2.agents import AgentQueueManager
-from internal.core.language_model import LanguageModelManager
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, EndUser, Message
 from internal.schema.web_app_schema import WebAppChatReq
+from internal.schema.conversation_schema import GetConversationMessagesWithPageReq
+from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
+from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
 from .base_service import BaseService
 
@@ -28,8 +31,8 @@ class WebAppService(BaseService):
 
     db: SQLAlchemy
     app_config_service: AppConfigService
-    language_model_manager: LanguageModelManager
     agent_invocation_service: AgentInvocationService
+    agent_cleanup_service: AgentConversationCleanupService
 
     def resolve_web_app_end_user(
         self,
@@ -134,20 +137,11 @@ class WebAppService(BaseService):
         
         # 3.从模型配置中获取模型特性（不需要真正加载模型实例）
         model_config = app_config.get("model_config", {})
-        provider_name = model_config.get("provider", "")
-        model_name = model_config.get("model", "")
-        
-        # 4.从模型管理器获取模型实体信息（不需要 API Key）
-        features = []
-        try:
-            provider = self.language_model_manager.get_provider(provider_name)
-            model_entity = provider.get_model_entity(model_name)
-            features = model_entity.features
-        except Exception as e:
-            # 如果获取失败，记录日志但不影响返回
-            current_app.logger.warning(f"获取模型特性失败: {str(e)}")
+        features = model_config.get("features", [])
+        if not isinstance(features, list):
+            features = []
 
-        # 5.提取信息并返回
+        # 4.提取信息并返回
         return {
             "id": str(app.id),
             "icon": app.icon,
@@ -279,3 +273,73 @@ class WebAppService(BaseService):
         )
 
         return conversations
+
+    def get_web_app_conversation_messages_with_page(
+        self,
+        token: str,
+        conversation_id: UUID,
+        req: GetConversationMessagesWithPageReq,
+        account: Account,
+    ) -> tuple[list[Message], Paginator]:
+        """获取当前 WebApp 用户在指定会话中的消息。"""
+        _, _, conversation = self.get_owned_web_conversation(
+            token=token,
+            conversation_id=conversation_id,
+            account=account,
+        )
+
+        paginator = Paginator(db=self.db, req=req)
+        filters = []
+        if req.created_at.data:
+            filters.append(
+                Message.created_at <= datetime.fromtimestamp(req.created_at.data)
+            )
+
+        messages = paginator.paginate(
+            self.db.session.query(Message)
+            .options(joinedload(Message.agent_thoughts))
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.status.in_([MessageStatus.STOP, MessageStatus.NORMAL]),
+                Message.answer != "",
+                ~Message.is_deleted,
+                *filters,
+            )
+            .order_by(desc("created_at"))
+        )
+
+        return messages, paginator
+
+    def delete_web_app_conversation(
+        self,
+        token: str,
+        conversation_id: UUID,
+        account: Account,
+    ) -> Conversation:
+        """删除当前 WebApp 用户在指定会话中的会话。"""
+        app, _, conversation = self.get_owned_web_conversation(
+            token=token,
+            conversation_id=conversation_id,
+            account=account,
+        )
+        self.agent_cleanup_service.cleanup_conversation(
+            account_id=app.account_id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+        )
+        return self.update(conversation, is_deleted=True)
+
+    def update_web_app_conversation(
+        self,
+        token: str,
+        conversation_id: UUID,
+        account: Account,
+        **kwargs,
+    ) -> Conversation:
+        """更新当前 WebApp 用户在指定会话中的会话属性。"""
+        _, _, conversation = self.get_owned_web_conversation(
+            token=token,
+            conversation_id=conversation_id,
+            account=account,
+        )
+        return self.update(conversation, **kwargs)
