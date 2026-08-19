@@ -32,6 +32,7 @@ from internal.handler import (
     ProviderApiKeyHandler,
     SkillHandler,
     WorkspaceFileHandler,
+    MemoryFileHandler,
 )
 
 
@@ -68,6 +69,7 @@ class Router:
     provider_api_key_handler: ProviderApiKeyHandler
     skill_handler: SkillHandler
     workspace_file_handler: WorkspaceFileHandler
+    memory_file_handler: MemoryFileHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -105,6 +107,10 @@ class Router:
             "/apps/<uuid:app_id>/draft-app-config",
             methods=["POST"],
             view_func=self.app_handler.update_draft_app_config,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/published-subagents",
+            view_func=self.app_handler.get_published_subagent_candidates,
         )
         bp.add_url_rule(
             "/apps/<uuid:app_id>/publish",
@@ -706,14 +712,69 @@ class Router:
             view_func=self.workspace_file_handler.delete_app_file,
         )
         bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/files",
+            "/apps/<uuid:app_id>/memory/files",
             methods=["GET"],
-            view_func=self.workspace_file_handler.list_conversation_files,
+            view_func=self.memory_file_handler.list_app_memory_files,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/memory/file",
+            methods=["GET"],
+            view_func=self.memory_file_handler.read_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/memory/file",
+            methods=["POST"],
+            view_func=self.memory_file_handler.write_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/memory/file",
+            methods=["DELETE"],
+            view_func=self.memory_file_handler.delete_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/memory/file/download",
+            methods=["GET"],
+            view_func=self.memory_file_handler.download_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/workspace/files",
+            methods=["GET"],
+            view_func=self.workspace_file_handler.list_all_web_app_files,
         )
         bp.add_url_rule(
             "/web-apps/<string:token>/conversations/<uuid:conversation_id>/file",
             methods=["GET"],
             view_func=self.workspace_file_handler.read_conversation_file,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/file/download",
+            methods=["GET"],
+            view_func=self.workspace_file_handler.download_conversation_file,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memory/files",
+            methods=["GET"],
+            view_func=self.memory_file_handler.list_web_app_memory_files,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memory/file",
+            methods=["GET"],
+            view_func=self.memory_file_handler.read_web_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memory/file",
+            methods=["POST"],
+            view_func=self.memory_file_handler.write_web_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memory/file",
+            methods=["DELETE"],
+            view_func=self.memory_file_handler.delete_web_app_memory_file,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/memory/file/download",
+            methods=["GET"],
+            view_func=self.memory_file_handler.download_web_app_memory_file,
         )
 
         # 20.在应用上去注册蓝图

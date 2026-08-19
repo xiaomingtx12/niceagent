@@ -32,10 +32,8 @@ class WorkspaceFile(db.Model):
     """workspace 文件实体（R1 FilesystemMiddleware 持久化）。
 
     路径约定：
-      /workspace/{account_id}/{app_id}/{conversation_id|seed}/<rest>
-
-    - conversation_id IS NULL → 路径为 `seed/...`（creator 跨会话共享）
-    - conversation_id IS NOT NULL → 路径为 `{conversation_id}/...`（私有）
+      Agent 使用 `/workspace/<rest>`，数据库保存为
+      `{conversation_id}/<rest>`。
 
     软版本：`version` 每次写入 +1，老行保留（agent 读 version 最大）。
     软删除：`is_deleted=True` + 30 天 GC；creator 面板默认隐藏已删除。
@@ -65,7 +63,7 @@ class WorkspaceFile(db.Model):
     id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
     account_id = Column(UUID, nullable=False)
     app_id = Column(UUID, nullable=False)
-    conversation_id = Column(UUID, nullable=True)  # NULL 表示 seed/
+    conversation_id = Column(UUID, nullable=False)
     path = Column(String(512), nullable=False)
     version = Column(Integer, nullable=False, server_default=text("1"))
     storage_backend = Column(
@@ -94,13 +92,21 @@ class WorkspaceFile(db.Model):
     )
 
     def to_dict(self, *, include_content: bool = False) -> dict:
+        conversation_prefix = f"{self.conversation_id}/"
+        relative_path = (
+            self.path[len(conversation_prefix):]
+            if self.path.startswith(conversation_prefix)
+            else self.path
+        )
+        virtual_path = f"/workspace/{relative_path}"
         data = {
             "id": str(self.id),
             "app_id": str(self.app_id),
             "conversation_id": (
                 str(self.conversation_id) if self.conversation_id else None
             ),
-            "path": self.path,
+            "path": virtual_path,
+            "virtual_path": virtual_path,
             "version": self.version,
             "storage_backend": self.storage_backend,
             "mime_type": self.mime_type,

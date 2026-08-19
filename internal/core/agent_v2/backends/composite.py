@@ -27,17 +27,17 @@ def build_composite_backend(
         sandbox_routes = {
             path: route
             for path, route in routes.items()
-            if not path.startswith(("/workspace/", "/artifacts/"))
+            if not path.startswith("/workspace/")
         }
         return CompositeBackend(
             default=sandbox,
             routes=sandbox_routes,
-            artifacts_root="/",
+            artifacts_root="/workspace",
         )
     return CompositeBackend(
         default=StateBackend(),
         routes=dict(routes),
-        artifacts_root="/",
+        artifacts_root="/workspace",
     )
 
 

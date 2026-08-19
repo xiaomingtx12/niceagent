@@ -74,10 +74,6 @@ class WorkspaceContextAssembler:
                     "/workspace/",
                     close_owner=True,
                 ),
-                "/artifacts/": WorkspaceRouteBackend(
-                    workspace,
-                    "/artifacts/",
-                ),
             },
         )
 
@@ -217,8 +213,6 @@ def build_filesystem_permissions(
                 "/.audit/**",
                 "/workspace/.system/**",
                 "/workspace/.audit/**",
-                "/artifacts/.system/**",
-                "/artifacts/.audit/**",
             ],
             mode="deny",
         ),
@@ -237,13 +231,12 @@ def build_filesystem_permissions(
                 "/subagent_skills/**",
                 "/memories/**",
                 "/workspace/**",
-                "/artifacts/**",
             ],
             mode="allow",
         ),
         FilesystemPermission(
             operations=["write"],
-            paths=["/workspace/**", "/artifacts/**"],
+            paths=["/workspace/**"],
             mode="allow",
         ),
         FilesystemPermission(

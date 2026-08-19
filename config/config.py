@@ -122,9 +122,9 @@ class Config:
             raise ValueError(
                 "AGENT_CHECKPOINT_BACKEND 必须是 postgres、memory 或 disabled"
             )
-        if self.AGENT_MEMORY_BACKEND not in supported:
+        if self.AGENT_MEMORY_BACKEND not in {"postgres", "memory"}:
             raise ValueError(
-                "AGENT_MEMORY_BACKEND 必须是 postgres、memory 或 disabled"
+                "AGENT_MEMORY_BACKEND 不允许关闭，必须是 postgres 或 memory"
             )
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"

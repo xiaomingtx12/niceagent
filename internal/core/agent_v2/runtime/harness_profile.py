@@ -26,7 +26,7 @@ def register_platform_harness_profile(
     *,
     allow_execute: bool = False,
 ) -> str:
-    """为具体模型关闭隐式通用 SubAgent。
+    """为具体模型启用 DeepAgents 默认通用 SubAgent。
 
     `execute` 不在 Harness Profile 中配置。DeepAgents 的
     FilesystemMiddleware 会在每次模型调用前根据解析出的 Backend 是否支持
@@ -37,12 +37,12 @@ def register_platform_harness_profile(
         params = model._get_ls_params()
     except (AttributeError, TypeError, NotImplementedError) as exc:
         raise HarnessProfileError(
-            "无法识别模型 provider，不能安全关闭 DeepAgents general-purpose"
+            "无法识别模型 provider，不能安全配置 DeepAgents general-purpose"
         ) from exc
     provider = params.get("ls_provider") if isinstance(params, Mapping) else None
     if not isinstance(provider, str) or not provider or ":" in provider:
         raise HarnessProfileError(
-            "无法识别模型 provider，不能安全关闭 DeepAgents general-purpose"
+            "无法识别模型 provider，不能安全配置 DeepAgents general-purpose"
         )
 
     identifier = getattr(model, "model_name", None) or getattr(model, "model", None)
@@ -59,7 +59,7 @@ def register_platform_harness_profile(
                 key,
                 HarnessProfile(
                     general_purpose_subagent=GeneralPurposeSubagentProfile(
-                        enabled=False
+                        enabled=True
                     )
                 ),
             )

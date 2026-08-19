@@ -18,8 +18,10 @@ from internal.core.agent_v2.events.serialization import serialize_agent_thought
 from internal.core.agent_v2.runtime.configuration import (
     build_agent_config_from_app_config,
 )
+from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
+from internal.exception import FailException
 from internal.model import App
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_runtime_service import AgentRuntimeService
@@ -107,6 +109,12 @@ class AgentInvocationService(BaseService):
                 )
             )
 
+        runtime_subagents, subagent_tools, subagent_models = (
+            self._prepare_subagents(
+                spec.app_config.get("subagents", []),
+                account_id=spec.account_id,
+            )
+        )
         runtime = self.agent_runtime_service.prepare(
             account_id=spec.account_id,
             app_id=app_id,
@@ -114,8 +122,10 @@ class AgentInvocationService(BaseService):
             created_by=spec.created_by,
             end_user_id=spec.end_user_id,
             skill_bindings=spec.app_config.get("skills", []),
-            subagents=spec.app_config.get("subagents", []),
+            subagents=runtime_subagents,
         )
+        runtime_app_config = dict(spec.app_config)
+        runtime_app_config["subagents"] = runtime_subagents
         try:
             agent = BaseAgent(
                 llm=llm,
@@ -126,6 +136,8 @@ class AgentInvocationService(BaseService):
                 skill_sources=runtime.skill_sources,
                 memory_sources=runtime.memory_sources,
                 subagent_skill_sources=runtime.subagent_skill_sources,
+                subagent_tools_by_name=subagent_tools,
+                subagent_models_by_name=subagent_models,
                 telemetry=runtime.telemetry,
                 runtime_context=runtime.runtime_context,
                 agent_config=build_agent_config_from_app_config(
@@ -135,7 +147,7 @@ class AgentInvocationService(BaseService):
                     app_description=(
                         spec.app.description if spec.app else spec.app_description
                     ),
-                    app_config=spec.app_config,
+                    app_config=runtime_app_config,
                     tools=tools,
                     opening_statement=spec.opening_statement,
                 ),
@@ -152,6 +164,105 @@ class AgentInvocationService(BaseService):
                 pass
             raise
         return agent, llm
+
+    def _prepare_subagents(
+        self,
+        subagents: Sequence[dict[str, Any]],
+        *,
+        account_id: UUID,
+    ) -> tuple[
+        list[dict[str, Any]],
+        dict[str, list[BaseTool]],
+        dict[str, BaseChatModel],
+    ]:
+        """把发布 Agent 引用解析为当前图可装配的原生同步子 Agent。"""
+        normalized = [dict(item) for item in subagents or []]
+        tool_overrides: dict[str, list[BaseTool]] = {}
+        model_overrides: dict[str, BaseChatModel] = {}
+
+        for item in normalized:
+            if item.get("source", "custom") != "published":
+                continue
+
+            target_id = UUID(str(item["published_app_id"]))
+            target_app = (
+                self.db.session.query(App)
+                .filter(
+                    App.id == target_id,
+                    App.account_id == account_id,
+                    App.status == AppStatus.PUBLISHED,
+                )
+                .one_or_none()
+            )
+            if target_app is None:
+                raise FailException(
+                    f"子 Agent 引用的发布应用 {target_id} 不存在或已取消发布"
+                )
+
+            target_config = self.app_config_service.get_app_config(target_app)
+            target_tools = self.app_config_service.get_langchain_tools_by_tools_config(
+                target_config.get("tools", []),
+                account_id=account_id,
+            )
+            if target_config.get("datasets"):
+                target_tools.append(
+                    self.retrieval_service.create_langchain_tool_from_search(
+                        flask_app=current_app._get_current_object(),
+                        dataset_ids=[
+                            dataset["id"] for dataset in target_config["datasets"]
+                        ],
+                        account_id=account_id,
+                        retrival_source=RetrievalSource.APP,
+                        source_app_id=target_id,
+                        **target_config.get("retrieval_config", {}),
+                    )
+                )
+            if target_config.get("workflows"):
+                target_tools.extend(
+                    self.app_config_service.get_langchain_tools_by_workflow_ids(
+                        [workflow["id"] for workflow in target_config["workflows"]],
+                        account_id=account_id,
+                    )
+                )
+
+            tool_names = [tool.name for tool in target_tools]
+            if len(tool_names) != len(set(tool_names)):
+                raise FailException(
+                    f"发布 Agent {target_app.name!r} 的工具名称存在冲突"
+                )
+            reserved_tools = {
+                "task",
+                "write_todos",
+                "ls",
+                "read_file",
+                "write_file",
+                "edit_file",
+                "glob",
+                "grep",
+                "execute",
+            }
+            if reserved_tools.intersection(tool_names):
+                raise FailException(
+                    f"发布 Agent {target_app.name!r} 的工具名称与 DeepAgents 内置工具冲突"
+                )
+
+            target_model = self.language_model_service.load_language_model(
+                target_config.get("model_config", {}),
+                account_id=account_id,
+            )
+            item["mode"] = "sync"
+            item["context_passing"] = "NONE"
+            item["system_prompt"] = (
+                f"你是已发布应用「{target_app.name}」的执行 Agent。"
+                "请严格遵循该应用的发布人设完成任务，并只返回本次任务的最终结果。\n\n"
+                f"{target_config.get('preset_prompt', '')}"
+            ).strip()
+            item["tools"] = tool_names
+            item["skills"] = []
+            tool_overrides[item["name"]] = target_tools
+            model_overrides[item["name"]] = target_model
+
+        return normalized, tool_overrides, model_overrides
 
     def stream(
         self,

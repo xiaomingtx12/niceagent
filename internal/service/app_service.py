@@ -249,6 +249,7 @@ class AppService(BaseService):
         ]
         remove_fields(app_dict, app_remove_fields)
         remove_fields(draft_app_config_dict, draft_app_config_remove_fields)
+        draft_app_config_dict["long_term_memory"] = {"enable": True}
 
         # 4.开启数据库自动提交上下文
         with self.db.auto_commit():
@@ -291,6 +292,49 @@ class AppService(BaseService):
 
         return apps, paginator
 
+    def get_published_subagent_candidates(
+        self,
+        app_id: UUID,
+        account: Account,
+        search_word: str = "",
+    ) -> list[dict[str, Any]]:
+        """返回当前账号下可被其他应用引用的已发布 Agent。"""
+        self.get_app(app_id, account)
+        query = (
+            self.db.session.query(App)
+            .filter(
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+                App.id != app_id,
+            )
+            .order_by(App.updated_at.desc(), App.name.asc())
+        )
+        if search_word.strip():
+            query = query.filter(App.name.ilike(f"%{search_word.strip()}%"))
+
+        candidates: list[dict[str, Any]] = []
+        for app in query.all():
+            published_config = app.app_config
+            if published_config is None:
+                continue
+            candidates.append(
+                {
+                    "id": str(app.id),
+                    "name": app.name,
+                    "icon": app.icon,
+                    "description": app.description,
+                    "status": app.status,
+                    "model": {
+                        "provider": published_config.model_config.get(
+                            "provider",
+                            "",
+                        ),
+                        "model": published_config.model_config.get("model", ""),
+                    },
+                }
+            )
+        return candidates
+
     def get_draft_app_config(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """根据传递的应用id，获取指定的应用草稿配置信息"""
         app = self.get_app(app_id, account)
@@ -310,6 +354,7 @@ class AppService(BaseService):
         draft_app_config = self.app_config_service.validate_draft_app_config(
             draft_app_config,
             account_id=account.id,
+            app_id=app.id,
         )
 
         # 3.获取当前应用的最新草稿信息
@@ -327,6 +372,11 @@ class AppService(BaseService):
         # 1.获取应用的信息以及草稿信息
         app = self.get_app(app_id, account)
         draft_app_config = self.get_draft_app_config(app_id, account)
+        self.app_config_service.validate_published_agent_references(
+            draft_app_config.get("subagents", []),
+            account_id=account.id,
+            app_id=app.id,
+        )
 
         # 2.创建应用运行配置（在这里暂时不删除历史的运行配置）
         app_config = self.create(
@@ -348,9 +398,7 @@ class AppService(BaseService):
             ],
             workflows=[workflow["id"] for workflow in draft_app_config["workflows"]],
             retrieval_config=draft_app_config["retrieval_config"],
-            # Kept only because the legacy database column is non-nullable.
-            # Runtime memory is owned by DeepAgents StoreBackend files.
-            long_term_memory={},
+            long_term_memory=draft_app_config["long_term_memory"],
             opening_statement=draft_app_config["opening_statement"],
             opening_questions=draft_app_config["opening_questions"],
             speech_to_text=draft_app_config["speech_to_text"],
@@ -488,6 +536,7 @@ class AppService(BaseService):
         draft_app_config_dict = self.app_config_service.validate_draft_app_config(
             draft_app_config_dict,
             account_id=account.id,
+            app_id=app.id,
         )
 
         # 5.更新草稿配置信息
@@ -631,7 +680,12 @@ class AppService(BaseService):
             "web_app": {
                 "token": app.token_with_default,
                 "status": app.status,
-            }
+            },
+            "subagent": {
+                "enabled": app.status == AppStatus.PUBLISHED,
+                "app_id": str(app.id),
+                "name": app.name,
+            },
         }
 
     def regenerate_web_app_token(self, app_id: UUID, account: Account) -> str:

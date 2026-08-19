@@ -26,6 +26,7 @@ from .web_app_handler import WebAppHandler
 from .wechat_handler import WechatHandler
 from .workflow_handler import WorkflowHandler
 from .workspace_file_handler import WorkspaceFileHandler
+from .memory_file_handler import MemoryFileHandler
 
 __all__ = [
     "AppHandler",
@@ -57,4 +58,5 @@ __all__ = [
     "ProviderApiKeyHandler",
     "SkillHandler",
     "WorkspaceFileHandler",
+    "MemoryFileHandler",
 ]

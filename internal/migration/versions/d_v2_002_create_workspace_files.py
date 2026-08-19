@@ -12,14 +12,13 @@ R1 改造（[deepagents-v2-plan-workspace-three-layer-paths] memory）：
 字段说明：
 - account_id / app_id / path / version → 软版本（每次写入 version+1，老行保留
   用于 audit / rollback；agent 读只取 version 最大）
-- conversation_id → NULL 表示 `seed/` 路径（creator 跨会话共享），
-  非 NULL 表示该 conversation 私有产物
+- conversation_id → 当前 conversation 作用域
 - storage_backend → 预留多后端（"db" 内联 / "cos" 远端），R1 只用 "db"
 - content_sha256 → 内容哈希（去重 + 完整性）
 - is_deleted → 软删除（30 天 GC；本迁移不删老行，creator 可见历史）
 
 三层路径约定（详见 plan）：
-  /workspace/{account_id}/{app_id}/{seed|cnv_id}/...
+  /workspace/{conversation_id}/...
   ↑ FilesystemMiddleware 路径白名单 + storage_backend.read/write 校验
 
 不建索引的情况：
@@ -45,8 +44,8 @@ def upgrade():
         sa.Column('id', sa.UUID(), nullable=False, server_default=sa.text('uuid_generate_v4()'), comment='主键ID'),
         sa.Column('account_id', sa.UUID(), nullable=False, comment='账号ID（多租户隔离）'),
         sa.Column('app_id', sa.UUID(), nullable=False, comment='应用ID'),
-        sa.Column('conversation_id', sa.UUID(), nullable=True, comment='会话ID（NULL 表示 seed/ 跨会话共享）'),
-        sa.Column('path', sa.String(length=512), nullable=False, comment="相对路径，如 'seed/readme.md' 或 '{cnv_id}/report.xlsx'"),
+        sa.Column('conversation_id', sa.UUID(), nullable=False, comment='会话ID'),
+        sa.Column('path', sa.String(length=512), nullable=False, comment="物理路径，如 '{cnv_id}/report.xlsx'"),
         sa.Column('version', sa.Integer(), nullable=False, server_default=sa.text('1'), comment='软版本号（写入时+1）'),
         sa.Column('storage_backend', sa.String(length=32), nullable=False, server_default=sa.text("'db'"), comment="存储后端：'db' 内联 / 'cos' 远端"),
         sa.Column('mime_type', sa.String(length=128), nullable=True, server_default=sa.text("'text/plain'"), comment='MIME 类型'),

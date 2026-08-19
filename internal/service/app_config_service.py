@@ -35,7 +35,7 @@ from .base_service import BaseService
 from ..core.language_model import LanguageModelManager
 from ..core.language_model.entities.model_entity import ModelEntity, ModelParameterType
 from ..core.workflow.entities.workflow_entity import WorkflowConfig
-from ..entity.app_entity import DEFAULT_APP_CONFIG
+from ..entity.app_entity import AppStatus, DEFAULT_APP_CONFIG
 from ..entity.workflow_entity import WorkflowStatus
 from .skill_service import SkillService
 from .language_model_service import LanguageModelService
@@ -58,6 +58,7 @@ class AppConfigService(BaseService):
         self,
         draft_app_config: dict[str, Any],
         account_id: UUID,
+        app_id: UUID | None = None,
     ) -> dict[str, Any]:
         """校验并标准化可保存的应用草稿配置。"""
         acceptable_fields = {
@@ -70,6 +71,7 @@ class AppConfigService(BaseService):
             "workflows",
             "datasets",
             "retrieval_config",
+            "long_term_memory",
             "opening_statement",
             "opening_questions",
             "speech_to_text",
@@ -107,6 +109,14 @@ class AppConfigService(BaseService):
             try:
                 normalized["subagents"] = validate_platform_subagents(
                     normalized["subagents"]
+                )
+            except SubAgentSpecError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+            try:
+                self.validate_published_agent_references(
+                    normalized["subagents"],
+                    account_id=account_id,
+                    app_id=app_id,
                 )
             except SubAgentSpecError as exc:
                 raise ValidateErrorException(str(exc)) from exc
@@ -156,10 +166,80 @@ class AppConfigService(BaseService):
         if "retrieval_config" in normalized:
             self._validate_retrieval_config(normalized["retrieval_config"])
 
+        normalized["long_term_memory"] = self._normalize_long_term_memory(
+            normalized.get("long_term_memory")
+        )
+
         self._validate_presentation_config(normalized)
         if "review_config" in normalized:
             self._validate_review_config(normalized["review_config"])
         return normalized
+
+    def validate_published_agent_references(
+        self,
+        subagents: list[dict[str, Any]] | None,
+        *,
+        account_id: UUID,
+        app_id: UUID | None = None,
+    ) -> None:
+        """校验发布 Agent 引用的租户边界、发布状态和引用环。"""
+        for subagent in subagents or []:
+            if subagent.get("source", "custom") != "published":
+                continue
+            target_id = UUID(str(subagent["published_app_id"]))
+            self._validate_published_agent_graph(
+                target_id,
+                account_id=account_id,
+                root_app_id=app_id,
+                chain=(),
+            )
+
+    def _validate_published_agent_graph(
+        self,
+        app_id: UUID,
+        *,
+        account_id: UUID,
+        root_app_id: UUID | None,
+        chain: tuple[UUID, ...],
+    ) -> None:
+        """递归检查已发布 Agent 的子 Agent 图，阻断自引用和循环引用。"""
+        if root_app_id is not None and app_id == root_app_id:
+            raise SubAgentSpecError("发布 Agent 不能引用当前应用自身")
+        if app_id in chain:
+            raise SubAgentSpecError("发布 Agent 子 Agent 引用存在循环")
+        if len(chain) >= 32:
+            raise SubAgentSpecError("发布 Agent 子 Agent 嵌套层级不能超过 32")
+
+        target = (
+            self.db.session.query(App)
+            .filter(
+                App.id == app_id,
+                App.account_id == account_id,
+                App.status == AppStatus.PUBLISHED,
+            )
+            .one_or_none()
+        )
+        if target is None or target.app_config is None:
+            raise SubAgentSpecError(
+                f"发布 Agent {app_id} 不存在、未发布或当前账号不可见"
+            )
+
+        next_chain = (*chain, app_id)
+        for nested in target.app_config.subagents or []:
+            if nested.get("source", "custom") != "published":
+                continue
+            try:
+                nested_id = UUID(str(nested["published_app_id"]))
+            except (TypeError, ValueError, AttributeError) as exc:
+                raise SubAgentSpecError(
+                    f"发布 Agent {app_id} 的子 Agent 引用格式错误"
+                ) from exc
+            self._validate_published_agent_graph(
+                nested_id,
+                account_id=account_id,
+                root_app_id=root_app_id,
+                chain=next_chain,
+            )
 
     def _validate_strict_model_config(
         self,
@@ -227,6 +307,19 @@ class AppConfigService(BaseService):
             "parameters": normalized_parameters,
             "features": [feature.value for feature in model_entity.features],
         }
+
+    @staticmethod
+    def _normalize_long_term_memory(value: Any) -> dict[str, bool]:
+        """长期记忆是 Agent 基础能力，历史关闭值只允许被修正为开启。"""
+        if value is not None and not isinstance(value, dict):
+            raise ValidateErrorException("长期记忆配置格式错误")
+        if (
+            isinstance(value, dict)
+            and "enable" in value
+            and not isinstance(value["enable"], bool)
+        ):
+            raise ValidateErrorException("长期记忆配置格式错误")
+        return {"enable": True}
 
     def _validate_tool_bindings(
         self,
@@ -465,6 +558,15 @@ class AppConfigService(BaseService):
         # 1.提取应用的草稿配置
         draft_app_config = app.draft_app_config
 
+        normalized_long_term_memory = self._normalize_long_term_memory(
+            draft_app_config.long_term_memory
+        )
+        if draft_app_config.long_term_memory != normalized_long_term_memory:
+            self.update(
+                draft_app_config,
+                long_term_memory=normalized_long_term_memory,
+            )
+
         # 2.校验model_config信息，如果使用了不存在的提供者或者模型，则使用默认值(宽松校验)
         validate_model_config = self._process_and_validate_model_config(
             draft_app_config.model_config,
@@ -514,6 +616,15 @@ class AppConfigService(BaseService):
         """根据传递的应用获取该应用的运行配置"""
         # 1.提取应用的草稿配置
         app_config = app.app_config
+
+        normalized_long_term_memory = self._normalize_long_term_memory(
+            app_config.long_term_memory
+        )
+        if app_config.long_term_memory != normalized_long_term_memory:
+            self.update(
+                app_config,
+                long_term_memory=normalized_long_term_memory,
+            )
 
         # 2.校验model_config信息，如果运行时配置里的model_config发生变化则进行更新
         validate_model_config = self._process_and_validate_model_config(
@@ -694,6 +805,9 @@ class AppConfigService(BaseService):
             "workflows": workflows,
             "datasets": datasets,
             "retrieval_config": app_config.retrieval_config,
+            "long_term_memory": cls._normalize_long_term_memory(
+                getattr(app_config, "long_term_memory", None)
+            ),
             "opening_statement": app_config.opening_statement,
             "opening_questions": app_config.opening_questions,
             "speech_to_text": app_config.speech_to_text,

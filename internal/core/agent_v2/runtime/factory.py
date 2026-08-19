@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Sequence
 
 from deepagents import create_deep_agent
@@ -31,6 +32,7 @@ from internal.core.agent_v2.runtime.harness_profile import (
     register_platform_harness_profile,
 )
 from internal.core.agent_v2.runtime.subagents import (
+    build_async_subagent_specs,
     build_subagent_specs,
 )
 
@@ -51,6 +53,8 @@ def build_deep_agent(
     memory_sources: Sequence[str] = (),
     subagent_skill_sources: dict[str, Sequence[str]] | None = None,
     subagents: list[dict[str, Any]] | None = None,
+    subagent_tools_by_name: Mapping[str, Sequence[BaseTool]] | None = None,
+    subagent_models_by_name: Mapping[str, BaseChatModel | str] | None = None,
 ) -> Any:
     """装配 MyDify 运行时依赖并构造 DeepAgents 图。"""
     middleware = [
@@ -76,17 +80,21 @@ def build_deep_agent(
         ),
     ]
 
-    # 禁止 DeepAgents 隐式添加继承父工具的通用工作器。
     # execute 由原生 FilesystemMiddleware 按本次 Backend 动态过滤。
     register_platform_harness_profile(llm)
 
     # 持久化记录仅作业务适配，其余运行时能力由 DeepAgents 负责。
-    subagent_specs = build_subagent_specs(
-        subagents,
-        available_tools=tools,
-        skill_sources_by_agent=subagent_skill_sources,
-        default_model=llm,
-    )
+    subagent_specs = [
+        *build_subagent_specs(
+            subagents,
+            available_tools=tools,
+            skill_sources_by_agent=subagent_skill_sources,
+            default_model=llm,
+            subagent_tools_by_name=subagent_tools_by_name,
+            subagent_models_by_name=subagent_models_by_name,
+        ),
+        *build_async_subagent_specs(subagents),
+    ]
 
     return create_deep_agent(
         model=llm,

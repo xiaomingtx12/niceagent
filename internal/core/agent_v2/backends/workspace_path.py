@@ -44,65 +44,30 @@ def validate_workspace_path(
     account_id: UUID | None = None,
     app_id: UUID | None = None,
 ) -> str:
-    """把 Agent 路径映射为会话存储路径。
-
-    新入口使用 ``/workspace/<file>`` 这类短虚拟路径；旧的管理入口使用
-    ``/workspace/<account>/<app>/<scope>/<file>``。两种形式都归一化到同一
-    个数据库路径，避免目录重构改变已有 Workspace 数据的可见性。
-    """
+    """把唯一的 Agent 虚拟路径映射为会话存储路径。"""
     normalized = normalize_workspace_path(path)
-    if normalized == "/":
-        raise WorkspacePathError("workspace root is a directory")
-
-    if normalized.startswith("/workspace/"):
-        relative = normalized.removeprefix("/workspace/")
-        physical_prefix = (
-            f"/workspace/{account_id}/{app_id}/"
-            if account_id is not None and app_id is not None
-            else None
-        )
-        if physical_prefix and normalized == physical_prefix.rstrip("/"):
-            raise WorkspacePathError(
-                f"path '{normalized}' missing scope segment"
-            )
-        if physical_prefix and normalized.startswith(physical_prefix):
-            rest = normalized.removeprefix(physical_prefix)
-        else:
-            segments_after_root = relative.split("/")
-            if len(segments_after_root) >= 2:
-                try:
-                    UUID(segments_after_root[0])
-                    UUID(segments_after_root[1])
-                except ValueError:
-                    pass
-                else:
-                    if physical_prefix:
-                        raise WorkspacePathError(
-                            f"path '{normalized}' outside workspace scope "
-                            f"'{physical_prefix.rstrip('/')}'"
-                        )
-                    raise WorkspacePathError(
-                        "tenant-scoped physical workspace paths are not supported"
-                    )
-            rest = f"{conversation_id}/{relative}"
-    elif normalized == "/workspace":
-        rest = str(conversation_id)
-    elif normalized.startswith("/seed/"):
-        rest = normalized.removeprefix("/")
-    elif normalized == "/seed":
-        rest = "seed"
-    elif normalized.startswith("/artifacts/"):
-        rest = (
-            f"{conversation_id}/artifacts/"
-            f"{normalized.removeprefix('/artifacts/')}"
-        )
-    elif normalized == "/artifacts":
-        rest = f"{conversation_id}/artifacts"
-    else:
+    if normalized == "/workspace":
+        return str(conversation_id)
+    if not normalized.startswith("/workspace/"):
         raise WorkspacePathError(
-            f"path '{normalized}' is not in a writable namespace"
+            f"path '{normalized}' is not in the /workspace/ namespace"
         )
 
+    relative = normalized.removeprefix("/workspace/")
+    if not relative:
+        raise WorkspacePathError("workspace root is a directory")
+    relative_segments = relative.split("/")
+    if len(relative_segments) >= 2:
+        try:
+            UUID(relative_segments[0])
+            UUID(relative_segments[1])
+        except ValueError:
+            pass
+        else:
+            raise WorkspacePathError(
+                "physical tenant-scoped workspace paths are not supported"
+            )
+    rest = f"{conversation_id}/{relative}"
     if not rest:
         raise WorkspacePathError(f"path '{normalized}' has no storage scope")
     segments = rest.split("/")
@@ -116,7 +81,7 @@ def validate_workspace_path(
             f"path '{normalized}' enters a reserved namespace"
         )
 
-    if segments[0] not in {"seed", str(conversation_id)}:
+    if segments[0] != str(conversation_id):
         raise WorkspacePathError("workspace path escaped the conversation scope")
     return rest
 
@@ -126,8 +91,6 @@ def scope_to_conversation_id(
 ) -> Optional[UUID]:
     """把存储路径作用域映射到所属会话。"""
     first = rest.split("/", 1)[0]
-    if first == "seed":
-        return None
     if first == str(conversation_id):
         return conversation_id
     return None
@@ -155,14 +118,12 @@ class WorkspacePathPolicy:
         conversation_prefix = f"{self.conversation_id}/"
         if rest.startswith(conversation_prefix):
             visible = rest[len(conversation_prefix):]
-            if visible.startswith("artifacts/"):
-                return f"/{visible}"
             return f"/workspace/{visible}"
-        return f"/{rest}"
+        raise WorkspacePathError("workspace path escaped the conversation scope")
 
     def visible_prefixes(self) -> tuple[str]:
         """返回当前会话存储前缀。"""
-        return ("seed", str(self.conversation_id))
+        return (str(self.conversation_id),)
 
     def is_visible_storage_path(self, rest: str) -> bool:
         """检查存储路径是否可安全暴露。"""

@@ -31,7 +31,9 @@ class MemoryContextAssembler:
         """构造租户隔离的 StoreBackend，内容由 Agent 文件工具维护。"""
         store = self._store_provider() if self._store_provider else None
         if store is None:
-            return MemoryProjection()
+            raise RuntimeError(
+                "长期记忆 Store 未配置，Agent 运行时拒绝在无记忆模式下启动"
+            )
         memory_backend: BackendProtocol = StoreBackend(
             namespace=memory_namespace_from_runtime,
         )

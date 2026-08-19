@@ -107,6 +107,17 @@ class AppHandler(object):
 
     @rate_limit(config_key="lightweight")
     @login_required
+    def get_published_subagent_candidates(self, app_id: UUID):
+        """获取当前应用可引用的同账号已发布 Agent。"""
+        candidates = self.app_service.get_published_subagent_candidates(
+            app_id,
+            current_user,
+            request.args.get("search_word", ""),
+        )
+        return success_json({"list": candidates})
+
+    @rate_limit(config_key="lightweight")
+    @login_required
     def get_draft_app_config(self, app_id: UUID):
         """根据传递的应用id获取应用的最新草稿配置"""
         draft_config = self.app_service.get_draft_app_config(app_id, current_user)

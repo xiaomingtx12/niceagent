@@ -72,8 +72,8 @@ class StoreProvider:
                     self._close_registered = True
             return self._store  # type: ignore[return-value]
 
-    def get_configured_store(self, mode: str | None = None) -> BaseStore | None:
-        """按配置选择 PostgreSQL、内存或关闭 Store。"""
+    def get_configured_store(self, mode: str | None = None) -> BaseStore:
+        """按配置选择 PostgreSQL 或内存 Store。"""
         selected = (
             mode or self.config_factory().AGENT_MEMORY_BACKEND
         ).strip().lower()
@@ -85,9 +85,11 @@ class StoreProvider:
                     self._memory_store = InMemoryStore()
                 return self._memory_store
         if selected in {"disabled", "false", "off", "none"}:
-            return None
+            raise ValueError(
+                "AGENT_MEMORY_BACKEND 不允许关闭，必须是 postgres 或 memory"
+            )
         raise ValueError(
-            "AGENT_MEMORY_BACKEND 必须是 postgres、memory 或 disabled"
+            "AGENT_MEMORY_BACKEND 必须是 postgres 或 memory"
         )
 
     def close_postgres_store(self) -> None:
@@ -103,7 +105,7 @@ class StoreProvider:
 _provider = StoreProvider()
 
 
-def get_configured_store(mode: str | None = None) -> BaseStore | None:
+def get_configured_store(mode: str | None = None) -> BaseStore:
     """使用默认配置获取长期文件 Store。"""
     return _provider.get_configured_store(mode)
 

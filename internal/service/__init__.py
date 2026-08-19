@@ -39,6 +39,7 @@ from .vector_database_service import VectorDatabaseService
 from .web_app_service import WebAppService
 from .wechat_service import WechatService
 from .workspace_file_service import WorkspaceFileService
+from .memory_file_service import MemoryFileService
 from .workflow_service import WorkflowService
 
 __all__ = [
@@ -85,4 +86,5 @@ __all__ = [
     "PlatformService",
     "ProviderApiKeyService",
     "WorkspaceFileService",
+    "MemoryFileService",
 ]

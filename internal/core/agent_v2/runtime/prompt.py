@@ -12,6 +12,14 @@ BASE_AGENT_PROMPT = """你是 {app_name}。
 {preset_prompt}
 </业务指令>
 
+<文件路径约束>
+文件工具使用平台虚拟路径，不要使用宿主机路径或其他未授权路径：
+- 所有工作文件和最终交付文件统一写入 /workspace/，例如 /workspace/周报.md。
+- 长期记忆只写入当前用户隔离的 /memories/，例如 /memories/AGENTS.md。
+- 不要写入 /home/user/、/root/、/tmp/ 或文件系统根目录。
+如果用户要求在工作区创建、导出或交付文件，统一使用 /workspace/。
+</文件路径约束>
+
 请严格遵循业务指令，按需使用已授权工具和 Skills。不要伪造工具结果；需要委派时选择最合适的子 Agent。"""
 
 

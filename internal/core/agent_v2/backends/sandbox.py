@@ -85,7 +85,7 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
     def _sync_workspace_from_sandbox(self) -> None:
         """把 Agent 工作目录中的最终文件写回版本化 Workspace。"""
         paths: list[str] = []
-        for prefix in ("/workspace", "/artifacts"):
+        for prefix in ("/workspace",):
             result = self.glob("**/*", path=prefix)
             if result.error:
                 raise SandboxProviderError(result.error)
@@ -208,7 +208,7 @@ def _sync_workspace_into_sandbox(
 ) -> None:
     """把数据库中已有的工作文件放入本次 Sandbox。"""
     paths: list[str] = []
-    for prefix in ("/workspace", "/artifacts"):
+    for prefix in ("/workspace",):
         result = workspace.ls(prefix)
         if result.error:
             raise SandboxProviderError(result.error)

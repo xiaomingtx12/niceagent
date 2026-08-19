@@ -1,3 +1,4 @@
+from collections.abc import Mapping, Sequence
 from threading import Lock, Thread
 from typing import Optional, Any, Iterator
 from uuid import uuid4
@@ -59,6 +60,12 @@ class BaseAgent(Serializable, Runnable):
     _skill_sources: list[str] = PrivateAttr(default_factory=list)
     _memory_sources: list[str] = PrivateAttr(default_factory=list)
     _subagent_skill_sources: dict[str, list[str]] = PrivateAttr(default_factory=dict)
+    _subagent_tools_by_name: dict[str, list[BaseTool]] = PrivateAttr(
+        default_factory=dict
+    )
+    _subagent_models_by_name: dict[str, BaseChatModel | str] = PrivateAttr(
+        default_factory=dict
+    )
     _permissions: list[FilesystemPermission] = PrivateAttr(default_factory=list)
     _telemetry: AgentTelemetry = PrivateAttr(default=NOOP_AGENT_TELEMETRY)
     _runtime_context: AgentRunContext = PrivateAttr()
@@ -86,6 +93,8 @@ class BaseAgent(Serializable, Runnable):
         skill_sources: list[str] | None = None,
         memory_sources: list[str] | None = None,
         subagent_skill_sources: dict[str, list[str]] | None = None,
+        subagent_tools_by_name: Mapping[str, Sequence[BaseTool]] | None = None,
+        subagent_models_by_name: Mapping[str, BaseChatModel | str] | None = None,
         telemetry: AgentTelemetry | None = None,
         *args,
         **kwargs,
@@ -99,6 +108,11 @@ class BaseAgent(Serializable, Runnable):
         self._skill_sources = list(skill_sources or [])
         self._memory_sources = list(memory_sources or [])
         self._subagent_skill_sources = dict(subagent_skill_sources or {})
+        self._subagent_tools_by_name = {
+            name: list(tools)
+            for name, tools in (subagent_tools_by_name or {}).items()
+        }
+        self._subagent_models_by_name = dict(subagent_models_by_name or {})
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._runtime_context = runtime_context
         try:
@@ -131,6 +145,8 @@ class BaseAgent(Serializable, Runnable):
             skill_sources=self._skill_sources,
             memory_sources=self._memory_sources,
             subagent_skill_sources=self._subagent_skill_sources,
+            subagent_tools_by_name=self._subagent_tools_by_name,
+            subagent_models_by_name=self._subagent_models_by_name,
             subagents=self.agent_config.subagents,
         )
 

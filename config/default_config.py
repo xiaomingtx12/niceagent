@@ -9,7 +9,7 @@ DEFAULT_CONFIG = {
     "SQLALCHEMY_ECHO": "True",
     # DeepAgents runtime
     "AGENT_CHECKPOINT_BACKEND": "postgres",
-    "AGENT_MEMORY_BACKEND": "disabled",
+    "AGENT_MEMORY_BACKEND": "postgres",
     "AGENT_SANDBOX_PROVIDER": "disabled",
     "AGENT_SANDBOX_SNAPSHOT_ID": "",
     "AGENT_SANDBOX_IDLE_TTL_SECONDS": 600,

@@ -10,6 +10,21 @@ from deepagents.backends.protocol import BackendProtocol
 from deepagents.middleware.filesystem import FilesystemPermission
 
 
+def build_memory_namespace(
+    *,
+    account_id: UUID,
+    app_id: UUID,
+    end_user_id: UUID | None,
+) -> tuple[str, ...]:
+    """Return the shared namespace used by runtime and management APIs."""
+    return (
+        "mydify",
+        str(account_id),
+        str(app_id),
+        str(end_user_id or "account"),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class ThreadIdentity:
     """一个 Agent 线程的服务端身份边界。"""
@@ -69,11 +84,10 @@ class AgentRunContext:
     @property
     def memory_namespace(self) -> tuple[str, ...]:
         """返回 native Store 使用的租户和用户命名空间。"""
-        return (
-            "mydify",
-            str(self.account_id),
-            str(self.app_id),
-            str(self.end_user_id or "account"),
+        return build_memory_namespace(
+            account_id=self.account_id,
+            app_id=self.app_id,
+            end_user_id=self.end_user_id,
         )
 
     @property
@@ -108,4 +122,5 @@ __all__ = [
     "AgentRunContext",
     "AgentRuntimeResources",
     "ThreadIdentity",
+    "build_memory_namespace",
 ]
