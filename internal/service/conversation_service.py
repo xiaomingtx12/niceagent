@@ -224,6 +224,9 @@ class ConversationService(BaseService):
                 QueueEvent.TODO_UPDATE,
                 QueueEvent.SUB_AGENT_DELEGATE,
                 QueueEvent.SUB_AGENT_END,
+                QueueEvent.TIMEOUT,
+                QueueEvent.STOP,
+                QueueEvent.ERROR,
             ]:
                 # 5.更新位置及总耗时
                 position += 1

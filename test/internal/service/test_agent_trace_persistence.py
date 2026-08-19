@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from internal.core.agent_v2.entities.queue_entity import (
+from internal.core.agent_v2.agents.models import (
     AgentThought,
     AgentTodo,
     AgentType,
@@ -65,6 +65,12 @@ def test_save_agent_thoughts_persists_delegation_and_todo_events(monkeypatch):
             event=QueueEvent.TODO_UPDATE,
             todos=[AgentTodo(content="核对证据", status="in_progress")],
         ),
+        AgentThought(
+            id=uuid4(),
+            task_id=request_task_id,
+            event=QueueEvent.ERROR,
+            observation="工具执行失败",
+        ),
     ]
 
     service.save_agent_thoughts(
@@ -80,6 +86,7 @@ def test_save_agent_thoughts_persists_delegation_and_todo_events(monkeypatch):
         QueueEvent.SUB_AGENT_DELEGATE,
         QueueEvent.SUB_AGENT_END,
         QueueEvent.TODO_UPDATE,
+        QueueEvent.ERROR,
     ]
     assert created_rows[0]["delegation_id"] == delegation_id
     assert created_rows[1]["agent_type"] == "subagent"
@@ -87,6 +94,6 @@ def test_save_agent_thoughts_persists_delegation_and_todo_events(monkeypatch):
     assert created_rows[2]["todos"] == [
         {"content": "核对证据", "status": "in_progress"}
     ]
-    assert all(row["task_id"] is None for row in created_rows)
+    assert created_rows[3]["observation"] == "工具执行失败"
+    assert all(row["task_id"] == request_task_id for row in created_rows)
     assert all(row["invoke_from"] == InvokeFrom.WEB_APP for row in created_rows)
-

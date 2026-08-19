@@ -140,16 +140,17 @@ def _tool_start_thought(
 ) -> AgentThought:
     """构造普通动作或 SubAgent 委派事件。"""
     is_subagent = tool_call.name == SUBAGENT_TOOL_NAME
+    display_name = (
+        _subagent_name(tool_call)
+        if is_subagent
+        else tool_call.name or "工具"
+    )
     return AgentThought(
         id=uuid4(),
         task_id=session.task_id,
         event=(QueueEvent.SUB_AGENT_DELEGATE if is_subagent else QueueEvent.AGENT_ACTION),
-        thought=content,
-        tool=(
-            _subagent_name(tool_call)
-            if is_subagent
-            else tool_call.name
-        ),
+        thought=content or f"正在调用 {display_name}",
+        tool=display_name,
         tool_input=tool_call.arguments,
         agent_id=MAIN_AGENT_ID,
         agent_type=AgentType.MAIN,
@@ -167,7 +168,7 @@ def _tool_end_thought(
 ) -> AgentThought:
     """构造普通结果或 SubAgent 完成事件。"""
     is_subagent = tool_call.name == SUBAGENT_TOOL_NAME
-    subagent_id = _subagent_name(tool_call)
+    subagent_id = _subagent_name(tool_call) if is_subagent else None
     return AgentThought(
         id=uuid4(),
         task_id=session.task_id,
@@ -184,7 +185,9 @@ def _tool_end_thought(
 
 def _subagent_name(tool_call: ToolCallRecord) -> str:
     """读取当前 DeepAgents task 工具的真实参数名。"""
-    return str(tool.arguments.get(SUBAGENT_TYPE_ARGUMENT, SUBAGENT_TOOL_NAME))
+    return str(
+        tool_call.arguments.get(SUBAGENT_TYPE_ARGUMENT, SUBAGENT_TOOL_NAME)
+    )
 
 
 def _todo_update_thought(

@@ -7,7 +7,7 @@ from langchain.agents.middleware.types import ModelResponse
 from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.types import Command
 
-from internal.core.agent_v2.entities.queue_entity import AgentType, QueueEvent
+from internal.core.agent_v2.agents.models import AgentType, QueueEvent
 from internal.core.agent_v2.middleware.event_translation_middleware import (
     EventTranslationMiddleware,
     bind_event_translation,
@@ -202,6 +202,25 @@ def test_ordinary_tool_keeps_agent_action_event():
     ]
     assert events[1].tool == "search"
     assert events[1].tool_input == {"query": "deepagents"}
+    assert events[1].observation == "search result"
+    assert events[0].thought == "正在调用 search"
+
+
+def test_error_event_is_terminal_and_keeps_the_observation_for_streaming():
+    """运行错误可序列化为前端可展示的终止事件。"""
+    task_id = uuid4()
+    events = []
+
+    with bind_event_translation(
+        task_id=task_id,
+        publisher=lambda _task_id, thought: events.append(thought),
+    ) as session:
+        session.publish_error("工具执行失败")
+        session.finish()
+
+    assert [event.event for event in events] == [QueueEvent.ERROR]
+    assert events[0].observation == "工具执行失败"
+    assert serialize_agent_thought(events[0])["observation"] == "工具执行失败"
 
 
 def test_text_response_emits_agent_message_with_answer_and_usage():
