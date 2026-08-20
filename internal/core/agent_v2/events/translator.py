@@ -56,6 +56,37 @@ def translate_ai_message(
     return thoughts
 
 
+def translate_model_chunk(
+    session: EventTranslationSession,
+    message: AIMessage,
+    metadata: Mapping[str, Any] | None = None,
+) -> AgentThought | None:
+    """把 messages 流中的文本增量翻译为一个业务事件。"""
+    if not isinstance(message, AIMessage):
+        return None
+    content = message_text(message.content)
+    usage = getattr(message, "usage_metadata", None)
+    if not content and (
+        getattr(message, "tool_calls", None)
+        or getattr(message, "tool_call_chunks", None)
+        or not usage
+    ):
+        return None
+
+    stream_key = _stream_key(message, metadata)
+    if content:
+        session.mark_model_message_streamed(message, stream_key)
+    return AgentThought(
+        id=session.model_event_id(message, stream_key),
+        task_id=session.task_id,
+        event=QueueEvent.AGENT_MESSAGE,
+        answer=content,
+        message_token_count=_usage_value(message, "input_tokens"),
+        answer_token_count=_usage_value(message, "output_tokens"),
+        total_token_count=_usage_value(message, "total_tokens"),
+    )
+
+
 def translate_tool_result(
     session: EventTranslationSession,
     result: ToolMessage | Command[Any],
@@ -71,10 +102,45 @@ def translate_tool_result(
         tool_call = session.resolve_tool_call(str(message.tool_call_id), fallback)
         if tool_call.name == TODO_TOOL_NAME:
             todos = command_todos(result)
-            if todos is not None:
+            if todos is not None and session.remember_todo_call(tool_call.call_id):
                 thoughts.append(_todo_update_thought(session, tool_call, todos))
             continue
         thoughts.append(_tool_end_thought(session, message, tool_call))
+    return thoughts
+
+
+def translate_graph_update(
+    session: EventTranslationSession,
+    update: Mapping[str, Any],
+) -> list[AgentThought]:
+    """从 0.6 updates 流补取原生 Todo 状态。"""
+    thoughts: list[AgentThought] = []
+    for value in update.values():
+        if not isinstance(value, Mapping):
+            continue
+        raw_todos = value.get("todos")
+        if not isinstance(raw_todos, list):
+            continue
+        todos = [AgentTodo.model_validate(todo) for todo in raw_todos]
+        messages = value.get("messages", [])
+        if not isinstance(messages, list):
+            messages = [messages]
+        tool_call_id = next(
+            (
+                str(message.tool_call_id)
+                for message in messages
+                if isinstance(message, ToolMessage) and message.tool_call_id
+            ),
+            "",
+        )
+        if not session.remember_todo_call(tool_call_id):
+            continue
+        tool_call = ToolCallRecord(
+            call_id=tool_call_id,
+            name=TODO_TOOL_NAME,
+            arguments={"todos": [todo.model_dump(mode="json") for todo in todos]},
+        )
+        thoughts.append(_todo_update_thought(session, tool_call, todos))
     return thoughts
 
 
@@ -122,7 +188,7 @@ def _message_thought(
 ) -> AgentThought:
     """构造主 Agent 响应事件。"""
     return AgentThought(
-        id=uuid4(),
+        id=session.model_event_id(message),
         task_id=session.task_id,
         event=QueueEvent.AGENT_MESSAGE,
         answer=content,
@@ -215,11 +281,30 @@ def _usage_value(message: AIMessage, key: str) -> int:
     return int(getattr(usage, key, 0) or 0)
 
 
+def _stream_key(
+    message: AIMessage,
+    metadata: Mapping[str, Any] | None,
+) -> str | None:
+    """读取无消息 ID 时用于区分模型轮次的图元数据。"""
+    if getattr(message, "id", None):
+        return None
+    if not metadata:
+        return None
+    return str(
+        metadata.get("checkpoint_ns")
+        or metadata.get("langgraph_checkpoint_ns")
+        or metadata.get("langgraph_step")
+        or ""
+    ) or None
+
+
 __all__ = [
     "command_todos",
     "message_text",
     "response_messages",
+    "translate_graph_update",
     "tool_messages",
     "translate_ai_message",
+    "translate_model_chunk",
     "translate_tool_result",
 ]

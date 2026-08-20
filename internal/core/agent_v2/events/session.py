@@ -8,7 +8,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Any, TypeAlias
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from internal.core.agent_v2.agents.models import AgentThought, QueueEvent
 from internal.core.agent_v2.runtime.telemetry import (
@@ -48,8 +48,14 @@ class EventTranslationSession:
     telemetry: AgentTelemetry = NOOP_AGENT_TELEMETRY
     cancelled: CancellationProbe = lambda: False
     tool_calls: dict[str, ToolCallRecord] = field(default_factory=dict)
-    pending_model_events: list[AgentThought] = field(default_factory=list)
+    pending_model_events: list[tuple[Any, AgentThought]] = field(
+        default_factory=list
+    )
     observed_model_messages: set[tuple[str, str]] = field(default_factory=set)
+    model_event_ids: dict[tuple[str, str], UUID] = field(default_factory=dict)
+    streamed_model_messages: set[tuple[str, str]] = field(default_factory=set)
+    todo_call_ids: set[str] = field(default_factory=set)
+    stream_model_messages: bool = False
     terminal_published: bool = False
     _last_event_at: float = field(default_factory=perf_counter)
 
@@ -67,20 +73,76 @@ class EventTranslationSession:
         return self.tool_calls.get(call_id, fallback)
 
     @staticmethod
-    def _message_key(message: Any) -> tuple[str, str]:
+    def _message_key(
+        message: Any,
+        stream_key: str | None = None,
+    ) -> tuple[str, str]:
         """生成一次运行内稳定的消息标识。"""
-        return (
-            str(getattr(message, "id", "") or ""),
-            repr(getattr(message, "content", "")),
-        )
+        message_id = str(getattr(message, "id", "") or "")
+        if message_id:
+            return ("id", message_id)
+        if stream_key:
+            return ("stream", stream_key)
+        return ("content", repr(getattr(message, "content", "")))
 
-    def remember_model_message(self, message: Any) -> None:
+    def remember_model_message(
+        self,
+        message: Any,
+        stream_key: str | None = None,
+    ) -> None:
         """记录已经由模型调用翻译的消息。"""
-        self.observed_model_messages.add(self._message_key(message))
+        self.observed_model_messages.add(self._message_key(message, stream_key))
 
-    def has_seen_model_message(self, message: Any) -> bool:
+    def has_seen_model_message(
+        self,
+        message: Any,
+        stream_key: str | None = None,
+    ) -> bool:
         """检查消息是否已经进入模型事件队列。"""
-        return self._message_key(message) in self.observed_model_messages
+        return self._message_key(message, stream_key) in self.observed_model_messages
+
+    def model_event_id(
+        self,
+        message: Any,
+        stream_key: str | None = None,
+    ) -> UUID:
+        """为一次模型响应生成稳定的业务事件 ID。"""
+        key = self._message_key(message, stream_key)
+        event_id = self.model_event_ids.get(key)
+        if event_id is None:
+            event_id = uuid5(
+                NAMESPACE_URL,
+                f"mydify-agent-message:{self.task_id}:{key[0]}:{key[1]}",
+            )
+            self.model_event_ids[key] = event_id
+        return event_id
+
+    def mark_model_message_streamed(
+        self,
+        message: Any,
+        stream_key: str | None = None,
+    ) -> None:
+        """记录模型响应已经通过 messages 流输出。"""
+        key = self._message_key(message, stream_key)
+        self.remember_model_message(message, stream_key)
+        self.streamed_model_messages.add(key)
+
+    def has_streamed_model_message(
+        self,
+        message: Any,
+        stream_key: str | None = None,
+    ) -> bool:
+        """检查完整模型消息是否已经由增量事件覆盖。"""
+        return self._message_key(message, stream_key) in self.streamed_model_messages
+
+    def remember_todo_call(self, call_id: str) -> bool:
+        """记录 Todo 调用并返回是否应首次发布。"""
+        if not call_id:
+            return True
+        if call_id in self.todo_call_ids:
+            return False
+        self.todo_call_ids.add(call_id)
+        return True
 
     def queue_model_events(
         self,
@@ -89,14 +151,22 @@ class EventTranslationSession:
     ) -> None:
         """等待内部审核通过后再发布模型事件。"""
         self.remember_model_message(message)
-        self.pending_model_events.extend(thoughts)
+        self.pending_model_events.extend((message, thought) for thought in thoughts)
 
-    def flush_model_events(self) -> None:
+    def flush_model_events(self, *, final: bool = False) -> None:
         """按原顺序发布已接受的模型事件。"""
         pending = self.pending_model_events
         self.pending_model_events = []
-        for thought in pending:
+        deferred: list[tuple[Any, AgentThought]] = []
+        for message, thought in pending:
+            if thought.event == QueueEvent.AGENT_MESSAGE:
+                if self.stream_model_messages and not final:
+                    deferred.append((message, thought))
+                    continue
+                if self.has_streamed_model_message(message):
+                    continue
             self.publish(thought)
+        self.pending_model_events = deferred + self.pending_model_events
 
     def publish(self, thought: AgentThought) -> None:
         """发布事件并附加距上一事件的耗时。"""
@@ -144,6 +214,7 @@ class EventTranslationSession:
             return
         if self.terminal_published:
             return
+        self.flush_model_events(final=True)
         self.publish(
             AgentThought(
                 id=uuid4(),
@@ -188,6 +259,7 @@ def bind_event_translation(
     publisher: EventPublisher,
     telemetry: AgentTelemetry | None = None,
     cancelled: CancellationProbe | None = None,
+    stream_model_messages: bool = False,
 ) -> Iterator[EventTranslationSession]:
     """把一次图调用绑定到 MyDify 事件发布器。"""
     session = EventTranslationSession(
@@ -195,6 +267,7 @@ def bind_event_translation(
         publisher=publisher,
         telemetry=telemetry or NOOP_AGENT_TELEMETRY,
         cancelled=cancelled or (lambda: False),
+        stream_model_messages=stream_model_messages,
     )
     token = _current_session.set(session)
     try:

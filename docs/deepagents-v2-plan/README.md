@@ -15,6 +15,7 @@
 | [`06-agent-v2-code-guide.md`](06-agent-v2-code-guide.md) | Agent V2 当前代码导读、请求调用链、Backend、受限 Skill 执行、同步 SubAgent 与事件边界 |
 | [`07-agent-v2-runtime-architecture.md`](07-agent-v2-runtime-architecture.md) | Agent V2 State、上下文投影、运行时资源与迁移边界 |
 | [`08-service-handler-refactor-plan.md`](08-service-handler-refactor-plan.md) | Agent V2 后端 Service、Handler 和接口契约整理方案 |
+| [`09-todo-and-streaming-contract.md`](09-todo-and-streaming-contract.md) | DeepAgents 0.6 Todo 能力、流式事件和终止语义 |
 
 ## 文档原则
 

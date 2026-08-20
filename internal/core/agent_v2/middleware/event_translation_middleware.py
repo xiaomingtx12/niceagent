@@ -69,7 +69,7 @@ class EventTranslationMiddleware(AgentMiddleware):
         return result
 
     def after_agent(self, state: dict, runtime: Any) -> None:
-        """图执行完成后发布正常终止事件。"""
+        """图执行完成后补齐未经过流式钩子的最终模型消息。"""
         session = current_event_session()
         if session is not None:
             messages = list(state.get("messages", []) or [])
@@ -87,7 +87,6 @@ class EventTranslationMiddleware(AgentMiddleware):
             ):
                 for thought in translate_ai_message(session, final_message):
                     session.publish(thought)
-            session.finish()
         return None
 
 

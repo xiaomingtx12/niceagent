@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from langchain.agents.middleware.types import ModelResponse
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 from langgraph.types import Command
 
 from internal.core.agent_v2.agents.models import AgentType, QueueEvent
@@ -13,6 +13,7 @@ from internal.core.agent_v2.middleware.event_translation_middleware import (
     bind_event_translation,
 )
 from internal.core.agent_v2.events.serialization import serialize_agent_thought
+from internal.core.agent_v2.events.translator import translate_model_chunk
 
 
 def test_task_tool_call_emits_subagent_boundaries():
@@ -259,3 +260,40 @@ def test_text_response_emits_agent_message_with_answer_and_usage():
     assert events[0].answer == "最终答案"
     assert events[0].message_token_count == 7
     assert events[0].answer_token_count == 3
+
+
+def test_streamed_model_chunks_share_id_and_suppress_full_response():
+    """messages 增量与模型完整响应只产生一条可追加消息。"""
+    task_id = uuid4()
+    events = []
+    middleware = EventTranslationMiddleware()
+    message_id = "streamed-message-1"
+
+    with bind_event_translation(
+        task_id=task_id,
+        publisher=lambda _task_id, thought: events.append(thought),
+        stream_model_messages=True,
+    ) as session:
+        for content in ["第一", "个答案"]:
+            thought = translate_model_chunk(
+                session,
+                AIMessageChunk(content=content, id=message_id),
+            )
+            assert thought is not None
+            session.publish(thought)
+
+        middleware.wrap_model_call(
+            None,
+            lambda _request: ModelResponse(
+                result=[AIMessage(content="第一个答案", id=message_id)]
+            ),
+        )
+        middleware.after_model({}, None)
+        session.finish()
+
+    message_events = [
+        event for event in events if event.event == QueueEvent.AGENT_MESSAGE
+    ]
+    assert [event.answer for event in message_events] == ["第一", "个答案"]
+    assert len({event.id for event in message_events}) == 1
+    assert events[-1].event == QueueEvent.AGENT_END
