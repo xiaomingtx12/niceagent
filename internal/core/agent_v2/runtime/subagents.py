@@ -19,7 +19,7 @@ class SubAgentSpecError(ValueError):
 
 MAX_SUBAGENT_DESCRIPTION_LENGTH = 500
 MAX_SUBAGENT_SYSTEM_PROMPT_LENGTH = 8000
-_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,63}$")
+_NAME = re.compile(r"^(?!\.{1,2}$)[^\x00-\x1f/\\:*?\"<>|]{1,64}$")
 _FIELDS = {
     "name",
     "description",
@@ -73,7 +73,7 @@ def validate_platform_subagents(
         name = raw.get("name")
         if not isinstance(name, str) or not _NAME.fullmatch(name):
             raise SubAgentSpecError(
-                "sub-agent 名称必须以小写字母开头，只能包含小写字母、数字、_、-，最长 64 位"
+                "Agent 标识需为 1-64 个字符，不能包含路径分隔符、控制字符或 Windows 路径保留字符"
             )
         if name in seen:
             raise SubAgentSpecError(f"sub-agent 名称重复: {name}")
@@ -140,8 +140,20 @@ def validate_platform_subagents(
                     name=name,
                     field="published_app_id",
                 )
-            elif raw.get("model"):
-                item["model"] = str(raw["model"]).strip()
+            elif raw.get("model") is not None:
+                model = raw["model"]
+                if not isinstance(model, str) or not model.strip():
+                    raise SubAgentSpecError(
+                        f"subagent {name!r} model 必须是 provider/model 格式"
+                    )
+                model_parts = model.strip().split("/")
+                if len(model_parts) != 2 or any(
+                    not part.strip() for part in model_parts
+                ):
+                    raise SubAgentSpecError(
+                        f"subagent {name!r} model 必须是 provider/model 格式"
+                    )
+                item["model"] = "/".join(part.strip() for part in model_parts)
         else:
             graph_id = raw.get("graph_id")
             if not isinstance(graph_id, str) or not graph_id.strip():

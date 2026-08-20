@@ -44,6 +44,7 @@ def create_postgres_saver(
         },
         min_size=1,
         max_size=10,
+        check=ConnectionPool.check_connection,
         open=True,
     )
     saver = saver_factory(pool)

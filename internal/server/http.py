@@ -6,6 +6,7 @@ from flask_cors import CORS
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_weaviate import FlaskWeaviate
+from psycopg import OperationalError as PsycopgOperationalError
 from psycopg2 import OperationalError as Psycopg2OperationalError
 from sqlalchemy.exc import OperationalError
 
@@ -49,6 +50,9 @@ class Http(Flask):
         )
         self.register_error_handler(
             Psycopg2OperationalError, self._handle_database_operational_error
+        )
+        self.register_error_handler(
+            PsycopgOperationalError, self._handle_database_operational_error
         )
         self.register_error_handler(404, self._handle_not_found_error)
 

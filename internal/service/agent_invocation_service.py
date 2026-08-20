@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from flask import current_app
 from injector import inject
@@ -181,6 +181,28 @@ class AgentInvocationService(BaseService):
         model_overrides: dict[str, BaseChatModel] = {}
 
         for item in normalized:
+            model_ref = item.get("model")
+            if model_ref:
+                model_parts = str(model_ref).split("/")
+                if len(model_parts) != 2 or any(
+                    not part.strip() for part in model_parts
+                ):
+                    raise FailException(
+                        f"子 Agent {item['name']!r} 的模型标识必须是 provider/model 格式"
+                    )
+                provider_name, model_name = (
+                    part.strip() for part in model_parts
+                )
+                model_overrides[item["name"]] = (
+                    self.language_model_service.load_language_model(
+                        {
+                            "provider": provider_name,
+                            "model": model_name,
+                        },
+                        account_id=account_id,
+                    )
+                )
+
             if item.get("source", "custom") != "published":
                 continue
 
@@ -269,10 +291,12 @@ class AgentInvocationService(BaseService):
         spec: AgentInvocationSpec,
     ) -> Generator[AgentThought, None, None]:
         """流式执行 Agent，并在正常结束后统一持久化轨迹。"""
-        agent, llm = self.build_agent(spec)
+        try:
+            agent, llm = self.build_agent(spec)
+        except Exception as error:
+            return self._error_stream(spec, error)
 
-        # 先完成 build_agent，再返回真正的生成器。这样模型/API Key/
-        # 工具装配异常会在 Flask 创建响应前抛出，可以返回正常业务错误。
+        # 先完成 build_agent，再返回真正的生成器；构建失败会转成统一错误事件。
         def generate() -> Generator[AgentThought, None, None]:
             thought_map: dict[str, AgentThought] = {}
             completed = False
@@ -289,11 +313,58 @@ class AgentInvocationService(BaseService):
                     self._collect_thought(thought_map, thought)
                     yield thought
                 completed = True
+            except Exception as error:
+                error_thought = self._build_error_thought(error)
+                self._persist_error(spec, error_thought)
+                yield error_thought
             finally:
                 if completed:
                     self._persist(spec, thought_map.values())
 
         return generate()
+
+    def _error_stream(
+        self,
+        spec: AgentInvocationSpec,
+        error: Exception,
+    ) -> Generator[AgentThought, None, None]:
+        """把 Agent 构建失败转换为前端可消费的 SSE 错误事件。"""
+
+        def generate() -> Generator[AgentThought, None, None]:
+            error_thought = self._build_error_thought(error)
+            self._persist_error(spec, error_thought)
+            yield error_thought
+
+        return generate()
+
+    def _persist_error(
+        self,
+        spec: AgentInvocationSpec,
+        error_thought: AgentThought,
+    ) -> None:
+        try:
+            self._persist(spec, [error_thought])
+        except Exception:
+            current_app.logger.exception("持久化 Agent 错误事件失败")
+
+    @staticmethod
+    def _build_error_thought(error: Exception) -> AgentThought:
+        if isinstance(error, FailException):
+            message = error.message.strip() or "Agent 执行失败"
+            current_app.logger.warning("Agent 执行失败: %s", message)
+        else:
+            message = str(error).strip() or "Agent 执行失败"
+            current_app.logger.error(
+                "Agent 执行失败",
+                exc_info=(type(error), error, error.__traceback__),
+            )
+
+        return AgentThought(
+            id=uuid4(),
+            task_id=uuid4(),
+            event=QueueEvent.ERROR,
+            observation=message,
+        )
 
     def invoke(self, spec: AgentInvocationSpec):
         """非流式执行 Agent，并统一持久化轨迹。"""

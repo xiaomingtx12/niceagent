@@ -13,11 +13,15 @@ from typing import Any, Callable
 from uuid import UUID
 
 from langgraph.store.base import BaseStore
+from psycopg import OperationalError as PsycopgOperationalError
 
 from internal.core.agent_v2.backends.workspace_path import (
     contains_reserved_segment,
 )
-from internal.core.agent_v2.persistence.store import get_configured_store
+from internal.core.agent_v2.persistence.store import (
+    close_postgres_store,
+    get_configured_store,
+)
 from internal.core.agent_v2.runtime.models import build_memory_namespace
 from internal.exception import FailException
 
@@ -126,6 +130,19 @@ class MemoryFileService:
 
     store_provider: Callable[[], BaseStore] = get_configured_store
 
+    def _with_store_retry(
+        self,
+        operation: Callable[[BaseStore], Any],
+    ) -> Any:
+        """连接被 PostgreSQL 断开时重建 Store 并重试一次。"""
+        store = self.store_provider()
+        try:
+            return operation(store)
+        except PsycopgOperationalError:
+            if self.store_provider is get_configured_store:
+                close_postgres_store()
+            return operation(self.store_provider())
+
     def list_files(
         self,
         *,
@@ -134,33 +151,36 @@ class MemoryFileService:
         end_user_id: str | UUID | None = None,
     ) -> list[MemoryFile]:
         namespace = self._namespace(account_id, app_id, end_user_id)
-        store = self.store_provider()
-        rows: list[MemoryFile] = []
-        offset = 0
-        while True:
-            items = store.search(
-                namespace,
-                limit=_STORE_PAGE_SIZE,
-                offset=offset,
+
+        def list_from_store(store: BaseStore) -> list[MemoryFile]:
+            rows: list[MemoryFile] = []
+            offset = 0
+            while True:
+                items = store.search(
+                    namespace,
+                    limit=_STORE_PAGE_SIZE,
+                    offset=offset,
+                )
+                if not items:
+                    break
+                for item in items:
+                    path = str(item.key)
+                    if not path.startswith(MEMORY_ROOT):
+                        continue
+                    try:
+                        rows.append(self._from_item(namespace, item))
+                    except FailException:
+                        continue
+                if len(items) < _STORE_PAGE_SIZE:
+                    break
+                offset += _STORE_PAGE_SIZE
+            return sorted(
+                rows,
+                key=lambda item: item.updated_at or "",
+                reverse=True,
             )
-            if not items:
-                break
-            for item in items:
-                path = str(item.key)
-                if not path.startswith(MEMORY_ROOT):
-                    continue
-                try:
-                    rows.append(self._from_item(namespace, item))
-                except FailException:
-                    continue
-            if len(items) < _STORE_PAGE_SIZE:
-                break
-            offset += _STORE_PAGE_SIZE
-        return sorted(
-            rows,
-            key=lambda item: item.updated_at or "",
-            reverse=True,
-        )
+
+        return self._with_store_retry(list_from_store)
 
     def read_file(
         self,
@@ -172,10 +192,14 @@ class MemoryFileService:
     ) -> MemoryFile:
         key = normalize_memory_path(path)
         namespace = self._namespace(account_id, app_id, end_user_id)
-        item = self.store_provider().get(namespace, key)
-        if item is None:
-            raise FailException("记忆文件不存在")
-        return self._from_item(namespace, item)
+
+        def read_from_store(store: BaseStore) -> MemoryFile:
+            item = store.get(namespace, key)
+            if item is None:
+                raise FailException("记忆文件不存在")
+            return self._from_item(namespace, item)
+
+        return self._with_store_retry(read_from_store)
 
     def write_file(
         self,
@@ -190,25 +214,32 @@ class MemoryFileService:
             raise FailException("记忆文件内容必须是字符串")
         key = normalize_memory_path(path)
         namespace = self._namespace(account_id, app_id, end_user_id)
-        store = self.store_provider()
-        existing = store.get(namespace, key)
-        old_value = existing.value if existing is not None else {}
-        created_at = old_value.get("created_at") if isinstance(old_value, dict) else None
-        now = datetime.now(timezone.utc).isoformat()
-        store.put(
-            namespace,
-            key,
-            {
-                "content": content,
-                "encoding": "utf-8",
-                "created_at": created_at or now,
-                "modified_at": now,
-            },
-        )
-        item = store.get(namespace, key)
-        if item is None:
-            raise FailException("记忆文件保存失败")
-        return self._from_item(namespace, item)
+
+        def write_to_store(store: BaseStore) -> MemoryFile:
+            existing = store.get(namespace, key)
+            old_value = existing.value if existing is not None else {}
+            created_at = (
+                old_value.get("created_at")
+                if isinstance(old_value, dict)
+                else None
+            )
+            now = datetime.now(timezone.utc).isoformat()
+            store.put(
+                namespace,
+                key,
+                {
+                    "content": content,
+                    "encoding": "utf-8",
+                    "created_at": created_at or now,
+                    "modified_at": now,
+                },
+            )
+            item = store.get(namespace, key)
+            if item is None:
+                raise FailException("记忆文件保存失败")
+            return self._from_item(namespace, item)
+
+        return self._with_store_retry(write_to_store)
 
     def delete_file(
         self,
@@ -220,10 +251,13 @@ class MemoryFileService:
     ) -> None:
         key = normalize_memory_path(path)
         namespace = self._namespace(account_id, app_id, end_user_id)
-        store = self.store_provider()
-        if store.get(namespace, key) is None:
-            raise FailException("记忆文件不存在")
-        store.delete(namespace, key)
+
+        def delete_from_store(store: BaseStore) -> None:
+            if store.get(namespace, key) is None:
+                raise FailException("记忆文件不存在")
+            store.delete(namespace, key)
+
+        self._with_store_retry(delete_from_store)
 
     @staticmethod
     def _namespace(

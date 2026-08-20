@@ -11,6 +11,7 @@ from config.config import Config
 from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 from langgraph.store.postgres import PostgresStore
+from psycopg_pool import ConnectionPool
 
 
 def _pg_uri_for_langgraph(sqlalchemy_uri: str) -> str:
@@ -31,7 +32,11 @@ def create_postgres_store(
     )
     context = store_factory.from_conn_string(
         connection_string,
-        pool_config={"min_size": 1, "max_size": 10},
+        pool_config={
+            "min_size": 1,
+            "max_size": 10,
+            "check": ConnectionPool.check_connection,
+        },
     )
     store = context.__enter__()
     try:

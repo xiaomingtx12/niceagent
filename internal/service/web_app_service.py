@@ -222,8 +222,7 @@ class WebAppService(BaseService):
             ),
         )
 
-        # 提前构建 Agent，确保模型/API Key/工具装配异常发生在 Flask
-        # 创建 SSE 响应之前，异常可以转换为正常业务 JSON 响应。
+        # stream() 会把模型/API Key/工具装配异常转换为统一的 SSE error 事件。
         agent_stream = self.agent_invocation_service.stream(spec)
 
         def generate() -> Generator:
