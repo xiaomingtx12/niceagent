@@ -9,8 +9,9 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.tools import tool
 from pydantic import Field
 
-from internal.core.agent_v2.subagents.specs import (
+from internal.core.agent_v2.runtime.subagents import (
     SubAgentSpecError,
+    build_async_subagent_specs,
     build_subagent_specs,
     validate_platform_subagents,
 )
@@ -31,6 +32,22 @@ def _sync(**overrides):
         "context_passing": "NONE",
         "tools": [],
         "skills": [],
+    }
+    value.update(overrides)
+    return value
+
+
+def _async(**overrides):
+    value = {
+        "name": "remote_researcher",
+        "description": "在远程部署中执行长时间研究",
+        "mode": "async",
+        "context_passing": "NONE",
+        "tools": [],
+        "skills": [],
+        "graph_id": "research-graph",
+        "url": "https://agent.example.com",
+        "headers": {"Authorization": "Bearer test"},
     }
     value.update(overrides)
     return value
@@ -77,15 +94,16 @@ def test_sync_spec_uses_explicit_tools_scoped_skills_and_read_only_filesystem():
     assert "看不到父会话历史" in spec["system_prompt"]
     assert spec["permissions"][0].operations == ["read"]
     assert spec["permissions"][0].paths == [
-        "/subagent_skills/researcher/**"
+        "/subagent_skills/researcher",
+        "/subagent_skills/researcher/**",
     ]
     assert spec["permissions"][0].mode == "allow"
-    assert "/conversation_history/**" in spec["permissions"][1].paths
+    assert "/workspace/**" in spec["permissions"][1].paths
     assert spec["permissions"][2].operations == ["read"]
-    assert spec["permissions"][2].paths == ["/**"]
+    assert spec["permissions"][2].paths == ["/", "/**"]
     assert spec["permissions"][2].mode == "deny"
     assert spec["permissions"][-1].operations == ["write"]
-    assert spec["permissions"][-1].paths == ["/**"]
+    assert spec["permissions"][-1].paths == ["/", "/**"]
     assert spec["permissions"][-1].mode == "deny"
 
     from deepagents.middleware.filesystem import _check_fs_permission
@@ -116,7 +134,7 @@ def test_sync_spec_uses_explicit_tools_scoped_skills_and_read_only_filesystem():
     )
     assert (
         _check_fs_permission(spec["permissions"], "read", "/workspace/out.md")
-        == "deny"
+        == "allow"
     )
     assert _check_fs_permission(spec["permissions"], "read", "/unknown.md") == "deny"
     assert _check_fs_permission(spec["permissions"], "write", "/out.md") == "deny"
@@ -139,9 +157,30 @@ def test_configured_skills_require_a_runtime_authorization_projection():
 
 
 @pytest.mark.parametrize("mode", ["async", "ASYNC"])
-def test_async_mode_is_rejected_until_the_async_phase(mode):
-    with pytest.raises(SubAgentSpecError, match="当前仅支持 sync"):
-        validate_platform_subagents([_sync(mode=mode)])
+def test_async_mode_normalizes_and_maps_to_native_async_spec(mode):
+    config = validate_platform_subagents([_async(mode=mode)])
+
+    assert config == [_async(mode="async")]
+    assert build_async_subagent_specs(config) == [
+        {
+            "name": "remote_researcher",
+            "description": "在远程部署中执行长时间研究",
+            "graph_id": "research-graph",
+            "url": "https://agent.example.com",
+            "headers": {"Authorization": "Bearer test"},
+        }
+    ]
+
+
+def test_async_mode_requires_url_and_rejects_local_capabilities():
+    with pytest.raises(SubAgentSpecError, match="缺 url"):
+        validate_platform_subagents([_async(url=None)])
+    with pytest.raises(SubAgentSpecError, match="不支持 system_prompt"):
+        validate_platform_subagents([_async(system_prompt="ignored")])
+    with pytest.raises(SubAgentSpecError, match="不支持本地 tools"):
+        validate_platform_subagents([_async(tools=["web_search"])])
+    with pytest.raises(SubAgentSpecError, match="不支持本地 model"):
+        validate_platform_subagents([_async(model="openai:gpt-4o")])
 
 
 @pytest.mark.parametrize("policy", ["SUMMARY", "RECENT_K", "ALL"])
@@ -159,21 +198,18 @@ def test_invalid_or_duplicate_names_are_rejected(name):
         validate_platform_subagents([_sync(), _sync()])
 
 
-def test_unknown_legacy_async_policy_fields_and_large_teams_are_rejected():
+def test_unknown_legacy_async_policy_fields_are_rejected_and_team_is_unbounded():
     for field in (
-        "graph_id",
-        "url",
-        "headers",
         "timeout_seconds",
         "max_concurrent_per_conversation",
         "k",
     ):
-        with pytest.raises(SubAgentSpecError, match="当前同步阶段不支持"):
+        with pytest.raises(SubAgentSpecError, match="包含不支持的字段"):
             validate_platform_subagents([_sync(**{field: "value"})])
-    with pytest.raises(SubAgentSpecError, match="数量"):
-        validate_platform_subagents(
-            [_sync(name=f"agent-{index}") for index in range(9)]
-        )
+    config = validate_platform_subagents(
+        [_sync(name=f"agent-{index}") for index in range(64)]
+    )
+    assert len(config) == 64
 
 
 def test_factory_compiles_native_synchronous_subagent():

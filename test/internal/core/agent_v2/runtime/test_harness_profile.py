@@ -9,7 +9,7 @@ from internal.core.agent_v2.runtime.harness_profile import (
 )
 
 
-def test_default_general_purpose_is_disabled_for_prebuilt_model():
+def test_default_general_purpose_is_enabled_for_prebuilt_model():
     from deepagents.profiles.harness.harness_profiles import (
         _harness_profile_for_model,
     )
@@ -20,7 +20,7 @@ def test_default_general_purpose_is_disabled_for_prebuilt_model():
 
     assert key == "fakelistchatmodel"
     assert profile.general_purpose_subagent is not None
-    assert profile.general_purpose_subagent.enabled is False
+    assert profile.general_purpose_subagent.enabled is True
     assert "execute" not in profile.excluded_tools
 
 
@@ -34,12 +34,12 @@ def test_sandbox_profile_keeps_native_execute_visible():
     profile = _harness_profile_for_model(model, None)
 
     assert "execute" not in profile.excluded_tools
-    assert profile.general_purpose_subagent.enabled is False
+    assert profile.general_purpose_subagent.enabled is True
 
 
 def test_unidentifiable_model_fails_closed(monkeypatch):
     model = FakeListChatModel(responses=["ok"])
     monkeypatch.setattr(model, "_get_ls_params", lambda: {})
 
-    with pytest.raises(HarnessProfileError, match="不能安全关闭"):
+    with pytest.raises(HarnessProfileError, match="不能安全配置"):
         register_platform_harness_profile(model)

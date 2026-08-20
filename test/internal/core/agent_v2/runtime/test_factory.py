@@ -4,7 +4,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from deepagents.backends import CompositeBackend
+from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends import StoreBackend
 from deepagents.backends.utils import create_file_data
 from deepagents.backends.protocol import (
@@ -16,12 +16,11 @@ from deepagents.backends.sandbox import BaseSandbox
 from pydantic import Field
 
 from internal.core.agent_v2.runtime import factory
-from internal.core.agent_v2.backends.deny import DenyBackend
 from internal.core.agent_v2.runtime.factory import (
     build_deep_agent,
     build_thread_config,
 )
-from internal.core.agent_v2.context.permissions import (
+from internal.core.agent_v2.runtime.assembly import (
     build_filesystem_permissions,
 )
 
@@ -70,8 +69,8 @@ def test_build_deep_agent_returns_compiled_state_graph():
     assert isinstance(agent, CompiledStateGraph)
 
 
-def test_empty_team_excludes_implicit_general_purpose_tools():
-    """空团队不暴露隐式委派和任意执行工具。"""
+def test_empty_team_includes_default_general_purpose_agent():
+    """空团队仍提供 DeepAgents 默认通用 Agent。"""
     model = _RecordingChatModel()
     agent = build_deep_agent(
         llm=model,
@@ -85,7 +84,7 @@ def test_empty_team_excludes_implicit_general_purpose_tools():
     agent.invoke({"messages": [HumanMessage(content="hello")]})
 
     tool_names = set(agent.nodes["tools"].bound._tools_by_name)
-    assert "task" not in tool_names
+    assert "task" in tool_names
     assert model.bound_tool_names
     assert "execute" not in model.bound_tool_names[-1]
 
@@ -177,6 +176,36 @@ def test_explicit_sync_team_exposes_native_task_tool():
     assert "task" in set(agent.nodes["tools"].bound._tools_by_name)
 
 
+def test_async_team_exposes_native_background_task_tools():
+    """异步团队使用 DeepAgents 原生后台任务工具。"""
+    agent = build_deep_agent(
+        llm=_llm(),
+        tools=[],
+        system_prompt="test prompt",
+        review_config={},
+        checkpointer=False,
+        subagents=[
+            {
+                "name": "remote_researcher",
+                "description": "research",
+                "mode": "async",
+                "graph_id": "research-graph",
+                "url": "https://agent.example.com",
+                "headers": {},
+            }
+        ],
+    )
+
+    tool_names = set(agent.nodes["tools"].bound._tools_by_name)
+    assert {
+        "start_async_task",
+        "check_async_task",
+        "update_async_task",
+        "cancel_async_task",
+        "list_async_tasks",
+    } <= tool_names
+
+
 def test_graph_uses_native_state_without_business_context_channels():
     """图状态只保留 DeepAgents 原生通道。"""
     agent = build_deep_agent(
@@ -228,7 +257,6 @@ def test_build_deep_agent_routes_native_runtime_options(monkeypatch):
         checkpointer=False,
         backend=backend,
         memory_sources=["/memories/AGENTS.md"],
-        context_sources=["/context/request.md"],
         permissions=[permission],
     )
 
@@ -258,7 +286,7 @@ def test_native_memory_middleware_loads_store_backend_file():
         create_file_data("# Long-term memory\n\n- [preference] 中文\n"),
     )
     backend = CompositeBackend(
-        default=DenyBackend(),
+        default=StateBackend(),
         routes={
             "/memories/": StoreBackend(
                 store=store,

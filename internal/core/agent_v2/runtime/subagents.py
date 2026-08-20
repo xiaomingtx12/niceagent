@@ -154,17 +154,29 @@ def validate_platform_subagents(
                 )
             item["graph_id"] = graph_id.strip()
             url = raw.get("url")
-            if url:
-                if not isinstance(url, str):
-                    raise SubAgentSpecError(
-                        f"subagent {name!r} url 必须是字符串"
-                    )
-                parsed = urlparse(url.strip())
-                if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                    raise SubAgentSpecError(
-                        f"subagent {name!r} url 必须是 http/https 地址"
-                    )
-                item["url"] = url.strip()
+            if not isinstance(url, str) or not url.strip():
+                raise SubAgentSpecError(
+                    f"subagent {name!r} 异步模式缺 url；当前平台使用同步图驱动，"
+                    "必须配置 Agent Protocol 服务地址"
+                )
+            parsed = urlparse(url.strip())
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise SubAgentSpecError(
+                    f"subagent {name!r} url 必须是 http/https 地址"
+                )
+            item["url"] = url.strip()
+            if system_prompt.strip():
+                raise SubAgentSpecError(
+                    f"subagent {name!r} 异步模式不支持 system_prompt"
+                )
+            if tools or skills:
+                raise SubAgentSpecError(
+                    f"subagent {name!r} 异步模式不支持本地 tools 或 skills"
+                )
+            if raw.get("model"):
+                raise SubAgentSpecError(
+                    f"subagent {name!r} 异步模式不支持本地 model"
+                )
             item["headers"] = _normalize_headers(
                 raw.get("headers", {}),
                 name=name,
@@ -181,6 +193,7 @@ def build_subagent_specs(
     default_model: BaseChatModel | str | None = None,
     subagent_tools_by_name: Mapping[str, Sequence[BaseTool]] | None = None,
     subagent_models_by_name: Mapping[str, BaseChatModel | str] | None = None,
+    sandbox_enabled: bool = False,
 ) -> list[dict[str, Any]]:
     """将已标准化的配置转换为原生同步 SubAgent 规格。
 
@@ -200,7 +213,7 @@ def build_subagent_specs(
     specs: list[dict[str, Any]] = []
     for config in normalized:
         name = config["name"]
-        requested_tools = config["tools"]
+        requested_tools = config.get("tools", [])
         if name in tool_overrides:
             resolved_tools = list(tool_overrides[name])
             resolved_names = [tool.name for tool in resolved_tools]
@@ -216,7 +229,7 @@ def build_subagent_specs(
                 )
             resolved_tools = [base_tool_map[item] for item in requested_tools]
         sources = list(scoped_skills.get(name, ()))
-        if config["skills"] and not sources:
+        if config.get("skills", []) and not sources:
             raise SubAgentSpecError(f"subagent {name!r} 的 Skills 尚未完成运行时授权")
 
         spec: dict[str, Any] = {
@@ -228,10 +241,11 @@ def build_subagent_specs(
             "system_prompt": f"{config['system_prompt']}\n\n{_STATELESS_CONTRACT}",
             # 显式空列表避免继承父 Agent 的全部工具。
             "tools": resolved_tools,
-            # 子 Agent 与主 Agent 共享当前 Backend，但只暴露协作目录和
-            # 自己声明的 Skill；长期记忆及其他虚拟路径由默认拒绝规则隔离。
-            "permissions": _build_subagent_permissions(sources),
         }
+        if not sandbox_enabled:
+            # 非 Sandbox 模式显式限制子 Agent 的文件范围；Sandbox 的隔离
+            # 由原生 SandboxBackend 提供，不能再叠加工具级权限规则。
+            spec["permissions"] = _build_subagent_permissions(sources)
         if sources:
             spec["skills"] = sources
         if name in model_overrides:

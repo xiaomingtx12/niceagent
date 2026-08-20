@@ -8,6 +8,7 @@ from typing import Any, Sequence
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.middleware.filesystem import FilesystemPermission
+from deepagents.middleware.filesystem import supports_execution
 from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ModelRetryMiddleware,
@@ -92,6 +93,9 @@ def build_deep_agent(
             default_model=llm,
             subagent_tools_by_name=subagent_tools_by_name,
             subagent_models_by_name=subagent_models_by_name,
+            sandbox_enabled=(
+                backend is not None and supports_execution(backend)
+            ),
         ),
         *build_async_subagent_specs(subagents),
     ]
