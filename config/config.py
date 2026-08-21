@@ -70,6 +70,14 @@ class Config:
         self.REDIS_PASSWORD = _get_env("REDIS_PASSWORD")
         self.REDIS_DB = _get_env("REDIS_DB")
         self.REDIS_USE_SSL = _get_bool_env("REDIS_USE_SSL")
+        self.REDIS_MAX_CONNECTIONS = int(_get_env("REDIS_MAX_CONNECTIONS"))
+        self.REDIS_SOCKET_TIMEOUT = float(_get_env("REDIS_SOCKET_TIMEOUT"))
+        self.REDIS_SOCKET_CONNECT_TIMEOUT = float(
+            _get_env("REDIS_SOCKET_CONNECT_TIMEOUT")
+        )
+        self.REDIS_HEALTH_CHECK_INTERVAL = int(
+            _get_env("REDIS_HEALTH_CHECK_INTERVAL")
+        )
 
         # Celery配置
         self.CELERY = {

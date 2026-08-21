@@ -52,28 +52,34 @@ def _parse_revisions():
 
 def test_d_v2_chain_resolves():
     """所有 d_v2 迁移 down_revision 都指向已存在的 rev (master 视为合法 head)。"""
+    from alembic.script import ScriptDirectory
+
     parsed = _parse_revisions()
-    revs = {r for r, _, _ in parsed}
+    script = ScriptDirectory("internal/migration")
     for rev, down, fname in parsed:
         if down is None:
             continue
         if isinstance(down, tuple):
             for d in down:
-                if d not in revs and _is_master_head(d):
-                    continue
-                assert d in revs, (
-                    f"{fname}: down_revision {d!r} not found in d_v2 chain"
+                assert script.get_revision(d) is not None, (
+                    f"{fname}: down_revision {d!r} not found in migration graph"
                 )
         else:
-            if down not in revs and _is_master_head(down):
-                continue
-            assert down in revs, (
-                f"{fname}: down_revision {down!r} not found in d_v2 chain"
+            assert script.get_revision(down) is not None, (
+                f"{fname}: down_revision {down!r} not found in migration graph"
             )
 
 
 def test_d_v2_single_head():
     """d_v2 链只允许 1 个 head (末端)。"""
+    from alembic.script import ScriptDirectory
+
+    heads = ScriptDirectory("internal/migration").get_heads()
+    assert heads == ["05f098262b28"]
+
+
+def test_d_v2_013_is_head():
+    """模型中转站地址迁移是当前 d_v2 head。"""
     parsed = _parse_revisions()
     revs = {r for r, _, _ in parsed}
     incoming = set()
@@ -85,25 +91,7 @@ def test_d_v2_single_head():
         else:
             incoming.add(down)
     heads = revs - incoming
-    assert len(heads) == 1, (
-        f"expected 1 head, got {len(heads)}: {sorted(heads)}"
-    )
-
-
-def test_d_v2_008_is_head():
-    """Agent trace migration is the current d_v2 head."""
-    parsed = _parse_revisions()
-    revs = {r for r, _, _ in parsed}
-    incoming = set()
-    for _, down, _ in parsed:
-        if down is None:
-            continue
-        if isinstance(down, tuple):
-            incoming.update(down)
-        else:
-            incoming.add(down)
-    heads = revs - incoming
-    assert "d_v2_008_agent_trace_fields" in heads
+    assert "d_v2_013_provider_base_url" in heads
 
 
 def test_alembic_native_revision_map_loads_with_one_head():
@@ -112,7 +100,7 @@ def test_alembic_native_revision_map_loads_with_one_head():
 
     script = ScriptDirectory("internal/migration")
 
-    assert script.get_heads() == ["d_v2_008_agent_trace_fields"]
+    assert script.get_heads() == ["05f098262b28"]
     assert script.get_revision("deepagents_v2").revision == (
         "d_v2_001_drop_agent_checkpoints"
     )
@@ -123,5 +111,6 @@ def _is_master_head(rev: str) -> bool:
     return rev in {
         "223e8bdd31a6",  # master 老 chain
         "6837222596d1",
+        "b3c416557a96",
         "fe593d5bb1ab",
     }

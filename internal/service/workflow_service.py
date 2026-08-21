@@ -376,6 +376,10 @@ class WorkflowService(BaseService):
                     )
                     .all()
                 )
+                if len({dataset.embedding_fingerprint for dataset in datasets}) > 1:
+                    raise ValidateErrorException(
+                        "知识库检索节点只能关联使用相同向量模型的知识库"
+                    )
                 node["meta"] = {
                     "datasets": [
                         {
@@ -383,6 +387,9 @@ class WorkflowService(BaseService):
                             "name": dataset.name,
                             "icon": dataset.icon,
                             "description": dataset.description,
+                            "embedding_provider": dataset.embedding_provider,
+                            "embedding_model": dataset.embedding_model,
+                            "embedding_fingerprint": dataset.embedding_fingerprint,
                         }
                         for dataset in datasets
                     ]
@@ -602,6 +609,9 @@ class WorkflowService(BaseService):
                         model_config.get("provider", ""),
                         model_config.get("model", ""),
                         account.id,
+                        provider_connection_id=model_config.get(
+                            "provider_connection_id"
+                        ),
                     ):
                         node["model_config"] = (
                             self.language_model_service.get_default_model_config(

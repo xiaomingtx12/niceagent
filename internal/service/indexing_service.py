@@ -18,7 +18,7 @@ from internal.entity.cache_entity import LOCK_DOCUMENT_UPDATE_ENABLED
 from internal.entity.dataset_entity import DocumentStatus, SegmentStatus
 from internal.exception import NotFoundException
 from internal.lib.helper import generate_text_hash
-from internal.model import Document, Segment, KeywordTable, DatasetQuery
+from internal.model import Dataset, Document, Segment, KeywordTable, DatasetQuery
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .embeddings_service import EmbeddingsService
@@ -52,6 +52,10 @@ class IndexingService(BaseService):
         # 2.执行循环遍历所有文档完成对每个文档的构建
         for document in documents:
             try:
+                self.embeddings_service.initialize_embeddings(
+                    document.account_id,
+                    document.dataset.embedding_model_config,
+                )
                 # 3.更新当前状态为解析中，并记录开始处理的时间
                 self.update(
                     document,
@@ -90,6 +94,10 @@ class IndexingService(BaseService):
         if document is None:
             logging.exception(f"当前文档不存在，文档id：{document_id}")
             raise NotFoundException("当前文档不存在")
+        self.embeddings_service.initialize_embeddings(
+            document.account_id,
+            document.dataset.embedding_model_config,
+        )
 
         # 3.查询归属于当前文档的所有片段的节点id
         segments = (
@@ -159,6 +167,14 @@ class IndexingService(BaseService):
 
     def delete_document(self, dataset_id: UUID, document_id: UUID) -> None:
         """根据传递的知识库id+文档id删除文档信息"""
+        dataset = self.get(Dataset, dataset_id)
+        if dataset is None:
+            raise NotFoundException("知识库不存在")
+        self.embeddings_service.initialize_embeddings(
+            dataset.account_id,
+            dataset.embedding_model_config,
+        )
+
         # 1.查找该文档下的所有片段id列表
         segment_ids = [
             str(id)
@@ -187,7 +203,7 @@ class IndexingService(BaseService):
             dataset_id, segment_ids
         )
 
-    def delete_dataset(self, dataset_id: UUID) -> None:
+    def delete_dataset(self, dataset_id: UUID, embedding_fingerprint: str) -> None:
         """根据传递的知识库id执行相应的删除操作"""
         try:
             with self.db.auto_commit():
@@ -212,7 +228,9 @@ class IndexingService(BaseService):
                 ).delete()
 
             # 5.调用向量数据库删除知识库的关联记录
-            self.vector_database_service.collection.data.delete_many(
+            self.vector_database_service.get_collection(
+                embedding_fingerprint
+            ).data.delete_many(
                 where=Filter.by_property("dataset_id").equal(str(dataset_id))
             )
         except Exception as e:
@@ -368,22 +386,24 @@ class IndexingService(BaseService):
             lc_segment.metadata["document_enabled"] = True
             lc_segment.metadata["segment_enabled"] = True
 
-        # 1.5 获取当前用户的 account_id，用于在线程中初始化 embeddings
-        from flask import g
-        account_id = getattr(g, 'embeddings_account_id', None)
-        if not account_id:
-            account_id = document.account_id
+        account_id = document.account_id
+        model_config = document.dataset.embedding_model_config
 
         # 2.调用向量数据库，每次存储10条数据，避免一次传递过多的数据
         def thread_func(
-            flask_app: Flask, chunks: list[LCDocument], ids: list[UUID], account_id: UUID
+            flask_app: Flask,
+            chunks: list[LCDocument],
+            ids: list[UUID],
+            account_id: UUID,
+            model_config: dict[str, str],
         ) -> None:
             """线程函数，执行向量数据库与postgres数据的存储"""
             with flask_app.app_context():
                 try:
-                    # 在线程上下文中设置 account_id
-                    g.embeddings_account_id = account_id
-                    
+                    self.embeddings_service.initialize_embeddings(
+                        account_id,
+                        model_config,
+                    )
                     self.vector_database_service.vector_store.add_documents(
                         chunks,
                         ids=ids,
@@ -419,7 +439,12 @@ class IndexingService(BaseService):
                 ids = [chunk.metadata["node_id"] for chunk in chunks]
                 futures.append(
                     executor.submit(
-                        thread_func, current_app._get_current_object(), chunks, ids, account_id
+                        thread_func,
+                        current_app._get_current_object(),
+                        chunks,
+                        ids,
+                        account_id,
+                        model_config,
                     )
                 )
 

@@ -1,4 +1,5 @@
 from urllib.parse import urlparse
+from uuid import UUID
 
 from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
@@ -22,6 +23,7 @@ class WebAppChatReq(FlaskForm):
         "query", default="", validators=[DataRequired(message="用户提问query不能为空")]
     )
     image_urls = ListField("image_urls", default=[])
+    file_ids = ListField("file_ids", default=[])
 
     def validate_image_urls(self, field: ListField) -> None:
         """校验传递的图片URL链接列表"""
@@ -38,6 +40,18 @@ class WebAppChatReq(FlaskForm):
             result = urlparse(image_url)
             if not all([result.scheme, result.netloc]):
                 raise ValidationError("上传的图片URL地址格式错误，请核实后重试")
+
+    def validate_file_ids(self, field: ListField) -> None:
+        """校验附件 id 列表。"""
+        if not isinstance(field.data, list):
+            raise ValidationError("附件 id 列表格式错误")
+        if len(field.data) > 5:
+            raise ValidationError("上传的附件数量不能超过5，请核实后重试")
+        for file_id in field.data:
+            try:
+                UUID(str(file_id))
+            except (TypeError, ValueError):
+                raise ValidationError("附件 id 必须为 UUID")
 
 
 class GetConversationsReq(FlaskForm):

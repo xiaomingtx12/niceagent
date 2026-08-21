@@ -63,7 +63,7 @@ class WorkspaceFile(db.Model):
     id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
     account_id = Column(UUID, nullable=False)
     app_id = Column(UUID, nullable=False)
-    conversation_id = Column(UUID, nullable=False)
+    conversation_id = Column(UUID, nullable=True)
     path = Column(String(512), nullable=False)
     version = Column(Integer, nullable=False, server_default=text("1"))
     storage_backend = Column(

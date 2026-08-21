@@ -83,7 +83,9 @@ class ProviderApiKeyHandler:
         return success_json({
             "id": str(provider_api_key.id),
             "provider_name": provider_api_key.provider_name,
+            "connection_name": (provider_api_key.remark or "").strip(),
             "api_key_masked": api_key_masked,
+            "base_url": provider_api_key.base_url or "",
             "is_active": provider_api_key.is_active,
             "remark": provider_api_key.remark,
             "discovered_model_count": len(provider_api_key.discovered_models or []),
@@ -110,6 +112,8 @@ class ProviderApiKeyHandler:
         # 只有当 api_key 字段存在且不为空时才更新
         if req.api_key.data and req.api_key.data.strip():
             update_data["api_key"] = req.api_key.data.strip()
+        if req.base_url.data is not None:
+            update_data["base_url"] = req.base_url.data.strip()
         
         # 只有当 is_active 字段在请求中存在时才更新
         if "is_active" in request.form or "is_active" in payload:
@@ -132,17 +136,26 @@ class ProviderApiKeyHandler:
         """更新供应商 API Key 下已激活的动态模型。"""
         payload = request.get_json(silent=True) or {}
         enabled_models = payload.get("enabled_models")
+        discovered_models = payload.get("discovered_models")
         if not isinstance(enabled_models, list) or not all(
             isinstance(model_name, str) for model_name in enabled_models
         ):
             return validate_error_json(
                 {"enabled_models": ["已激活模型必须是字符串数组"]}
             )
+        if discovered_models is not None and (
+            not isinstance(discovered_models, list)
+            or not all(isinstance(model, dict) for model in discovered_models)
+        ):
+            return validate_error_json(
+                {"discovered_models": ["发现模型必须是对象数组"]}
+            )
 
         self.provider_api_key_service.update_enabled_models(
             provider_api_key_id,
             current_user,
             enabled_models,
+            discovered_models=discovered_models,
         )
         return success_message("模型激活状态更新成功")
 

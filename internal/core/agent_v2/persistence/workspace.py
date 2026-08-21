@@ -133,8 +133,24 @@ class WorkspaceRepository:
         mime_type: str = "text/plain",
         enforce_quota: bool = True,
     ) -> WorkspaceFile:
-        """经配额检查和冲突重试后追加快照。"""
-        encoded = content.encode("utf-8")
+        """以 UTF-8 字节写入一个文本快照。"""
+        return self.write_bytes(
+            rest,
+            content.encode("utf-8"),
+            mime_type=mime_type,
+            enforce_quota=enforce_quota,
+        )
+
+    def write_bytes(
+        self,
+        rest: str,
+        content: bytes,
+        *,
+        mime_type: str = "application/octet-stream",
+        enforce_quota: bool = True,
+    ) -> WorkspaceFile:
+        """经配额检查和冲突重试后追加二进制快照。"""
+        encoded = bytes(content)
         with self._write_lock, self._session_lock:
             for attempt in range(_VERSION_RETRIES):
                 try:

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from deepagents.backends.protocol import BackendProtocol
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph.state import CompiledStateGraph
 
@@ -34,6 +35,7 @@ class GraphExecutionDriver:
     telemetry: AgentTelemetry = NOOP_AGENT_TELEMETRY
     cancelled: Callable[[], bool] = lambda: False
     on_cleanup: Callable[[], None] | None = None
+    on_usage: Callable[[dict[str, Any]], None] | None = None
     backend: BackendProtocol | None = None
 
     def run(
@@ -45,6 +47,8 @@ class GraphExecutionDriver:
         stream_options: dict[str, Any],
     ) -> None:
         """消费图输出，由中间件发布业务事件。"""
+        usage_callback = UsageMetadataCallbackHandler()
+        effective_config = _append_callback(config, usage_callback)
         with bind_event_translation(
             task_id=task_id,
             publisher=self.publisher,
@@ -60,7 +64,7 @@ class GraphExecutionDriver:
                 )
                 for item in self.graph.stream(
                     input_state,
-                    config=config,
+                    config=effective_config,
                     context=self.runtime_context,
                     **stream_options,
                 ):
@@ -84,6 +88,17 @@ class GraphExecutionDriver:
                         close_runtime_backends(self.backend)
                     except Exception as exc:  # noqa: BLE001
                         event_session.publish_error(exc)
+                usage_payload = event_session.publish_token_usage(
+                    usage_callback.usage_metadata,
+                )
+                if usage_payload is not None and self.on_usage is not None:
+                    try:
+                        self.on_usage(usage_payload)
+                    except Exception:  # noqa: BLE001
+                        self.telemetry.emit(
+                            "agent.run_usage_persistence.failed",
+                            attributes={"task_id": str(task_id)},
+                        )
                 event_session.finish()
 
 
@@ -117,6 +132,24 @@ def _translate_stream_item(
     if mode == "updates" and isinstance(payload, Mapping):
         return translate_graph_update(event_session, payload)
     return []
+
+
+def _append_callback(
+    config: RunnableConfig | None,
+    callback: UsageMetadataCallbackHandler,
+) -> RunnableConfig:
+    """附加当前运行专用的用量聚合器，不修改调用方配置。"""
+    effective: RunnableConfig = dict(config or {})
+    existing = effective.get("callbacks")
+    if existing is None:
+        callbacks = []
+    elif isinstance(existing, list):
+        callbacks = list(existing)
+    else:
+        callbacks = [existing]
+    callbacks.append(callback)
+    effective["callbacks"] = callbacks
+    return effective
 
 
 def checkpoint_has_state(

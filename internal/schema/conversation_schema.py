@@ -26,8 +26,17 @@ class GetConversationMessagesWithPageResp(Schema):
     conversation_id = fields.UUID(dump_default="")
     query = fields.String(dump_default="")
     image_urls = fields.List(fields.String, dump_default=[])
+    attachments = fields.List(fields.Dict, dump_default=[])
     answer = fields.String(dump_default="")
     total_token_count = fields.Integer(dump_default=0)
+    input_token_count = fields.Integer(dump_default=0)
+    output_token_count = fields.Integer(dump_default=0)
+    cached_token_count = fields.Integer(dump_default=0)
+    reasoning_token_count = fields.Integer(dump_default=0)
+    model_call_count = fields.Integer(dump_default=0)
+    tool_call_count = fields.Integer(dump_default=0)
+    trace_id = fields.String(allow_none=True, dump_default=None)
+    token_usage = fields.Dict(dump_default={})
     latency = fields.Float(dump_default=0)
     agent_thoughts = fields.List(fields.Dict, dump_default=[])
     created_at = fields.Integer(dump_default=0)
@@ -39,8 +48,17 @@ class GetConversationMessagesWithPageResp(Schema):
             "conversation_id": data.conversation_id,
             "query": data.query,
             "image_urls": data.image_urls,
+            "attachments": data.attachments,
             "answer": data.answer,
             "total_token_count": data.total_token_count,
+            "input_token_count": data.input_token_count,
+            "output_token_count": data.output_token_count,
+            "cached_token_count": data.cached_token_count,
+            "reasoning_token_count": data.reasoning_token_count,
+            "model_call_count": data.model_call_count,
+            "tool_call_count": data.tool_call_count,
+            "trace_id": data.trace_id,
+            "token_usage": data.token_usage,
             "latency": data.latency,
             "agent_thoughts": [
                 dump_agent_thought(agent_thought)

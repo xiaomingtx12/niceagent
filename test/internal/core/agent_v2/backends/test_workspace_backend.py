@@ -9,6 +9,7 @@
 - conversation_id 自动映射到当前 Workspace 会话
 """
 from uuid import uuid4
+import base64
 
 import pytest
 from sqlalchemy import create_engine
@@ -414,6 +415,17 @@ def test_upload_files_writes_each(backend, ids):
     assert all(r.error is None for r in responses)
     assert backend.read("/workspace/a.txt").file_data["content"] == "alpha"
     assert backend.read("/workspace/b.txt").file_data["content"] == "beta"
+
+
+def test_binary_upload_is_returned_as_base64_file_data(backend):
+    content = b"\x89PNG\r\n\x00\xff"
+    responses = backend.upload_files([("/workspace/photo.png", content)])
+
+    assert responses[0].error is None
+    result = backend.read("/workspace/photo.png")
+    assert result.error is None
+    assert result.file_data["encoding"] == "base64"
+    assert base64.b64decode(result.file_data["content"]) == content
 
 
 def test_download_files_returns_content(backend, ids):

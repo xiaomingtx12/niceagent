@@ -33,6 +33,9 @@ def extract_query_and_images(input_state: dict[str, Any]) -> tuple[str, list[str
             continue
         if block.get("type") == "text":
             query_parts.append(str(block.get("text", "")))
+        elif block.get("type") == "image":
+            if block.get("url"):
+                image_urls.append(str(block["url"]))
         elif block.get("type") == "image_url":
             image = block.get("image_url", {})
             if isinstance(image, dict) and image.get("url"):

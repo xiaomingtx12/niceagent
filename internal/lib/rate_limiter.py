@@ -13,9 +13,14 @@ from enum import Enum
 from dataclasses import dataclass
 
 from redis import Redis
+from redis.exceptions import (
+    ConnectionError as RedisConnectionError,
+    TimeoutError as RedisTimeoutError,
+)
 
 
 logger = logging.getLogger(__name__)
+_REDIS_CONNECTION_ERRORS = (RedisConnectionError, RedisTimeoutError)
 
 
 class RateLimitStrategy(str, Enum):
@@ -60,6 +65,21 @@ class RateLimiter:
             redis_client: Redis 客户端实例
         """
         self.redis = redis_client
+
+    def _handle_backend_error(self, operation: str, error: Exception) -> None:
+        """清理失效连接并记录限流降级。"""
+        if isinstance(error, _REDIS_CONNECTION_ERRORS):
+            try:
+                self.redis.connection_pool.disconnect(inuse_connections=True)
+            except Exception:
+                pass
+            logger.warning(
+                "Redis %s暂时不可用，已放行本次请求: %s",
+                operation,
+                error,
+            )
+            return
+        logger.error("Redis %s失败: %s", operation, error)
         
     def check_rate_limit(
         self,
@@ -127,7 +147,7 @@ class RateLimiter:
             )
             
         except Exception as e:
-            logger.error(f"固定窗口限流检查失败: {str(e)}")
+            self._handle_backend_error("固定窗口限流检查", e)
             # 限流器故障时默认允许请求 (Fail Open)
             return RateLimitResult(
                 allowed=True,
@@ -215,7 +235,7 @@ class RateLimiter:
             )
             
         except Exception as e:
-            logger.error(f"滑动窗口限流检查失败: {str(e)}")
+            self._handle_backend_error("滑动窗口限流检查", e)
             # 限流器故障时默认允许请求
             return RateLimitResult(
                 allowed=True,
@@ -306,7 +326,7 @@ class RateLimiter:
             )
             
         except Exception as e:
-            logger.error(f"令牌桶限流检查失败: {str(e)}")
+            self._handle_backend_error("令牌桶限流检查", e)
             # 限流器故障时默认允许请求
             return RateLimitResult(
                 allowed=True,
@@ -332,7 +352,7 @@ class RateLimiter:
                 self.redis.delete(*keys)
             return True
         except Exception as e:
-            logger.error(f"重置限流计数器失败: {str(e)}")
+            self._handle_backend_error("重置限流计数器", e)
             return False
     
     def get_current_usage(
@@ -369,5 +389,5 @@ class RateLimiter:
                 current = int(current) if current else 0
                 return (current, config.max_requests)
         except Exception as e:
-            logger.error(f"获取限流使用情况失败: {str(e)}")
+            self._handle_backend_error("获取限流使用情况", e)
             return (0, config.max_requests)

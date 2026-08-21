@@ -34,6 +34,17 @@ class CreateDatasetReq(FlaskForm):
             Length(max=2000, message="知识库描述长度不能超过2000字符"),
         ],
     )
+    embedding_provider = StringField(
+        "embedding_provider",
+        validators=[DataRequired("请选择向量模型提供商"), Length(max=255)],
+    )
+    embedding_model = StringField(
+        "embedding_model",
+        validators=[DataRequired("请选择向量模型"), Length(max=255)],
+    )
+    embedding_provider_connection_id = StringField(
+        "embedding_provider_connection_id", validators=[Optional(), Length(max=64)]
+    )
 
 
 class GetDatasetResp(Schema):
@@ -43,6 +54,11 @@ class GetDatasetResp(Schema):
     name = fields.String(dump_default="")
     icon = fields.String(dump_default="")
     description = fields.String(dump_default="")
+    embedding_provider = fields.String(dump_default="")
+    embedding_model = fields.String(dump_default="")
+    embedding_provider_connection_id = fields.UUID(allow_none=True, dump_default=None)
+    embedding_fingerprint = fields.String(dump_default="")
+    embedding_dimension = fields.Integer(dump_default=0)
     document_count = fields.Integer(dump_default=0)
     hit_count = fields.Integer(dump_default=0)
     related_app_count = fields.Integer(dump_default=0)
@@ -57,6 +73,11 @@ class GetDatasetResp(Schema):
             "name": data.name,
             "icon": data.icon,
             "description": data.description,
+            "embedding_provider": data.embedding_provider,
+            "embedding_model": data.embedding_model,
+            "embedding_provider_connection_id": data.embedding_provider_connection_id,
+            "embedding_fingerprint": data.embedding_fingerprint,
+            "embedding_dimension": data.embedding_dimension,
             "document_count": data.document_count,
             "hit_count": data.hit_count,
             "related_app_count": data.related_app_count,
@@ -91,6 +112,17 @@ class UpdateDatasetReq(FlaskForm):
             Length(max=2000, message="知识库描述长度不能超过2000字符"),
         ],
     )
+    embedding_provider = StringField(
+        "embedding_provider",
+        validators=[DataRequired("请选择向量模型提供商"), Length(max=255)],
+    )
+    embedding_model = StringField(
+        "embedding_model",
+        validators=[DataRequired("请选择向量模型"), Length(max=255)],
+    )
+    embedding_provider_connection_id = StringField(
+        "embedding_provider_connection_id", validators=[Optional(), Length(max=64)]
+    )
 
 
 class GetDatasetsWithPageReq(PaginatorReq):
@@ -112,6 +144,9 @@ class GetDatasetsWithPageResp(Schema):
     name = fields.String(dump_default="")
     icon = fields.String(dump_default="")
     description = fields.String(dump_default="")
+    embedding_provider = fields.String(dump_default="")
+    embedding_model = fields.String(dump_default="")
+    embedding_fingerprint = fields.String(dump_default="")
     document_count = fields.Integer(dump_default=0)
     related_app_count = fields.Integer(dump_default=0)
     character_count = fields.Integer(dump_default=0)
@@ -125,6 +160,9 @@ class GetDatasetsWithPageResp(Schema):
             "name": data.name,
             "icon": data.icon,
             "description": data.description,
+            "embedding_provider": data.embedding_provider,
+            "embedding_model": data.embedding_model,
+            "embedding_fingerprint": data.embedding_fingerprint,
             "document_count": data.document_count,
             "related_app_count": data.related_app_count,
             "character_count": data.character_count,

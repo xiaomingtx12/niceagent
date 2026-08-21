@@ -558,7 +558,7 @@ class Router:
             view_func=self.language_model_handler.get_language_model_icon,
         )
         bp.add_url_rule(
-            "/language-models/<string:provider_name>/<string:model_name>",
+            "/language-models/<string:provider_name>/<path:model_name>",
             view_func=self.language_model_handler.get_language_model,
         )
 

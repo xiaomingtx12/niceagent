@@ -1,4 +1,5 @@
 from urllib.parse import urlparse
+from uuid import UUID
 
 from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
@@ -103,6 +104,9 @@ class GetAppsWithPageResp(Schema):
             "model_config": {
                 "provider": app_config.model_config.get("provider", ""),
                 "model": app_config.model_config.get("model", ""),
+                "provider_connection_id": app_config.model_config.get(
+                    "provider_connection_id", ""
+                ),
             },
             "status": data.status,
             "updated_at": datetime_to_timestamp(data.updated_at),
@@ -181,6 +185,7 @@ class DebugChatReq(FlaskForm):
     """应用调试会话请求结构体"""
 
     image_urls = ListField("image_urls", default=[])
+    file_ids = ListField("file_ids", default=[])
     query = StringField(
         "query",
         validators=[
@@ -204,6 +209,18 @@ class DebugChatReq(FlaskForm):
             if not all([result.scheme, result.netloc]):
                 raise ValidationError("上传的图片URL地址格式错误，请核实后重试")
 
+    def validate_file_ids(self, field: ListField) -> None:
+        """校验附件 id 列表。"""
+        if not isinstance(field.data, list):
+            raise ValidationError("附件 id 列表格式错误")
+        if len(field.data) > 5:
+            raise ValidationError("上传的附件数量不能超过5，请核实后重试")
+        for file_id in field.data:
+            try:
+                UUID(str(file_id))
+            except (TypeError, ValueError):
+                raise ValidationError("附件 id 必须为 UUID")
+
 
 class GetDebugConversationMessagesWithPageReq(PaginatorReq):
     """获取调试会话消息列表分页请求结构体"""
@@ -222,6 +239,7 @@ class GetDebugConversationMessagesWithPageResp(Schema):
     conversation_id = fields.UUID(dump_default="")
     query = fields.String(dump_default="")
     image_urls = fields.List(fields.String, dump_default=[])
+    attachments = fields.List(fields.Dict, dump_default=[])
     answer = fields.String(dump_default="")
     total_token_count = fields.Integer(dump_default=0)
     latency = fields.Float(dump_default=0)
@@ -235,6 +253,7 @@ class GetDebugConversationMessagesWithPageResp(Schema):
             "conversation_id": data.conversation_id,
             "query": data.query,
             "image_urls": data.image_urls,
+            "attachments": data.attachments,
             "answer": data.answer,
             "total_token_count": data.total_token_count,
             "latency": data.latency,

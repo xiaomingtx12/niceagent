@@ -3,8 +3,10 @@ from flask_wtf.file import FileField, FileRequired, FileAllowed, FileSize
 from marshmallow import Schema, fields, pre_dump
 
 from internal.entity.upload_file_entity import (
+    ALLOWED_AUDIO_EXTENSION,
     ALLOWED_DOCUMENT_EXTENSION,
     ALLOWED_IMAGE_EXTENSION,
+    ALLOWED_VIDEO_EXTENSION,
 )
 from internal.model import UploadFile
 
@@ -18,8 +20,13 @@ class UploadFileReq(FlaskForm):
             FileRequired("上传文件不能为空"),
             FileSize(max_size=15 * 1024 * 1024, message="上传文件最大不能超过15MB"),
             FileAllowed(
-                ALLOWED_DOCUMENT_EXTENSION,
-                message=f"仅允许上传{'/'.join(ALLOWED_DOCUMENT_EXTENSION)}文件",
+                (
+                    ALLOWED_DOCUMENT_EXTENSION
+                    + ALLOWED_IMAGE_EXTENSION
+                    + ALLOWED_AUDIO_EXTENSION
+                    + ALLOWED_VIDEO_EXTENSION
+                ),
+                message="仅允许上传受支持的附件文件",
             ),
         ],
     )

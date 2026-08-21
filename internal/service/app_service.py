@@ -49,6 +49,7 @@ from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
+from .agent_attachment_service import AgentAttachmentService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .base_service import BaseService
 from .cos_service import CosService
@@ -71,6 +72,7 @@ class AppService(BaseService):
     language_model_manager: LanguageModelManager
     language_model_service: LanguageModelService
     agent_cleanup_service: AgentConversationCleanupService
+    agent_attachment_service: AgentAttachmentService
 
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
@@ -589,6 +591,10 @@ class AppService(BaseService):
         app = self.get_app(app_id, account)
         draft_app_config = self.get_draft_app_config(app_id, account)
         debug_conversation = app.debug_conversation
+        attachments = self.agent_attachment_service.resolve(
+            req.file_ids.data,
+            owner_id=account.id,
+        )
         message = self.create(
             Message,
             app_id=app_id,
@@ -597,6 +603,7 @@ class AppService(BaseService):
             created_by=account.id,
             query=req.query.data,
             image_urls=req.image_urls.data,
+            attachments=[attachment.to_dict() for attachment in attachments],
             status=MessageStatus.NORMAL,
         )
 
@@ -612,6 +619,7 @@ class AppService(BaseService):
             invoke_from=InvokeFrom.DEBUGGER,
             query=req.query.data,
             image_urls=req.image_urls.data,
+            attachments=attachments,
             opening_statement=(
                 draft_app_config["opening_statement"]
                 if debug_conversation.is_new

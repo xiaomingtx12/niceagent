@@ -34,7 +34,8 @@ class AnalysisService(BaseService):
         fourteen_days_ago = today_midnight - timedelta(days=14)
 
         # 3.计算统计分析数据的缓存键
-        cache_key = f"{today.strftime('%Y_%m_%d')}:{str(app.id)}"
+        # 升级缓存版本，避免部署后继续返回不含新 Token 字段的旧结果。
+        cache_key = f"analysis_v2:{today.strftime('%Y_%m_%d')}:{str(app.id)}"
 
         # 4.从缓存中获取指定的结果，如果存在则直接返回
         try:
@@ -54,7 +55,7 @@ class AnalysisService(BaseService):
             app, fourteen_days_ago, seven_days_ago
         )
 
-        # 8.计算5个概念指标，涵盖：全部会话数、激活用户数、平均会话互动数、Token输出速度、费用消耗
+        # 8.计算概览指标，涵盖会话、用户、耗时、费用、Token和调用次数
         seven_overview_indicators = self.calculate_overview_indicators_by_messages(
             seven_days_messages
         )
@@ -67,8 +68,12 @@ class AnalysisService(BaseService):
             seven_overview_indicators, fourteen_overview_indicators
         )
 
-        # 10.计算4个指标对应的趋势
+        # 10.计算基础指标和 Run 级 Token 趋势
         trend = self.calculate_trend_by_messages(today_midnight, 7, seven_days_messages)
+        model_usage = self.calculate_model_usage_by_messages(seven_days_messages)
+        previous_model_usage = self.calculate_model_usage_by_messages(
+            fourteen_days_messages
+        )
 
         # 11.定义5个指标字段名称
         fields = [
@@ -77,6 +82,13 @@ class AnalysisService(BaseService):
             "avg_of_conversation_messages",
             "token_output_rate",
             "cost_consumption",
+            "total_token_count",
+            "input_token_count",
+            "output_token_count",
+            "cached_token_count",
+            "reasoning_token_count",
+            "model_call_count",
+            "tool_call_count",
         ]
 
         # 12.构建应用分析字典
@@ -88,6 +100,13 @@ class AnalysisService(BaseService):
                     "pop": pop.get(field),
                 }
                 for field in fields
+            },
+            "model_usage": {
+                "data": model_usage,
+                "pop": self.calculate_model_usage_pop(
+                    model_usage,
+                    previous_model_usage,
+                ),
             },
         }
 
@@ -108,6 +127,13 @@ class AnalysisService(BaseService):
                 Message.created_by,
                 Message.latency,
                 Message.total_token_count,
+                Message.input_token_count,
+                Message.output_token_count,
+                Message.cached_token_count,
+                Message.reasoning_token_count,
+                Message.model_call_count,
+                Message.tool_call_count,
+                Message.token_usage,
                 Message.total_price,
                 Message.created_at,
             )
@@ -139,14 +165,20 @@ class AnalysisService(BaseService):
 
         # 4.Token输出速度，使用总token数/总耗时，涉及除法要做/0判断
         token_output_rate = 0
-        latency_sum = sum(message.latency for message in messages)
+        latency_sum = sum(cls._metric(message, "latency") for message in messages)
         if latency_sum != 0:
             token_output_rate = (
-                sum(message.total_token_count for message in messages) / latency_sum
+                sum(
+                    cls._metric(message, "total_token_count")
+                    for message in messages
+                )
+                / latency_sum
             )
 
         # 5.计算费用消耗，使用总花费进行求和
-        cost_consumption = sum(message.total_price for message in messages)
+        cost_consumption = sum(
+            cls._metric(message, "total_price") for message in messages
+        )
 
         # 6.返回数据，并且对于小数型数据，如果数值过小，需要转换成float，避免Python使用科学计数法进行展示
         return {
@@ -155,6 +187,28 @@ class AnalysisService(BaseService):
             "avg_of_conversation_messages": float(avg_of_conversation_messages),
             "token_output_rate": float(token_output_rate),
             "cost_consumption": float(cost_consumption),
+            "total_token_count": sum(
+                cls._metric(message, "total_token_count") for message in messages
+            ),
+            "input_token_count": sum(
+                cls._metric(message, "input_token_count") for message in messages
+            ),
+            "output_token_count": sum(
+                cls._metric(message, "output_token_count") for message in messages
+            ),
+            "cached_token_count": sum(
+                cls._metric(message, "cached_token_count") for message in messages
+            ),
+            "reasoning_token_count": sum(
+                cls._metric(message, "reasoning_token_count")
+                for message in messages
+            ),
+            "model_call_count": sum(
+                cls._metric(message, "model_call_count") for message in messages
+            ),
+            "tool_call_count": sum(
+                cls._metric(message, "tool_call_count") for message in messages
+            ),
         }
 
     @classmethod
@@ -172,6 +226,13 @@ class AnalysisService(BaseService):
             "avg_of_conversation_messages",
             "token_output_rate",
             "cost_consumption",
+            "total_token_count",
+            "input_token_count",
+            "output_token_count",
+            "cached_token_count",
+            "reasoning_token_count",
+            "model_call_count",
+            "tool_call_count",
         ]
 
         # 3.循环遍历字段计算环比增长
@@ -186,6 +247,78 @@ class AnalysisService(BaseService):
                 # 5.如果前一期数据为0，则直接设置环比为0
                 pop[field] = 0
 
+        return pop
+
+    @classmethod
+    def calculate_model_usage_by_messages(
+        cls,
+        messages: list[Message],
+    ) -> dict[str, dict[str, int]]:
+        """按模型汇总输入、输出、缓存和推理 Token。"""
+        usage_by_model: dict[str, dict[str, int]] = {}
+        for message in messages:
+            raw_usage = getattr(message, "token_usage", {}) or {}
+            if not isinstance(raw_usage, dict):
+                continue
+            for model_name, raw_model_usage in raw_usage.items():
+                if not isinstance(raw_model_usage, dict):
+                    continue
+                target = usage_by_model.setdefault(
+                    str(model_name),
+                    {
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "cached_tokens": 0,
+                        "reasoning_tokens": 0,
+                    },
+                )
+                target["input_tokens"] += cls._int_value(
+                    raw_model_usage.get("input_tokens")
+                )
+                target["output_tokens"] += cls._int_value(
+                    raw_model_usage.get("output_tokens")
+                )
+                target["total_tokens"] += cls._int_value(
+                    raw_model_usage.get("total_tokens")
+                )
+                input_details = raw_model_usage.get("input_details", {})
+                output_details = raw_model_usage.get("output_details", {})
+                if isinstance(input_details, dict):
+                    target["cached_tokens"] += cls._detail_value(
+                        input_details,
+                        "cached",
+                    )
+                    target["reasoning_tokens"] += cls._detail_value(
+                        input_details,
+                        "reasoning",
+                    )
+                if isinstance(output_details, dict):
+                    target["reasoning_tokens"] += cls._detail_value(
+                        output_details,
+                        "reasoning",
+                    )
+        return usage_by_model
+
+    @classmethod
+    def calculate_model_usage_pop(
+        cls,
+        current_data: dict[str, dict[str, int]],
+        previous_data: dict[str, dict[str, int]],
+    ) -> dict[str, float]:
+        """计算各模型总 Token 的周期环比。"""
+        pop: dict[str, float] = {}
+        for model_name in set(current_data) | set(previous_data):
+            current_total = current_data.get(model_name, {}).get("total_tokens", 0)
+            previous_total = previous_data.get(model_name, {}).get(
+                "total_tokens",
+                0,
+            )
+            pop[model_name] = (
+                float((current_total - previous_total) / previous_total)
+                if previous_total
+                else 0.0
+            )
         return pop
 
     @classmethod
@@ -204,6 +337,18 @@ class AnalysisService(BaseService):
         active_accounts_trend = {"x_axis": [], "y_axis": []}
         avg_of_conversation_messages_trend = {"x_axis": [], "y_axis": []}
         cost_consumption_trend = {"x_axis": [], "y_axis": []}
+        token_trends = {
+            field: {"x_axis": [], "y_axis": []}
+            for field in (
+                "total_token_count",
+                "input_token_count",
+                "output_token_count",
+                "cached_token_count",
+                "reasoning_token_count",
+                "model_call_count",
+                "tool_call_count",
+            )
+        }
 
         # 3.循环遍历计算并提取数据
         for day in range(days_ago):
@@ -255,7 +400,7 @@ class AnalysisService(BaseService):
 
             # 8.计算费用消耗趋势
             cost_consumption_trend_y_axis = sum(
-                message.total_price
+                cls._metric(message, "total_price")
                 for message in messages
                 if trend_start_at <= message.created_at < trend_end_at
             )
@@ -264,10 +409,50 @@ class AnalysisService(BaseService):
                 float(cost_consumption_trend_y_axis)
             )
 
-        # 9.返回数据
+            # 9.计算 Run 级 Token 和调用次数趋势，兼容历史消息。
+            day_messages = [
+                message
+                for message in messages
+                if trend_start_at <= message.created_at < trend_end_at
+            ]
+            for field, trend_data in token_trends.items():
+                trend_data["x_axis"].append(int(trend_start_at.timestamp()))
+                trend_data["y_axis"].append(
+                    sum(cls._metric(message, field) for message in day_messages)
+                )
+
+        # 10.返回数据
         return {
             "total_messages_trend": total_messages_trend,
             "active_accounts_trend": active_accounts_trend,
             "avg_of_conversation_messages_trend": avg_of_conversation_messages_trend,
             "cost_consumption_trend": cost_consumption_trend,
+            **{
+                f"{field}_trend": trend_data
+                for field, trend_data in token_trends.items()
+            },
         }
+
+    @staticmethod
+    def _metric(message: Message, field: str) -> int | float:
+        """读取消息统计字段，并兼容历史对象或空值。"""
+        value = getattr(message, field, 0)
+        return value or 0
+
+    @staticmethod
+    def _int_value(value: Any) -> int:
+        """把模型用量中的数值安全转换为整数。"""
+        return int(value) if isinstance(value, (int, float)) else 0
+
+    @classmethod
+    def _detail_value(cls, details: dict[str, Any], name: str) -> int:
+        """读取模型明细中的兼容字段名。"""
+        aliases = {
+            "cached": ("cached", "cached_tokens", "cache_read", "cache_read_tokens"),
+            "reasoning": ("reasoning", "reasoning_tokens"),
+        }
+        for alias in aliases.get(name, (name,)):
+            value = details.get(alias)
+            if isinstance(value, (int, float)):
+                return int(value)
+        return 0

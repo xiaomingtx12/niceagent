@@ -28,10 +28,26 @@ class VectorDatabaseService:
             return self.weaviate.client
 
     @property
+    def collection_name(self) -> str:
+        binding = self.embeddings_service.current_binding
+        fingerprint = str(binding.get("fingerprint") or "")
+        if fingerprint.startswith("legacy_"):
+            return COLLECTION_NAME
+        return f"{COLLECTION_NAME}_{fingerprint[:24]}"
+
+    def get_collection(self, fingerprint: str) -> Collection[Any, Any]:
+        collection_name = (
+            COLLECTION_NAME
+            if fingerprint.startswith("legacy_")
+            else f"{COLLECTION_NAME}_{fingerprint[:24]}"
+        )
+        return self.weaviate.client.collections.get(collection_name)
+
+    @property
     def vector_store(self) -> WeaviateVectorStore:
         return WeaviateVectorStore(
             client=self.weaviate.client,
-            index_name=COLLECTION_NAME,
+            index_name=self.collection_name,
             text_key="text",
             embedding=self.embeddings_service.cache_backed_embeddings,
         )
@@ -46,4 +62,4 @@ class VectorDatabaseService:
 
     @property
     def collection(self) -> Collection[Any, Any]:
-        return self.weaviate.client.collections.get(COLLECTION_NAME)
+        return self.weaviate.client.collections.get(self.collection_name)

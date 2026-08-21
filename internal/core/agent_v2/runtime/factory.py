@@ -28,6 +28,7 @@ from internal.core.agent_v2.middleware.runtime_context_middleware import (
     RuntimeContextMiddleware,
 )
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
+from internal.core.agent_v2.middleware.trace_middleware import TraceMiddleware
 from internal.core.agent_v2.runtime.models import ThreadIdentity
 from internal.core.agent_v2.runtime.harness_profile import (
     register_platform_harness_profile,
@@ -74,6 +75,9 @@ def build_deep_agent(
             on_failure="error",
         ),
         ToolErrorMiddleware(on_error=_recoverable_tool_error),
+        # Trace 位于重试和错误处理中间件内部，确保每次真实尝试都有
+        # 一个 Span，同时保留已恢复工具错误的失败遥测。
+        TraceMiddleware(),
         ModelCallLimitMiddleware(run_limit=max_model_calls, exit_behavior="end"),
         ToolCallLimitMiddleware(
             run_limit=max_tool_calls,

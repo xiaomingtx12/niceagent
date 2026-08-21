@@ -3,6 +3,7 @@ from .ai_service import AIService
 from .agent_runtime_service import AgentRuntimeService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
+from .agent_attachment_service import AgentAttachment, AgentAttachmentService
 from .analysis_service import AnalysisService
 from .api_key_service import ApiKeyService
 from .api_tool_service import ApiToolService
@@ -70,6 +71,8 @@ __all__ = [
     "AgentConversationCleanupService",
     "AgentInvocationService",
     "AgentInvocationSpec",
+    "AgentAttachment",
+    "AgentAttachmentService",
     "ApiKeyService",
     "AppConfigService",
     "OpenAPIService",

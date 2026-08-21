@@ -19,6 +19,7 @@ from internal.core.agent_v2.events.session import (
     EventTranslationSession,
     ToolCallRecord,
 )
+from internal.core.agent_v2.runtime.token_usage import normalize_message
 
 MAIN_AGENT_ID = "main"
 SUBAGENT_TOOL_NAME = "task"
@@ -65,11 +66,11 @@ def translate_model_chunk(
     if not isinstance(message, AIMessage):
         return None
     content = message_text(message.content)
-    usage = getattr(message, "usage_metadata", None)
+    usage = normalize_message(message)
     if not content and (
         getattr(message, "tool_calls", None)
         or getattr(message, "tool_call_chunks", None)
-        or not usage
+        or not usage.present
     ):
         return None
 
@@ -81,9 +82,9 @@ def translate_model_chunk(
         task_id=session.task_id,
         event=QueueEvent.AGENT_MESSAGE,
         answer=content,
-        message_token_count=_usage_value(message, "input_tokens"),
-        answer_token_count=_usage_value(message, "output_tokens"),
-        total_token_count=_usage_value(message, "total_tokens"),
+        message_token_count=usage.input_tokens,
+        answer_token_count=usage.output_tokens,
+        total_token_count=usage.total_tokens,
     )
 
 
@@ -275,9 +276,7 @@ def _todo_update_thought(
 
 def _usage_value(message: AIMessage, key: str) -> int:
     """从 LangChain 用量元数据读取 Token 数。"""
-    usage = message.usage_metadata
-    if isinstance(usage, Mapping):
-        return int(usage.get(key, 0) or 0)
+    usage = normalize_message(message)
     return int(getattr(usage, key, 0) or 0)
 
 

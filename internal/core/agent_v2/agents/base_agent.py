@@ -73,6 +73,7 @@ class BaseAgent(Serializable, Runnable):
     _run_started: bool = PrivateAttr(False)
     _run_active: bool = PrivateAttr(False)
     _resources_closed: bool = PrivateAttr(False)
+    _last_run_usage: dict[str, Any] | None = PrivateAttr(default=None)
 
     model_config = ConfigDict(
         # 允许字段接收框架运行时对象。
@@ -191,6 +192,18 @@ class BaseAgent(Serializable, Runnable):
                 raise FailException("BaseAgent 只允许执行一次")
             self._run_started = True
             self._run_active = True
+            self._last_run_usage = None
+
+    @property
+    def last_run_usage(self) -> dict[str, Any] | None:
+        """返回最近一次运行的聚合用量。"""
+        if self._last_run_usage is None:
+            return None
+        return dict(self._last_run_usage)
+
+    def _record_run_usage(self, usage: dict[str, Any]) -> None:
+        """接收图执行线程生成的最终 Run 级用量。"""
+        self._last_run_usage = dict(usage)
 
     def _close_after_run(self) -> None:
         """在图执行结束后关闭资源，并允许清理异常回到事件层。"""
@@ -288,6 +301,7 @@ class BaseAgent(Serializable, Runnable):
             telemetry=self._telemetry,
             cancelled=lambda: self._agent_queue_manager.is_stopped(task_id),
             on_cleanup=self._close_after_run,
+            on_usage=self._record_run_usage,
         ).run(
             input_state=input,
             task_id=task_id,

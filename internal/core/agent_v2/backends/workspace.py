@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import fnmatch
+import base64
+import mimetypes
+from pathlib import PurePosixPath
 from typing import Any, Optional
 from uuid import UUID
 
@@ -117,7 +120,7 @@ class MyDifyWorkspaceBackend(BackendProtocol):
     def read(
         self, file_path: str, offset: int = 0, limit: int = 2000
     ) -> ReadResult:
-        """按行偏移读取 UTF-8 文件片段。"""
+        """按协议读取文本片段或二进制 multimodal 数据。"""
         try:
             rest = self._resolve(file_path)
         except WorkspacePathError as exc:
@@ -125,6 +128,17 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         row = self._repository.fetch_latest(rest)
         if row is None or row.is_deleted or row.content is None:
             return ReadResult(error=f"file not found: {file_path}")
+        if self._is_binary(row):
+            file_data: dict[str, Any] = {
+                "content": base64.b64encode(row.content).decode("ascii"),
+                "encoding": "base64",
+            }
+            if row.created_at:
+                file_data["created_at"] = row.created_at.isoformat()
+            if row.updated_at:
+                file_data["modified_at"] = row.updated_at.isoformat()
+            return ReadResult(file_data=file_data)  # type: ignore[arg-type]
+
         content = row.content.decode("utf-8", errors="replace")
         sliced = "".join(content.splitlines(keepends=True)[offset : offset + limit])
         file_data: dict[str, Any] = {"content": sliced, "encoding": "utf-8"}
@@ -133,6 +147,25 @@ class MyDifyWorkspaceBackend(BackendProtocol):
         if row.updated_at:
             file_data["modified_at"] = row.updated_at.isoformat()
         return ReadResult(file_data=file_data)  # type: ignore[arg-type]
+
+    @staticmethod
+    def _is_binary(row: WorkspaceFile) -> bool:
+        """按存储 MIME 和扩展名识别需要 base64 返回的文件。"""
+        mime_type = (row.mime_type or "").lower()
+        if mime_type.startswith(("text/", "image/", "audio/", "video/")):
+            return not mime_type.startswith("text/")
+        extension = PurePosixPath(row.path).suffix.lower()
+        guessed = mimetypes.guess_type(f"file{extension}")[0] or ""
+        return guessed.startswith(("image/", "audio/", "video/")) or extension in {
+            ".pdf",
+            ".doc",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".ppt",
+            ".pptx",
+            ".zip",
+        }
 
     def write(self, file_path: str, content: str) -> WriteResult:
         """为已校验路径追加文本快照。"""
@@ -261,21 +294,32 @@ class MyDifyWorkspaceBackend(BackendProtocol):
     def upload_files(
         self, files: list[tuple[str, bytes]]
     ) -> list[FileUploadResponse]:
-        """解码并保存一批 UTF-8 文件。"""
+        """保存一批文本或二进制文件。"""
         responses: list[FileUploadResponse] = []
         for path, content in files:
             try:
-                decoded = content.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                responses.append(
-                    FileUploadResponse(path=path, error=f"not utf-8: {exc}")
-                )
+                rest = self._resolve(path)
+            except WorkspacePathError as exc:
+                responses.append(FileUploadResponse(path=path, error=str(exc)))
                 continue
-            result = self.write(path, decoded)
+            mime_type = (
+                mimetypes.guess_type(path)[0] or "application/octet-stream"
+            )
+            try:
+                self._repository.write_bytes(
+                    rest,
+                    content,
+                    mime_type=mime_type,
+                )
+                result_path = path
+                error = None
+            except (WorkspaceQuotaExceeded, WorkspaceVersionConflict) as exc:
+                result_path = path
+                error = str(exc)
             responses.append(
                 FileUploadResponse(
-                    path=result.path or path,
-                    error=result.error,
+                    path=result_path,
+                    error=error,
                 )
             )
         return responses

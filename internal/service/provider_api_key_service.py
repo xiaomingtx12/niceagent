@@ -31,19 +31,6 @@ class ProviderApiKeyService(BaseService):
         enabled_models: list[str] | None = None,
     ) -> ProviderApiKey:
         """创建提供商API密钥"""
-        # 检查该用户是否已经配置了该提供商的密钥
-        existing = (
-            self.db.session.query(ProviderApiKey)
-            .filter(
-                ProviderApiKey.account_id == account.id,
-                ProviderApiKey.provider_name == req.provider_name.data,
-            )
-            .first()
-        )
-
-        if existing:
-            raise ForbiddenException(f"已存在 {req.provider_name.data} 的API密钥配置")
-
         normalized_models = self._normalize_discovered_models(discovered_models or [])
         normalized_enabled_models = self._normalize_enabled_models(
             enabled_models,
@@ -55,6 +42,7 @@ class ProviderApiKeyService(BaseService):
             account_id=account.id,
             provider_name=req.provider_name.data,
             api_key=req.api_key.data,
+            base_url=(req.base_url.data or "").strip(),
             is_active=req.is_active.data if req.is_active.data is not None else True,
             remark=req.remark.data or "",
             discovered_models=normalized_models,
@@ -81,6 +69,7 @@ class ProviderApiKeyService(BaseService):
                 ProviderApiKey.provider_name == provider_name,
                 ProviderApiKey.is_active == True,
             )
+            .order_by(desc(ProviderApiKey.created_at))
             .first()
         )
 
@@ -91,7 +80,7 @@ class ProviderApiKeyService(BaseService):
     ) -> ProviderApiKey:
         """更新提供商API密钥"""
         provider_api_key = self.get_provider_api_key(provider_api_key_id, account)
-        if "api_key" in kwargs:
+        if "api_key" in kwargs or "base_url" in kwargs:
             kwargs["discovered_models"] = []
             kwargs["enabled_models"] = []
         self.update(provider_api_key, **kwargs)
@@ -102,15 +91,22 @@ class ProviderApiKeyService(BaseService):
         provider_api_key_id: UUID,
         account: Account,
         enabled_models: list[str],
+        discovered_models: list[dict[str, Any]] | None = None,
     ) -> ProviderApiKey:
-        """更新当前供应商配置中已激活的动态模型。"""
+        """更新动态模型快照的输入模态和激活状态。"""
         provider_api_key = self.get_provider_api_key(provider_api_key_id, account)
+        normalized_models = self._normalize_discovered_models(
+            discovered_models
+            if discovered_models is not None
+            else provider_api_key.discovered_models or []
+        )
         normalized_enabled_models = self._normalize_enabled_models(
             enabled_models,
-            provider_api_key.discovered_models or [],
+            normalized_models,
         )
         self.update(
             provider_api_key,
+            discovered_models=normalized_models,
             enabled_models=normalized_enabled_models,
         )
         return provider_api_key

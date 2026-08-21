@@ -15,6 +15,10 @@ from internal.core.agent_v2.runtime.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
+from internal.core.agent_v2.runtime.token_usage import (
+    TokenUsage,
+    TokenUsageAccumulator,
+)
 
 EventPublisher: TypeAlias = Callable[[UUID, AgentThought], None]
 CancellationProbe: TypeAlias = Callable[[], bool]
@@ -58,6 +62,12 @@ class EventTranslationSession:
     stream_model_messages: bool = False
     terminal_published: bool = False
     _last_event_at: float = field(default_factory=perf_counter)
+    trace_id: UUID = field(default_factory=uuid4)
+    token_usage: TokenUsageAccumulator = field(
+        default_factory=TokenUsageAccumulator
+    )
+    model_call_count: int = 0
+    tool_call_count: int = 0
 
     def remember_tool_call(self, tool_call: ToolCallRecord) -> None:
         """记录带框架关联标识的工具调用。"""
@@ -184,6 +194,8 @@ class EventTranslationSession:
         self.telemetry.emit(
             "agent.event",
             attributes={
+                "trace_id": str(self.trace_id),
+                "task_id": str(self.task_id),
                 "agent_type": timed_thought.agent_type.value,
                 "event": timed_thought.event.value,
                 "latency_ms": round(timed_thought.latency * 1000, 3),
@@ -206,6 +218,116 @@ class EventTranslationSession:
                 observation=str(error),
             )
         )
+
+    def record_model_usage(
+        self,
+        usage: TokenUsage,
+        *,
+        model_name: str | None = None,
+    ) -> None:
+        """记录一次真实模型调用的归一化用量。"""
+        self.token_usage.add(usage, model_name=model_name)
+
+    def record_model_call(self) -> None:
+        """记录一次真实模型调用，即使 Provider 没有返回 Token。"""
+        self.model_call_count += 1
+
+    def record_tool_call(self) -> None:
+        """记录一次真实工具调用。"""
+        self.tool_call_count += 1
+
+    def build_token_usage_payload(
+        self,
+        framework_usage: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """构建一次运行的统一用量汇总，兼容回调和 Trace 两种来源。"""
+        aggregate = TokenUsageAccumulator()
+        source = "trace_span"
+        if framework_usage:
+            aggregate.add_mapping(
+                framework_usage,
+                source="langchain_callback",
+            )
+            if aggregate.present:
+                source = "langchain_callback"
+        if not aggregate.present:
+            aggregate = self.token_usage
+
+        if not aggregate.present and not self.model_call_count and not self.tool_call_count:
+            return None
+
+        total = aggregate.total
+        return {
+            "trace_id": str(self.trace_id),
+            "task_id": str(self.task_id),
+            "model_count": len(aggregate.by_model),
+            "model_call_count": self.model_call_count or aggregate.call_count,
+            "tool_call_count": self.tool_call_count,
+            "usage_source": source,
+            "usage_present": aggregate.present,
+            "input_tokens": total.input_tokens,
+            "output_tokens": total.output_tokens,
+            "total_tokens": total.total_tokens
+            or total.input_tokens + total.output_tokens,
+            "input_details": dict(total.input_details),
+            "output_details": dict(total.output_details),
+            "models": {
+                model_name: usage.to_dict()
+                for model_name, usage in aggregate.by_model.items()
+            },
+        }
+
+    def publish_token_usage(
+        self,
+        framework_usage: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any] | None:
+        """发布一次运行聚合结果，优先采用 LangChain 回调总量。"""
+        payload = self.build_token_usage_payload(framework_usage)
+        if payload is None:
+            return None
+
+        run_attributes: dict[str, Any] = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"input_details", "output_details", "models"}
+        }
+        run_attributes.update(
+            {
+                f"input_{key}_tokens": value
+                for key, value in payload["input_details"].items()
+            }
+        )
+        run_attributes.update(
+            {
+                f"output_{key}_tokens": value
+                for key, value in payload["output_details"].items()
+            }
+        )
+        self.telemetry.emit(
+            "agent.run.token_usage",
+            attributes=run_attributes,
+        )
+        for model_name, usage in payload["models"].items():
+            model_attributes: dict[str, Any] = {
+                "trace_id": str(self.trace_id),
+                "task_id": str(self.task_id),
+                "model_name": model_name,
+                "usage_source": payload["usage_source"],
+                "input_tokens": usage["input_tokens"],
+                "output_tokens": usage["output_tokens"],
+                "total_tokens": usage["total_tokens"],
+            }
+            for direction in ("input", "output"):
+                for detail_name, value in usage[f"{direction}_details"].items():
+                    suffix = str(detail_name)
+                    if not suffix.endswith("_tokens"):
+                        suffix = f"{suffix}_tokens"
+                    model_attributes[f"{direction}_{suffix}"] = value
+            self.telemetry.emit(
+                "agent.model.token_usage",
+                attributes=model_attributes,
+            )
+        return payload
 
     def finish(self) -> None:
         """缺少终止事件时发布一次正常结束。"""

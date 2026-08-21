@@ -66,6 +66,10 @@ class SegmentService(BaseService):
         # 3.判断文档的状态是否可以新增片段数据，只有completed才可以新增
         if document.status != DocumentStatus.COMPLETED:
             raise FailException("当前文档不可新增片段，请稍后尝试")
+        self.embeddings_service.initialize_embeddings(
+            account.id,
+            document.dataset.embedding_model_config,
+        )
 
         # 4.提取文档片段的最大位置
         position = (
@@ -219,6 +223,10 @@ class SegmentService(BaseService):
             if required_update:
                 # 7.更新文档信息，涵盖字符总数、token总次数
                 document = segment.document
+                self.embeddings_service.initialize_embeddings(
+                    account.id,
+                    document.dataset.embedding_model_config,
+                )
                 document_character_count, document_token_count = (
                     self.db.session.query(
                         func.coalesce(func.sum(Segment.character_count), 0),
@@ -342,6 +350,10 @@ class SegmentService(BaseService):
         # 5.上锁并更新对应的数据，涵盖postgres记录、weaviate、关键词表
         with self.redis_client.lock(cache_key, LOCK_EXPIRE_TIME):
             try:
+                self.embeddings_service.initialize_embeddings(
+                    account.id,
+                    segment.document.dataset.embedding_model_config,
+                )
                 # 6.修改postgres数据库里的文档片段状态
                 self.update(
                     segment,
@@ -403,6 +415,10 @@ class SegmentService(BaseService):
 
         # 3.删除文档片段并获取该片段的文档信息
         document = segment.document
+        self.embeddings_service.initialize_embeddings(
+            account.id,
+            document.dataset.embedding_model_config,
+        )
         self.delete(segment)
 
         # 4.同步删除关键词表中属于该片段的关键词

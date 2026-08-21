@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 from langchain_core.messages import AIMessageChunk, ToolMessage
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 
 from internal.core.agent_v2.agents.execution import GraphExecutionDriver
 from internal.core.agent_v2.agents.models import QueueEvent
@@ -91,3 +92,8 @@ def test_driver_streams_model_deltas_and_todo_updates_once():
     assert events[0].id == events[1].id
     assert [todo.model_dump() for todo in events[2].todos] == todos
     assert observed["stream_mode"] == ["messages", "updates"]
+    assert len(observed["config"]["callbacks"]) == 1
+    assert isinstance(
+        observed["config"]["callbacks"][0],
+        UsageMetadataCallbackHandler,
+    )

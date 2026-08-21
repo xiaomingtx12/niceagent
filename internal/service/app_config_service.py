@@ -252,12 +252,22 @@ class AppConfigService(BaseService):
             raise ValidateErrorException("模型配置格式错误，请核实后重试")
         required_keys = {"provider", "model", "parameters"}
         if not required_keys.issubset(model_config) or (
-            set(model_config) - required_keys - {"features"}
+            set(model_config)
+            - required_keys
+            - {
+                "features",
+                "modalities",
+                "input_modalities",
+                "output_modalities",
+                "native_file_input",
+                "provider_connection_id",
+            }
         ):
             raise ValidateErrorException("模型键配置格式错误，请核实后重试")
 
         provider_name = model_config["provider"]
         model_name = model_config["model"]
+        provider_connection_id = model_config.get("provider_connection_id")
         parameters = model_config["parameters"]
         if not isinstance(provider_name, str) or not provider_name:
             raise ValidateErrorException("模型服务提供商类型必须为字符串")
@@ -275,11 +285,14 @@ class AppConfigService(BaseService):
             provider_name,
             model_name,
             account_id,
+            provider_connection_id=provider_connection_id,
         )
         if not model_entity:
             raise ValidateErrorException(
                 "该模型未激活，请先在 API 密钥设置中发现并激活后再使用"
             )
+        if model_entity.model_type.value != "chat":
+            raise ValidateErrorException("Agent 只能选择对话模型")
 
         normalized_parameters: dict[str, Any] = {}
         for parameter in model_entity.parameters:
@@ -304,8 +317,18 @@ class AppConfigService(BaseService):
         return {
             "provider": provider_name,
             "model": model_name,
+            "provider_connection_id": str(
+                model_entity.attributes.get("provider_api_key_id") or ""
+            ),
             "parameters": normalized_parameters,
             "features": [feature.value for feature in model_entity.features],
+            "input_modalities": [
+                modality.value for modality in model_entity.input_modalities
+            ],
+            "output_modalities": [
+                modality.value for modality in model_entity.output_modalities
+            ],
+            "native_file_input": model_entity.native_file_input,
         }
 
     @staticmethod
@@ -982,6 +1005,11 @@ class AppConfigService(BaseService):
             str(dataset_record.id): dataset_record for dataset_record in dataset_records
         }
         dataset_sets = set(dataset_dict.keys())
+        embedding_fingerprints = {
+            dataset.embedding_fingerprint for dataset in dataset_records
+        }
+        if len(embedding_fingerprints) > 1:
+            raise ValidateErrorException("关联知识库必须使用相同的向量模型")
 
         # 2.计算存在的知识库id列表，为了保留原始顺序，使用列表循环的方式来判断
         validate_datasets = [
@@ -997,6 +1025,9 @@ class AppConfigService(BaseService):
                     "name": dataset.name,
                     "icon": dataset.icon,
                     "description": dataset.description,
+                    "embedding_provider": dataset.embedding_provider,
+                    "embedding_model": dataset.embedding_model,
+                    "embedding_fingerprint": dataset.embedding_fingerprint,
                 }
             )
 
@@ -1020,6 +1051,9 @@ class AppConfigService(BaseService):
         model_config = {
             "provider": origin_model_config.get("provider", ""),
             "model": origin_model_config.get("model", ""),
+            "provider_connection_id": origin_model_config.get(
+                "provider_connection_id", ""
+            ),
             "parameters": origin_model_config.get("parameters", {}),
         }
 
@@ -1040,8 +1074,11 @@ class AppConfigService(BaseService):
             model_config["provider"],
             model_config["model"],
             account_id,
+            provider_connection_id=model_config["provider_connection_id"],
         )
         if not model_entity:
+            return default_active_model_config()
+        if model_entity.model_type.value != "chat":
             return default_active_model_config()
 
         # 5.判断parameters信息类型是否错误，如果错误则设置为默认值
@@ -1093,9 +1130,19 @@ class AppConfigService(BaseService):
 
         # 15.完成数据校验，赋值parameters参数
         model_config["parameters"] = parameters
+        model_config["provider_connection_id"] = str(
+            model_entity.attributes.get("provider_api_key_id") or ""
+        )
 
-        # 16.将模型支持的features添加到model_config中，便于前端判断模型能力
+        # 16.能力字段始终从当前已激活模型快照派生，避免应用保存过期的发现结果。
         model_config["features"] = [f.value for f in model_entity.features]
+        model_config["input_modalities"] = [
+            modality.value for modality in model_entity.input_modalities
+        ]
+        model_config["output_modalities"] = [
+            modality.value for modality in model_entity.output_modalities
+        ]
+        model_config["native_file_input"] = model_entity.native_file_input
 
         return model_config
 

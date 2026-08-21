@@ -21,6 +21,7 @@ from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
+from .agent_attachment_service import AgentAttachmentService
 from .base_service import BaseService
 
 
@@ -33,6 +34,7 @@ class WebAppService(BaseService):
     app_config_service: AppConfigService
     agent_invocation_service: AgentInvocationService
     agent_cleanup_service: AgentConversationCleanupService
+    agent_attachment_service: AgentAttachmentService
 
     def resolve_web_app_end_user(
         self,
@@ -135,11 +137,11 @@ class WebAppService(BaseService):
         # 2.获取应用配置
         app_config = self.app_config_service.get_app_config(app)
         
-        # 3.从模型配置中获取模型特性（不需要真正加载模型实例）
+        # 3.从模型配置中获取输入模态（不需要真正加载模型实例）
         model_config = app_config.get("model_config", {})
-        features = model_config.get("features", [])
-        if not isinstance(features, list):
-            features = []
+        input_modalities = model_config.get("input_modalities", ["text"])
+        if not isinstance(input_modalities, list):
+            input_modalities = ["text"]
 
         # 4.提取信息并返回
         return {
@@ -151,7 +153,10 @@ class WebAppService(BaseService):
                 "opening_statement": app_config.get("opening_statement"),
                 "opening_questions": app_config.get("opening_questions"),
                 "suggested_after_answer": app_config.get("suggested_after_answer"),
-                "features": features,
+                "input_modalities": input_modalities,
+                "native_file_input": bool(
+                    model_config.get("native_file_input", False)
+                ),
                 "text_to_speech": app_config.get("text_to_speech"),
                 "speech_to_text": app_config.get("speech_to_text"),
             },
@@ -192,6 +197,10 @@ class WebAppService(BaseService):
 
         # 4.获取校验后的运行时配置
         app_config = self.app_config_service.get_app_config(app)
+        attachments = self.agent_attachment_service.resolve(
+            req.file_ids.data,
+            owner_id=account.id,
+        )
 
         # 5.新建一条消息记录
         message = self.create(
@@ -202,6 +211,7 @@ class WebAppService(BaseService):
             created_by=end_user.id,
             query=req.query.data,
             image_urls=req.image_urls.data,
+            attachments=[attachment.to_dict() for attachment in attachments],
             status=MessageStatus.NORMAL,
         )
 
@@ -217,6 +227,7 @@ class WebAppService(BaseService):
             invoke_from=InvokeFrom.WEB_APP,
             query=req.query.data,
             image_urls=req.image_urls.data,
+            attachments=attachments,
             opening_statement=(
                 app_config["opening_statement"] if conversation.is_new else ""
             ),

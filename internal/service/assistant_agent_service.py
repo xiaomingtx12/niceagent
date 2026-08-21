@@ -25,6 +25,7 @@ from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
+from .agent_attachment_service import AgentAttachmentService
 from .conversation_service import ConversationService
 from .embeddings_service import EmbeddingsService
 from .faiss_service import FaissService
@@ -42,6 +43,7 @@ class AssistantAgentService(BaseService):
     conversation_service: ConversationService
     agent_invocation_service: AgentInvocationService
     language_model_service: LanguageModelService
+    agent_attachment_service: AgentAttachmentService
 
     def chat(self, req: AssistantAgentChat, account: Account) -> Generator:
         """传递query与账号实现与辅助Agent进行会话"""
@@ -63,6 +65,10 @@ class AssistantAgentService(BaseService):
         conversation = account.assistant_agent_conversation
 
         # 3.新建一条消息记录
+        attachments = self.agent_attachment_service.resolve(
+            req.file_ids.data,
+            owner_id=account.id,
+        )
         message = self.create(
             Message,
             app_id=assistant_agent_id,
@@ -71,6 +77,7 @@ class AssistantAgentService(BaseService):
             created_by=account.id,
             query=req.query.data,
             image_urls=req.image_urls.data,
+            attachments=[attachment.to_dict() for attachment in attachments],
             status=MessageStatus.NORMAL,
         )
 
@@ -100,6 +107,7 @@ class AssistantAgentService(BaseService):
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             query=req.query.data,
             image_urls=req.image_urls.data,
+            attachments=attachments,
             app_id=assistant_agent_id,
             extra_tools=tools,
             llm=llm,

@@ -34,6 +34,9 @@ class ProviderApiKey(db.Model):
     api_key = Column(
         String(500), nullable=False, server_default=text("''::character varying")
     )  # API密钥
+    base_url = Column(
+        String(1000), nullable=False, server_default=text("''::character varying")
+    )  # 用户级 OpenAI-compatible 服务地址，可用于第三方中转站
     is_active = Column(
         Boolean, nullable=False, server_default=text("true")
     )  # 是否启用

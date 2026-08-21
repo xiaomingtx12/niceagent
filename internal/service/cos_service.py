@@ -11,6 +11,8 @@ from werkzeug.datastructures import FileStorage
 from internal.entity.upload_file_entity import (
     ALLOWED_IMAGE_EXTENSION,
     ALLOWED_DOCUMENT_EXTENSION,
+    ALLOWED_AUDIO_EXTENSION,
+    ALLOWED_VIDEO_EXTENSION,
 )
 from internal.exception import FailException
 from internal.model import UploadFile, Account
@@ -37,7 +39,10 @@ class CosService:
         extension = filename.rsplit(".", 1)[-1] if "." in filename else ""
         extension_lower = extension.lower()
         if extension.lower() not in (
-            ALLOWED_IMAGE_EXTENSION + ALLOWED_DOCUMENT_EXTENSION
+            ALLOWED_IMAGE_EXTENSION
+            + ALLOWED_DOCUMENT_EXTENSION
+            + ALLOWED_AUDIO_EXTENSION
+            + ALLOWED_VIDEO_EXTENSION
         ):
             raise FailException(f"该.{extension}扩展的文件不允许上传")
         elif only_image and extension_lower not in ALLOWED_IMAGE_EXTENSION:
@@ -78,6 +83,19 @@ class CosService:
         bucket = self._get_bucket()
 
         client.download_file(bucket, key, target_file_path)
+
+    def download_file_bytes(self, key: str) -> bytes:
+        """读取 COS 文件原始字节，供 Agent Workspace 投影使用。"""
+        client = self._get_client()
+        response = client.get_object(self._get_bucket(), key)
+        body = response["Body"] if isinstance(response, dict) else response
+        if hasattr(body, "get_raw_stream"):
+            body = body.get_raw_stream()
+        if hasattr(body, "read"):
+            body = body.read()
+        if not isinstance(body, (bytes, bytearray, memoryview)):
+            raise FailException("读取附件失败，COS 返回了无效的文件内容")
+        return bytes(body)
 
     @classmethod
     def get_file_url(cls, key: str) -> str:

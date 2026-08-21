@@ -19,6 +19,7 @@ from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .retrieval_service import RetrievalService
+from .language_model_service import LanguageModelService
 from ..lib.helper import datetime_to_timestamp
 from ..model.app import AppDatasetJoin
 
@@ -30,6 +31,7 @@ class DatasetService(BaseService):
 
     db: SQLAlchemy
     retrieval_service: RetrievalService
+    language_model_service: LanguageModelService
 
     def create_dataset(
         self,
@@ -56,6 +58,13 @@ class DatasetService(BaseService):
                 name=req.name.data
             )
 
+        binding = self.language_model_service.get_embedding_model_binding(
+            req.embedding_provider.data,
+            req.embedding_model.data,
+            account.id,
+            provider_connection_id=req.embedding_provider_connection_id.data,
+        )
+
         # 3.创建知识库记录并返回
         return self.create(
             Dataset,
@@ -63,6 +72,13 @@ class DatasetService(BaseService):
             name=req.name.data,
             icon=req.icon.data,
             description=req.description.data,
+            embedding_provider=binding["provider"],
+            embedding_provider_connection_id=(
+                UUID(binding["api_key_id"]) if binding.get("api_key_id") else None
+            ),
+            embedding_model=binding["model"],
+            embedding_fingerprint=binding["fingerprint"],
+            embedding_dimension=binding["dimension"],
         )
 
     def get_dataset_queries(
@@ -135,12 +151,41 @@ class DatasetService(BaseService):
                 name=req.name.data
             )
 
+        binding = self.language_model_service.get_embedding_model_binding(
+            req.embedding_provider.data,
+            req.embedding_model.data,
+            account.id,
+            provider_connection_id=req.embedding_provider_connection_id.data,
+        )
+        if (
+            dataset.embedding_fingerprint.startswith("legacy_")
+            and dataset.embedding_provider == binding["provider"]
+            and dataset.embedding_model == binding["model"]
+        ):
+            binding["fingerprint"] = dataset.embedding_fingerprint
+        model_changed = (
+            dataset.embedding_provider != binding["provider"]
+            or dataset.embedding_model != binding["model"]
+            or str(dataset.embedding_provider_connection_id or "")
+            != str(binding.get("api_key_id") or "")
+            or dataset.embedding_fingerprint != binding["fingerprint"]
+        )
+        if model_changed and dataset.document_count > 0:
+            raise ValidateErrorException("知识库已有文档，切换向量模型前必须先重建索引")
+
         # 4.更新数据
         self.update(
             dataset,
             name=req.name.data,
             icon=req.icon.data,
             description=req.description.data,
+            embedding_provider=binding["provider"],
+            embedding_provider_connection_id=(
+                UUID(binding["api_key_id"]) if binding.get("api_key_id") else None
+            ),
+            embedding_model=binding["model"],
+            embedding_fingerprint=binding["fingerprint"],
+            embedding_dimension=binding["dimension"],
         )
 
         return dataset
@@ -181,6 +226,7 @@ class DatasetService(BaseService):
 
         try:
             # 2.删除知识库基础记录以及知识库和应用关联的记录
+            embedding_fingerprint = dataset.embedding_fingerprint
             self.delete(dataset)
             with self.db.auto_commit():
                 self.db.session.query(AppDatasetJoin).filter(
@@ -188,7 +234,7 @@ class DatasetService(BaseService):
                 ).delete()
 
             # 3.调用异步任务执行后续的操作
-            delete_dataset.delay(dataset_id)
+            delete_dataset.delay(dataset_id, embedding_fingerprint)
         except Exception as e:
             logging.exception(
                 f"删除知识库失败, dataset_id: {dataset_id}, 错误信息: {str(e)}"

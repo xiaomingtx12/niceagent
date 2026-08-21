@@ -25,6 +25,7 @@ from internal.exception import FailException
 from internal.model import App
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_runtime_service import AgentRuntimeService
+from .agent_attachment_service import AgentAttachment, AgentAttachmentService
 from .app_config_service import AppConfigService
 from .base_service import BaseService
 from .conversation_service import ConversationService
@@ -47,6 +48,7 @@ class AgentInvocationSpec:
     invoke_from: InvokeFrom
     query: str
     image_urls: list[str]
+    attachments: Sequence[AgentAttachment] = ()
     opening_statement: str = ""
     app_id: UUID | None = None
     extra_tools: Sequence[BaseTool] = ()
@@ -66,6 +68,7 @@ class AgentInvocationService(BaseService):
     language_model_service: LanguageModelService
     agent_runtime_service: AgentRuntimeService
     conversation_service: ConversationService
+    agent_attachment_service: AgentAttachmentService
 
     def build_agent(
         self,
@@ -127,6 +130,10 @@ class AgentInvocationService(BaseService):
         runtime_app_config = dict(spec.app_config)
         runtime_app_config["subagents"] = runtime_subagents
         try:
+            self.agent_attachment_service.materialize(
+                spec.attachments,
+                runtime.backend,
+            )
             agent = BaseAgent(
                 llm=llm,
                 checkpointer=runtime.checkpointer,
@@ -183,21 +190,25 @@ class AgentInvocationService(BaseService):
         for item in normalized:
             model_ref = item.get("model")
             if model_ref:
-                model_parts = str(model_ref).split("/")
-                if len(model_parts) != 2 or any(
-                    not part.strip() for part in model_parts
-                ):
-                    raise FailException(
-                        f"子 Agent {item['name']!r} 的模型标识必须是 provider/model 格式"
+                provider_name = str(item.get("model_provider") or "").strip()
+                model_name = str(model_ref).strip()
+                if not provider_name:
+                    model_parts = str(model_ref).split("/", 1)
+                    if len(model_parts) != 2 or any(
+                        not part.strip() for part in model_parts
+                    ):
+                        raise FailException(
+                            f"子 Agent {item['name']!r} 的模型标识必须是 provider/model 格式"
+                        )
+                    provider_name, model_name = (
+                        part.strip() for part in model_parts
                     )
-                provider_name, model_name = (
-                    part.strip() for part in model_parts
-                )
                 model_overrides[item["name"]] = (
                     self.language_model_service.load_language_model(
                         {
                             "provider": provider_name,
                             "model": model_name,
+                            "provider_connection_id": item.get("model_connection_id"),
                         },
                         account_id=account_id,
                     )
@@ -306,6 +317,7 @@ class AgentInvocationService(BaseService):
                         llm.convert_to_human_message(
                             spec.query,
                             spec.image_urls,
+                            [attachment.to_dict() for attachment in spec.attachments],
                         )
                     ],
                 }
@@ -315,11 +327,19 @@ class AgentInvocationService(BaseService):
                 completed = True
             except Exception as error:
                 error_thought = self._build_error_thought(error)
-                self._persist_error(spec, error_thought)
+                self._persist_error(
+                    spec,
+                    error_thought,
+                    run_usage=agent.last_run_usage,
+                )
                 yield error_thought
             finally:
                 if completed:
-                    self._persist(spec, thought_map.values())
+                    self._persist(
+                        spec,
+                        thought_map.values(),
+                        run_usage=agent.last_run_usage,
+                    )
 
         return generate()
 
@@ -341,9 +361,10 @@ class AgentInvocationService(BaseService):
         self,
         spec: AgentInvocationSpec,
         error_thought: AgentThought,
+        run_usage: Mapping[str, Any] | None = None,
     ) -> None:
         try:
-            self._persist(spec, [error_thought])
+            self._persist(spec, [error_thought], run_usage=run_usage)
         except Exception:
             current_app.logger.exception("持久化 Agent 错误事件失败")
 
@@ -375,11 +396,16 @@ class AgentInvocationService(BaseService):
                     llm.convert_to_human_message(
                         spec.query,
                         spec.image_urls,
+                        [attachment.to_dict() for attachment in spec.attachments],
                     )
                 ],
             }
         )
-        self._persist(spec, result.agent_thoughts)
+        self._persist(
+            spec,
+            result.agent_thoughts,
+            run_usage=agent.last_run_usage,
+        )
         return result
 
     def serialize_event(
@@ -406,6 +432,7 @@ class AgentInvocationService(BaseService):
         self,
         spec: AgentInvocationSpec,
         thoughts: Sequence[AgentThought],
+        run_usage: Mapping[str, Any] | None = None,
     ) -> None:
         self.conversation_service.save_agent_thoughts(
             account_id=spec.account_id,
@@ -414,6 +441,7 @@ class AgentInvocationService(BaseService):
             conversation_id=spec.conversation_id,
             message_id=spec.message_id,
             agent_thoughts=list(thoughts),
+            run_usage=run_usage,
         )
 
     @staticmethod

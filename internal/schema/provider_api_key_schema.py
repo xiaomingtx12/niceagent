@@ -1,7 +1,7 @@
 from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
 from wtforms import BooleanField, StringField
-from wtforms.validators import Length, DataRequired
+from wtforms.validators import Length, DataRequired, Optional, URL
 
 from internal.lib.helper import datetime_to_timestamp
 from internal.model.provider_api_key import ProviderApiKey
@@ -24,6 +24,14 @@ class CreateProviderApiKeyReq(FlaskForm):
             Length(max=500, message="API密钥不能超过500个字符"),
         ],
     )
+    base_url = StringField(
+        "base_url",
+        validators=[
+            Optional(),
+            URL(message="模型服务地址必须是 http 或 https URL"),
+            Length(max=1000, message="模型服务地址不能超过1000个字符"),
+        ],
+    )
     is_active = BooleanField("is_active", default=True)
     remark = StringField(
         "remark", validators=[Length(max=255, message="备注不能超过255个字符")]
@@ -35,6 +43,14 @@ class UpdateProviderApiKeyReq(FlaskForm):
 
     api_key = StringField(
         "api_key", validators=[Length(max=500, message="API密钥不能超过500个字符")]
+    )
+    base_url = StringField(
+        "base_url",
+        validators=[
+            Optional(),
+            URL(message="模型服务地址必须是 http 或 https URL"),
+            Length(max=1000, message="模型服务地址不能超过1000个字符"),
+        ],
     )
     is_active = BooleanField("is_active")
     remark = StringField(
@@ -48,6 +64,8 @@ class GetProviderApiKeysResp(Schema):
     id = fields.UUID(dump_default="")
     provider_name = fields.String(dump_default="")
     api_key_masked = fields.String(dump_default="")  # 脱敏后的密钥
+    base_url = fields.String(dump_default="")
+    connection_name = fields.String(dump_default="")
     is_active = fields.Boolean(dump_default=True)
     remark = fields.String(dump_default="")
     updated_at = fields.Integer(dump_default=0)
@@ -72,6 +90,8 @@ class GetProviderApiKeysResp(Schema):
             "id": data.id,
             "provider_name": data.provider_name,
             "api_key_masked": api_key_masked,
+            "base_url": data.base_url or "",
+            "connection_name": (data.remark or "").strip(),
             "is_active": data.is_active,
             "remark": data.remark,
             "updated_at": datetime_to_timestamp(data.updated_at),

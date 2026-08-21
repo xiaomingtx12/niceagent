@@ -2,6 +2,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from threading import Thread
+from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
@@ -27,6 +28,19 @@ from .provider_api_key_service import ProviderApiKeyService
 from ..exception import NotFoundException
 from ..model import Conversation, Message, MessageAgentThought, Account
 from ..schema.conversation_schema import GetConversationMessagesWithPageReq
+
+
+def _usage_detail(details: Mapping[str, Any], name: str) -> int:
+    """读取 Token 明细并统一转换为整数。"""
+    aliases = {
+        "cached": ("cached", "cached_tokens", "cache_read", "cache_read_tokens"),
+        "reasoning": ("reasoning", "reasoning_tokens"),
+    }
+    for alias in aliases.get(name, (name,)):
+        value = details.get(alias, 0)
+        if isinstance(value, (int, float)):
+            return int(value)
+    return 0
 
 
 @inject
@@ -203,6 +217,7 @@ class ConversationService(BaseService):
         conversation_id: UUID,
         message_id: UUID,
         agent_thoughts: list[AgentThought],
+        run_usage: Mapping[str, Any] | None = None,
     ) -> None:
         """持久化 Agent V2 轨迹事件并更新父消息。"""
         # 1.定义变量存储推理位置及总耗时
@@ -315,6 +330,46 @@ class ConversationService(BaseService):
                     error=agent_thought.observation,
                 )
                 break
+
+        # Run 级用量只在一次执行结束后写入，避免把流式分片重复累加。
+        if run_usage:
+            input_details = run_usage.get("input_details", {})
+            output_details = run_usage.get("output_details", {})
+            if not isinstance(input_details, Mapping):
+                input_details = {}
+            if not isinstance(output_details, Mapping):
+                output_details = {}
+
+            usage_updates: dict[str, Any] = {
+                "trace_id": run_usage.get("trace_id"),
+                "model_call_count": int(run_usage.get("model_call_count", 0) or 0),
+                "tool_call_count": int(run_usage.get("tool_call_count", 0) or 0),
+                "token_usage": dict(run_usage.get("models", {}) or {}),
+            }
+            if run_usage.get("usage_present"):
+                usage_updates.update(
+                    {
+                        "input_token_count": int(
+                            run_usage.get("input_tokens", 0) or 0
+                        ),
+                        "output_token_count": int(
+                            run_usage.get("output_tokens", 0) or 0
+                        ),
+                        "cached_token_count": _usage_detail(
+                            input_details,
+                            "cached",
+                        ),
+                        "reasoning_token_count": max(
+                            _usage_detail(input_details, "reasoning"),
+                            _usage_detail(output_details, "reasoning"),
+                        ),
+                        # 新口径覆盖旧总量，历史消息仍继续使用旧字段。
+                        "total_token_count": int(
+                            run_usage.get("total_tokens", 0) or 0
+                        ),
+                    }
+                )
+            self.update(message, **usage_updates)
 
     def _generate_conversation_name_and_update(
         self,

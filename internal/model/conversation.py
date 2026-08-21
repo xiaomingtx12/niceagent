@@ -105,6 +105,9 @@ class Message(db.Model):
     image_urls = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 用户提问的图片URL列表信息
+    attachments = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 用户提问时提交的附件元数据
     message = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 产生answer的消息列表
@@ -146,6 +149,30 @@ class Message(db.Model):
     total_token_count = Column(
         Integer, nullable=False, server_default=text("0")
     )  # 消耗的总token数，计算步骤的消耗
+    input_token_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )  # 本次运行输入Token总数
+    output_token_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )  # 本次运行输出Token总数
+    cached_token_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )  # 本次运行缓存命中的输入Token数
+    reasoning_token_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )  # 本次运行推理Token数
+    model_call_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )  # 本次运行真实模型调用次数
+    tool_call_count = Column(
+        Integer, nullable=False, server_default=text("0")
+    )  # 本次运行真实工具调用次数
+    trace_id = Column(
+        String(64), nullable=True
+    )  # 本次运行的Trace标识
+    token_usage = Column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )  # 按模型保存的Token明细
     total_price = Column(
         Numeric(10, 7), nullable=False, server_default=text("0.0")
     )  # 消耗的总价格，计算步骤的总消耗

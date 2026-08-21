@@ -1,9 +1,11 @@
 import logging
+import hashlib
 import mimetypes
 import os
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
+from urllib.parse import urlparse
 
 from flask import current_app
 from injector import inject
@@ -12,15 +14,19 @@ from internal.core.language_model import LanguageModelManager
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
     ModelEntity,
+    ModelType,
 )
 from internal.model.provider_api_key import ProviderApiKey
 from internal.exception import NotFoundException, ValidateErrorException
+from langchain_openai import OpenAIEmbeddings
+from langchain_core.embeddings import Embeddings
 from internal.lib.helper import convert_model_to_dict
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from ..lib.api_key_helper import get_api_key_for_provider
 
 logger = logging.getLogger(__name__)
+AGENT_MODEL_TYPES = {ModelType.CHAT}
 
 
 @inject
@@ -34,12 +40,13 @@ class LanguageModelService(BaseService):
     def get_language_models(
         self,
         account_id: UUID | None = None,
+        model_types: set[ModelType] | None = None,
     ) -> list[dict[str, Any]]:
-        """读取当前账号已激活的模型，不访问第三方目录。"""
+        """读取当前账号已激活的模型，可按用途筛选。"""
         # 1.调用语言模型管理器获取提供商列表
         providers = self.language_model_manager.get_providers()
 
-        # 2.构建语言模型列表，循环读取数据
+        # 2.构建连接级模型列表。同一适配器下的不同 API Key/中转地址不能合并。
         language_models = []
         for provider in providers:
             # 3.获取提供商实体和模型实体列表
@@ -48,30 +55,50 @@ class LanguageModelService(BaseService):
                 provider_entity.name,
                 account_id,
             )
-            if not model_entities:
-                continue
+            if model_types is not None:
+                model_entities = [
+                    model for model in model_entities if model.model_type in model_types
+                ]
+            grouped_models: dict[str, list[ModelEntity]] = {}
+            for model in model_entities:
+                connection_id = str(
+                    model.attributes.get("provider_api_key_id") or "legacy"
+                )
+                grouped_models.setdefault(connection_id, []).append(model)
 
-            # 4.构建响应字典结构
-            language_model = {
-                "name": provider_entity.name,
-                "position": provider.position,
-                "label": provider_entity.label,
-                "icon": provider_entity.icon,
-                "description": provider_entity.description,
-                "background": provider_entity.background,
-                "support_model_types": provider_entity.supported_model_types,
-                "model_discovery": {
-                    "enabled": provider_entity.model_discovery.enabled,
-                    "dynamic_model_count": sum(
-                        model.is_dynamic for model in model_entities
-                    ),
-                    "static_model_count": sum(
-                        not model.is_dynamic for model in model_entities
-                    ),
-                },
-                "models": convert_model_to_dict(model_entities),
-            }
-            language_models.append(language_model)
+            profiles = self._get_provider_profiles(provider_entity.name, account_id)
+            profile_by_id = {str(profile.id): profile for profile in profiles}
+            for connection_id, connection_models in grouped_models.items():
+                profile = profile_by_id.get(connection_id)
+                connection_name = self._get_connection_name(
+                    profile,
+                    provider_entity.label,
+                )
+                language_models.append(
+                    {
+                        "name": provider_entity.name,
+                        "provider_name": provider_entity.name,
+                        "provider_label": provider_entity.label,
+                        "connection_id": "" if connection_id == "legacy" else connection_id,
+                        "connection_name": connection_name,
+                        "position": provider.position,
+                        "label": connection_name,
+                        "icon": provider_entity.icon,
+                        "description": provider_entity.description,
+                        "background": provider_entity.background,
+                        "support_model_types": provider_entity.supported_model_types,
+                        "model_discovery": {
+                            "enabled": provider_entity.model_discovery.enabled,
+                            "dynamic_model_count": sum(
+                                model.is_dynamic for model in connection_models
+                            ),
+                            "static_model_count": sum(
+                                not model.is_dynamic for model in connection_models
+                            ),
+                        },
+                        "models": convert_model_to_dict(connection_models),
+                    }
+                )
 
         return language_models
 
@@ -80,6 +107,7 @@ class LanguageModelService(BaseService):
         provider_name: str,
         model_name: str,
         account_id: UUID | None = None,
+        provider_connection_id: str | None = None,
     ) -> dict[str, Any]:
         """根据传递的提供者名字+模型名字获取模型详细信息"""
         # 1.获取提供者+模型实体信息
@@ -92,6 +120,7 @@ class LanguageModelService(BaseService):
             provider_name,
             model_name,
             account_id,
+            provider_connection_id=provider_connection_id,
         )
         if not model_entity:
             raise NotFoundException("该模型未激活，请先在 API 密钥设置中激活该模型")
@@ -144,6 +173,7 @@ class LanguageModelService(BaseService):
             # 1.从model_config中提取出provider、model、parameters
             provider_name = model_config.get("provider", "")
             model_name = model_config.get("model", "")
+            provider_connection_id = model_config.get("provider_connection_id")
             parameters = model_config.get("parameters", {}).copy()
             if not account_id:
                 raise ValidateErrorException("加载模型缺少账号信息")
@@ -153,14 +183,33 @@ class LanguageModelService(BaseService):
                 provider_name,
                 model_name,
                 account_id,
+                provider_connection_id=provider_connection_id,
             )
             if not model_entity:
                 raise ValidateErrorException(
                     f"模型 {provider_name}/{model_name} 未激活，请先在 API 密钥设置中激活该模型"
                 )
+            if model_entity.model_type not in AGENT_MODEL_TYPES:
+                raise ValidateErrorException(
+                    f"模型 {provider_name}/{model_name} 不是 Agent 可调用的对话模型"
+                )
 
-            # 2.获取用户的 API Key（必须成功，否则抛出异常）
+            # 2.获取模型所属配置的 API Key，兼容历史模型配置
             api_key = get_api_key_for_provider(provider_name, account_id)
+            provider_api_key_id = model_entity.attributes.get("provider_api_key_id")
+            if provider_api_key_id:
+                profile = (
+                    self.db.session.query(ProviderApiKey)
+                    .filter(
+                        ProviderApiKey.id == provider_api_key_id,
+                        ProviderApiKey.account_id == account_id,
+                        ProviderApiKey.provider_name == provider_name,
+                        ProviderApiKey.is_active == True,
+                    )
+                    .first()
+                )
+                if profile:
+                    api_key = profile.api_key
             # 根据不同提供商设置对应的 API Key 参数名
             api_key_param = self._get_api_key_param_name(provider_name)
             parameters[api_key_param] = api_key
@@ -172,10 +221,18 @@ class LanguageModelService(BaseService):
             )
 
             # 4.实例化模型后并返回
+            model_attributes = {
+                key: value
+                for key, value in model_entity.attributes.items()
+                if key != "provider_api_key_id"
+            }
             return model_class(
-                **model_entity.attributes,
+                **model_attributes,
                 **parameters,
                 features=model_entity.features,
+                input_modalities=model_entity.input_modalities,
+                output_modalities=model_entity.output_modalities,
+                native_file_input=model_entity.native_file_input,
                 metadata=model_entity.metadata,
             )
         except Exception as e:
@@ -183,6 +240,87 @@ class LanguageModelService(BaseService):
             logger.error(f"加载语言模型失败: {str(e)}")
             # 重新抛出异常，不再降级
             raise
+
+    def get_embedding_model_binding(
+        self,
+        provider_name: str,
+        model_name: str,
+        account_id: UUID,
+        provider_connection_id: str | None = None,
+    ) -> dict[str, Any]:
+        """校验动态向量模型，并生成稳定的向量集合标识。"""
+        model_entity = self.get_enabled_model_entity(
+            provider_name,
+            model_name,
+            account_id,
+            provider_connection_id=provider_connection_id,
+        )
+        if not model_entity:
+            raise ValidateErrorException(
+                f"向量模型 {provider_name}/{model_name} 未激活"
+            )
+        if model_entity.model_type != ModelType.EMBEDDING:
+            raise ValidateErrorException(
+                f"模型 {provider_name}/{model_name} 不是向量模型"
+            )
+        base_url = str(model_entity.attributes.get("base_url") or "").rstrip("/")
+        provider_api_key_id = str(
+            model_entity.attributes.get("provider_api_key_id") or ""
+        )
+        fingerprint = hashlib.sha256(
+            f"{provider_name}\0{provider_api_key_id}\0{base_url}\0{model_name}".encode(
+                "utf-8"
+            )
+        ).hexdigest()
+        dimension = int(
+            model_entity.attributes.get("dimensions")
+            or model_entity.metadata.get("dimensions")
+            or 0
+        )
+        return {
+            "provider": provider_name,
+            "model": model_name,
+            "base_url": base_url,
+            "api_key_id": provider_api_key_id,
+            "fingerprint": fingerprint,
+            "dimension": dimension,
+        }
+
+    def load_embeddings_model(
+        self,
+        provider_name: str,
+        model_name: str,
+        account_id: UUID,
+        provider_connection_id: str | None = None,
+    ) -> tuple[Embeddings, dict[str, Any]]:
+        """通过 OpenAI-compatible 接口加载已激活的向量模型。"""
+        binding = self.get_embedding_model_binding(
+            provider_name,
+            model_name,
+            account_id,
+            provider_connection_id=provider_connection_id,
+        )
+        api_key = get_api_key_for_provider(provider_name, account_id)
+        if binding["api_key_id"]:
+            profile = (
+                self.db.session.query(ProviderApiKey)
+                .filter(
+                    ProviderApiKey.id == binding["api_key_id"],
+                    ProviderApiKey.account_id == account_id,
+                    ProviderApiKey.provider_name == provider_name,
+                    ProviderApiKey.is_active == True,
+                )
+                .first()
+            )
+            if profile:
+                api_key = profile.api_key
+        embeddings = OpenAIEmbeddings(
+            model=model_name,
+            api_key=api_key,
+            base_url=binding["base_url"] or None,
+            dimensions=binding["dimension"] or None,
+        )
+        return embeddings, binding
 
     def _get_api_key_param_name(self, provider_name: str) -> str:
         """根据提供商名称返回对应的 API Key 参数名（所有提供商统一使用OpenAI兼容接口，参数名均为api_key）"""
@@ -192,6 +330,7 @@ class LanguageModelService(BaseService):
         self,
         provider_name: str,
         api_key: str,
+        base_url: str | None = None,
     ) -> list[dict[str, Any]]:
         """显式发现一次第三方目录，供 API Key 配置流程使用。"""
         if not api_key or not api_key.strip():
@@ -199,6 +338,7 @@ class LanguageModelService(BaseService):
         models = self.language_model_manager.discover_models(
             provider_name,
             api_key.strip(),
+            base_url=base_url,
         )
         return convert_model_to_dict(models)
 
@@ -214,43 +354,46 @@ class LanguageModelService(BaseService):
         self,
         provider_name: str,
         account_id: UUID | None,
+        provider_api_key_id: str | None = None,
     ) -> list[ModelEntity]:
         """按 API Key 激活顺序读取当前账号可使用的模型。"""
         if not account_id:
             return []
 
-        profile = (
-            self.db.session.query(ProviderApiKey)
-            .filter(
-                ProviderApiKey.account_id == account_id,
-                ProviderApiKey.provider_name == provider_name,
-                ProviderApiKey.is_active == True,
-            )
-            .first()
+        profiles = self._get_provider_profiles(
+            provider_name,
+            account_id,
+            provider_api_key_id=provider_api_key_id,
         )
-        if not profile:
+        if not profiles:
             return []
 
-        enabled_names = [
-            model_name
-            for model_name in profile.enabled_models or []
-            if isinstance(model_name, str) and model_name
-        ]
-        discovered_by_name: dict[str, dict[str, Any]] = {}
-        for raw_model in profile.discovered_models or []:
-            if not isinstance(raw_model, dict):
-                continue
-            model_name = raw_model.get("model_name") or raw_model.get("model")
-            if isinstance(model_name, str) and model_name:
-                discovered_by_name[model_name] = raw_model
+        enabled_models: list[tuple[ProviderApiKey, str, dict[str, Any]]] = []
+        seen_models: set[tuple[str, str]] = set()
+        for profile in profiles:
+            discovered_by_name = {
+                (raw_model.get("model_name") or raw_model.get("model")): raw_model
+                for raw_model in profile.discovered_models or []
+                if isinstance(raw_model, dict)
+                and isinstance(raw_model.get("model_name") or raw_model.get("model"), str)
+            }
+            for model_name in profile.enabled_models or []:
+                if not isinstance(model_name, str) or not model_name:
+                    continue
+                model_key = (str(profile.id), model_name)
+                if (
+                    model_key not in seen_models
+                    and model_name in discovered_by_name
+                ):
+                    enabled_models.append(
+                        (profile, model_name, discovered_by_name[model_name])
+                    )
+                    seen_models.add(model_key)
 
         # enabled_models 是唯一的运行时白名单。快照中不存在的名称不再兜底到静态目录。
         models: list[ModelEntity] = []
         provider = self.language_model_manager.get_provider(provider_name)
-        for model_name in enabled_names:
-            raw_model = discovered_by_name.get(model_name)
-            if raw_model is None:
-                continue
+        for profile, model_name, raw_model in enabled_models:
             try:
                 model_payload = {**raw_model, "model": model_name}
                 model_payload.pop("model_name", None)
@@ -261,7 +404,10 @@ class LanguageModelService(BaseService):
                 model.attributes = {
                     **(model.attributes or {}),
                     "model": model_name,
-                    "base_url": provider.provider_entity.base_url,
+                    "base_url": (
+                        profile.base_url.strip() or provider.provider_entity.base_url
+                    ),
+                    "provider_api_key_id": str(profile.id),
                 }
                 models.append(model)
             except Exception:
@@ -277,6 +423,7 @@ class LanguageModelService(BaseService):
         provider_name: str,
         model_name: str,
         account_id: UUID | None,
+        provider_connection_id: str | None = None,
     ) -> ModelEntity | None:
         """读取当前账号已激活的指定模型。"""
         return next(
@@ -284,32 +431,84 @@ class LanguageModelService(BaseService):
                 model
                 for model in self.get_enabled_model_entities(provider_name, account_id)
                 if model.model_name == model_name
+                and (
+                    not provider_connection_id
+                    or str(model.attributes.get("provider_api_key_id"))
+                    == str(provider_connection_id)
+                )
             ),
             None,
         )
 
-    def get_default_model_config(self, account_id: UUID) -> dict[str, Any]:
-        """按账号已激活顺序选择系统默认模型配置。"""
+    def get_default_model_config(
+        self,
+        account_id: UUID,
+        model_type: ModelType = ModelType.CHAT,
+    ) -> dict[str, Any]:
+        """按账号已激活顺序选择指定用途的默认模型。"""
         providers = sorted(
             self.language_model_manager.get_providers(),
             key=lambda item: item.position,
         )
         for provider in providers:
-            models = self.get_enabled_model_entities(provider.name, account_id)
+            models = [
+                model
+                for model in self.get_enabled_model_entities(provider.name, account_id)
+                if model.model_type == model_type
+            ]
             if not models:
                 continue
             model = models[0]
             return {
                 "provider": provider.name,
                 "model": model.model_name,
+                "provider_connection_id": str(
+                    model.attributes.get("provider_api_key_id") or ""
+                ),
                 "parameters": {
-                    parameter.name: parameter.default
-                    for parameter in model.parameters
+                    parameter.name: parameter.default for parameter in model.parameters
                 },
                 "features": [feature.value for feature in model.features],
+                "input_modalities": [
+                    modality.value for modality in model.input_modalities
+                ],
+                "output_modalities": [
+                    modality.value for modality in model.output_modalities
+                ],
+                "native_file_input": model.native_file_input,
             }
 
         raise ValidateErrorException(
-            "当前账号没有已激活的模型，请先在 API 密钥设置中发现并激活模型"
+            f"当前账号没有已激活的 {model_type.value} 模型，请先完成模型发现并激活"
         )
 
+    def _get_provider_profiles(
+        self,
+        provider_name: str,
+        account_id: UUID | None,
+        provider_api_key_id: str | None = None,
+    ) -> list[ProviderApiKey]:
+        connection_uuid = None
+        if provider_api_key_id:
+            try:
+                connection_uuid = UUID(str(provider_api_key_id))
+            except (TypeError, ValueError):
+                return []
+        query = self.db.session.query(ProviderApiKey).filter(
+            ProviderApiKey.account_id == account_id,
+            ProviderApiKey.provider_name == provider_name,
+            ProviderApiKey.is_active == True,
+        )
+        if connection_uuid:
+            query = query.filter(ProviderApiKey.id == connection_uuid)
+        return query.order_by(ProviderApiKey.created_at.desc()).all()
+
+    @staticmethod
+    def _get_connection_name(profile: ProviderApiKey | None, provider_label: str) -> str:
+        if profile and profile.remark and profile.remark.strip():
+            return profile.remark.strip()
+        if profile and profile.base_url:
+            host = urlparse(profile.base_url).netloc
+            if host:
+                return f"{provider_label} · {host}"
+        return provider_label

@@ -268,6 +268,14 @@ def test_build_deep_agent_routes_native_runtime_options(monkeypatch):
     assert captured["permissions"] == [permission]
     middleware = {item.name: item for item in captured["middleware"]}
     assert "EventTranslationMiddleware" in middleware
+    assert "TraceMiddleware" in middleware
+    middleware_names = [item.name for item in captured["middleware"]]
+    assert middleware_names.index("TraceMiddleware") > middleware_names.index(
+        "ModelRetryMiddleware"
+    )
+    assert middleware_names.index("TraceMiddleware") > middleware_names.index(
+        "ToolRetryMiddleware"
+    )
     assert middleware["ModelCallLimitMiddleware"].run_limit == 7
     assert middleware["ModelCallLimitMiddleware"].exit_behavior == "end"
     assert "state_schema" not in captured

@@ -36,6 +36,19 @@ class Dataset(db.Model):
         String(255), nullable=False, server_default=text("''::character varying")
     )
     description = Column(Text, nullable=False, server_default=text("''::text"))
+    embedding_provider = Column(
+        String(255), nullable=False, server_default=text("''::character varying")
+    )
+    embedding_provider_connection_id = Column(
+        UUID, nullable=True
+    )  # 具体的模型连接配置
+    embedding_model = Column(
+        String(255), nullable=False, server_default=text("''::character varying")
+    )
+    embedding_fingerprint = Column(
+        String(64), nullable=False, server_default=text("''::character varying")
+    )
+    embedding_dimension = Column(Integer, nullable=False, server_default=text("0"))
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -45,6 +58,19 @@ class Dataset(db.Model):
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
+
+    @property
+    def embedding_model_config(self) -> dict[str, str]:
+        return {
+            "provider": self.embedding_provider,
+            "model": self.embedding_model,
+            "provider_connection_id": (
+                str(self.embedding_provider_connection_id)
+                if self.embedding_provider_connection_id
+                else ""
+            ),
+            "fingerprint": self.embedding_fingerprint,
+        }
 
     @property
     def document_count(self) -> int:
@@ -129,6 +155,10 @@ class Document(db.Model):
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
+
+    @property
+    def dataset(self) -> "Dataset":
+        return db.session.query(Dataset).get(self.dataset_id)
 
     @property
     def upload_file(self) -> "UploadFile":

@@ -11,7 +11,7 @@ from sqlalchemy import update
 
 from internal.core.agent_v2.agents.models import DATASET_RETRIEVAL_TOOL_NAME
 from internal.entity.dataset_entity import RetrievalStrategy, RetrievalSource
-from internal.exception import NotFoundException
+from internal.exception import NotFoundException, ValidateErrorException
 from internal.model import Dataset, DatasetQuery, Segment
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
@@ -54,6 +54,16 @@ class RetrievalService(BaseService):
         if datasets is None or len(datasets) == 0:
             raise NotFoundException("当前无知识库可执行检索")
         dataset_ids = [dataset.id for dataset in datasets]
+        fingerprints = {dataset.embedding_fingerprint for dataset in datasets}
+        if "" in fingerprints:
+            raise ValidateErrorException("知识库尚未配置向量模型")
+        if len(fingerprints) != 1:
+            raise ValidateErrorException("一次检索只能使用相同向量模型的知识库")
+        binding_dataset = datasets[0]
+        self.vector_database_service.embeddings_service.initialize_embeddings(
+            account_id,
+            binding_dataset.embedding_model_config,
+        )
 
         # 2.构建不同种类的检索器
         from internal.core.retrievers import SemanticRetriever, FullTextRetriever
@@ -140,8 +150,6 @@ class RetrievalService(BaseService):
             """如果需要搜索扩展的知识库内容，当你觉得用户的提问超过你的知识范围时，可以尝试调用该工具，输入为搜索query语句，返回数据为检索内容字符串"""
             # 1.调用search_in_datasets检索得到LangChain文档列表
             with flask_app.app_context():
-                # 在新的应用上下文中初始化嵌入模型（设置g.embeddings_account_id）
-                self.vector_database_service.embeddings_service.initialize_embeddings(account_id)
                 documents = self.search_in_datasets(
                     dataset_ids=dataset_ids,
                     query=query,

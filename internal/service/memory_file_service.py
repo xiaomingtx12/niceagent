@@ -13,7 +13,9 @@ from typing import Any, Callable
 from uuid import UUID
 
 from langgraph.store.base import BaseStore
+from psycopg import InterfaceError as PsycopgInterfaceError
 from psycopg import OperationalError as PsycopgOperationalError
+from psycopg_pool import PoolTimeout
 
 from internal.core.agent_v2.backends.workspace_path import (
     contains_reserved_segment,
@@ -28,6 +30,11 @@ from internal.exception import FailException
 MEMORY_ROOT = "/memories/"
 MAX_MEMORY_PATH_LENGTH = 512
 _STORE_PAGE_SIZE = 100
+_STORE_CONNECTION_ERRORS = (
+    PsycopgOperationalError,
+    PsycopgInterfaceError,
+    PoolTimeout,
+)
 
 
 def normalize_memory_path(path: str) -> str:
@@ -135,13 +142,20 @@ class MemoryFileService:
         operation: Callable[[BaseStore], Any],
     ) -> Any:
         """连接被 PostgreSQL 断开时重建 Store 并重试一次。"""
-        store = self.store_provider()
         try:
-            return operation(store)
-        except PsycopgOperationalError:
-            if self.store_provider is get_configured_store:
-                close_postgres_store()
             return operation(self.store_provider())
+        except _STORE_CONNECTION_ERRORS:
+            if self.store_provider is get_configured_store:
+                try:
+                    close_postgres_store()
+                except Exception:
+                    pass
+            try:
+                return operation(self.store_provider())
+            except _STORE_CONNECTION_ERRORS as second_error:
+                raise FailException(
+                    "长期记忆存储暂时不可用，请稍后重试"
+                ) from second_error
 
     def list_files(
         self,

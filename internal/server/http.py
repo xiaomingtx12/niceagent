@@ -91,6 +91,18 @@ class Http(Flask):
         router.register_router(self)
 
     def _register_error_handler(self, error: Exception):
+        # Flask 在部分异常链路中会优先命中 Exception 处理器，不能只依赖
+        # 具体异常类注册，数据库连接错误必须始终返回可消费的业务响应。
+        if isinstance(
+            error,
+            (
+                OperationalError,
+                Psycopg2OperationalError,
+                PsycopgOperationalError,
+            ),
+        ):
+            return self._handle_database_operational_error(error)
+
         # 1.异常信息是不是我们的自定义异常，如果是可以提取message和code等信息
         if isinstance(error, CustomException):
             return json(

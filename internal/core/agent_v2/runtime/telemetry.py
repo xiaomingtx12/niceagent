@@ -96,6 +96,37 @@ class AgentTelemetry:
                 "Agent telemetry sink failed for %s", name
             )
 
+    def emit_span(
+        self,
+        operation: str,
+        *,
+        phase: str,
+        trace_id: str,
+        span_id: str,
+        parent_span_id: str | None = None,
+        status: str | None = None,
+        duration_ms: float | None = None,
+        attributes: Mapping[str, TelemetryValue | None] | None = None,
+    ) -> None:
+        """发送带有稳定 Span 关联字段的 Trace 生命周期事件。"""
+        span_attributes: dict[str, TelemetryValue | None] = {
+            "trace_id": trace_id,
+            "span_id": span_id,
+            "parent_span_id": parent_span_id,
+            "span_kind": operation,
+            "status": status,
+            "duration_ms": (
+                round(max(0.0, duration_ms), 3)
+                if duration_ms is not None
+                else None
+            ),
+        }
+        span_attributes.update(attributes or {})
+        self.emit(
+            f"agent.{operation}.{phase}",
+            attributes=span_attributes,
+        )
+
     @staticmethod
     def _sanitize(
         attributes: Mapping[str, TelemetryValue | None],

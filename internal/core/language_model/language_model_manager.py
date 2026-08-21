@@ -6,7 +6,7 @@ from injector import inject, singleton
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from internal.exception import NotFoundException
-from .entities.model_entity import BaseLanguageModel, ModelEntity, ModelType
+from .entities.model_entity import BaseLanguageModel, ModelEntity
 from .entities.provider_entity import Provider, ProviderEntity
 from .model_discovery import ModelDiscoveryClient
 
@@ -62,30 +62,27 @@ class LanguageModelManager(BaseModel):
         *,
         discovered_models: list[ModelEntity] | None = None,
     ) -> list[ModelEntity]:
-        """获取静态模型并合并已持久化的动态模型快照。"""
-        provider = self.get_provider(provider_name)
-        static_models = provider.get_model_entities()
-        dynamic_by_name = {
-            model.model_name: model
+        """读取调用方提供的动态发现模型快照。"""
+        self.get_provider(provider_name)
+        return [
+            model
             for model in (discovered_models or [])
-        }
-        models = [
-            dynamic_by_name.pop(model.model_name, model)
-            for model in static_models
+            if model.is_dynamic
         ]
-        models.extend(dynamic_by_name.values())
-        return models
 
     def discover_models(
         self,
         provider_name: str,
         api_key: str,
+        *,
+        base_url: str | None = None,
     ) -> list[ModelEntity]:
         """仅在用户显式请求时访问第三方模型目录。"""
         provider = self.get_provider(provider_name)
         return self._discovery_client.discover(
             provider.provider_entity,
             api_key,
+            base_url=base_url,
             force_refresh=True,
         )
 
@@ -96,7 +93,7 @@ class LanguageModelManager(BaseModel):
         *,
         discovered_models: list[ModelEntity] | None = None,
     ) -> ModelEntity:
-        """按供应商和模型名获取静态或已持久化的动态模型实体。"""
+        """按供应商和模型名读取动态发现模型实体。"""
         for model in self.get_model_entities(
             provider_name,
             discovered_models=discovered_models,
@@ -104,16 +101,6 @@ class LanguageModelManager(BaseModel):
             if model.model_name == model_name:
                 return model
         raise NotFoundException("该模型实体不存在，请核实后重试")
-
-    def get_model_class_by_provider_and_type(
-        self,
-        provider_name: str,
-        model_type: ModelType,
-    ) -> Optional[Type[BaseLanguageModel]]:
-        """根据传递的提供者名字+模型类型，获取模型类"""
-        provider = self.get_provider(provider_name)
-
-        return provider.get_model_class(model_type)
 
     def get_model_class_by_provider_and_model(
         self,

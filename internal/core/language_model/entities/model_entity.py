@@ -4,7 +4,7 @@ from typing import Any, Optional
 
 from langchain_core.language_models import BaseLanguageModel as LCBaseLanguageModel
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
 class DefaultModelParameterName(str, Enum):
@@ -18,10 +18,16 @@ class DefaultModelParameterName(str, Enum):
 
 
 class ModelType(str, Enum):
-    """模型类型枚举"""
+    """模型的主要用途。"""
 
-    CHAT = "chat"  # 聊天模型
-    COMPLETION = "completion"  # 文本生成模型
+    CHAT = "chat"
+    COMPLETION = "completion"
+    EMBEDDING = "embedding"
+    RERANK = "rerank"
+    IMAGE_GENERATION = "image_generation"
+    VIDEO_GENERATION = "video_generation"
+    SPEECH_TO_TEXT = "speech_to_text"
+    TEXT_TO_SPEECH = "text_to_speech"
 
 
 class ModelParameterType(str, Enum):
@@ -56,12 +62,41 @@ class ModelParameter(BaseModel):
 
 
 class ModelFeature(str, Enum):
-    """模型特性，用于标记模型支持的特性信息，涵盖工具调用、智能体推理、图片输入、视频输入"""
+    """模型调用能力；输入模态单独由 ModelModality 表达。"""
 
     TOOL_CALL = "tool_call"  # 工具调用
     AGENT_THOUGHT = "agent_thought"  # 是否支持智能体推理，一般要求参数量比较大，能回答通用型任务，如果不支持推理则会直接生成答案，而不进行中间步骤
-    IMAGE_INPUT = "image_input"  # 图片输入，多模态大语言模型
-    VIDEO_INPUT = "video_input"  # 视频输入，支持视频理解的多模态大语言模型
+    IMAGE_INPUT = "image_input"  # 旧版图片输入标记，兼容历史模型快照
+    VIDEO_INPUT = "video_input"  # 旧版视频输入标记，兼容历史模型快照
+
+
+class ModelModality(str, Enum):
+    """模型的输入或输出数据形态。"""
+
+    TEXT = "text"
+    IMAGE = "image"
+    VIDEO = "video"
+    AUDIO = "audio"
+    VECTOR = "vector"
+    RANKING = "ranking"
+    FILE = "file"  # 仅用于读取旧快照，新快照使用 native_file_input
+
+
+def _default_input_modalities(model_type: ModelType) -> list[ModelModality]:
+    if model_type == ModelType.SPEECH_TO_TEXT:
+        return [ModelModality.AUDIO]
+    return [ModelModality.TEXT]
+
+
+def _default_output_modalities(model_type: ModelType) -> list[ModelModality]:
+    mapping = {
+        ModelType.EMBEDDING: [ModelModality.VECTOR],
+        ModelType.RERANK: [ModelModality.RANKING],
+        ModelType.IMAGE_GENERATION: [ModelModality.IMAGE],
+        ModelType.VIDEO_GENERATION: [ModelModality.VIDEO],
+        ModelType.TEXT_TO_SPEECH: [ModelModality.AUDIO],
+    }
+    return list(mapping.get(model_type, [ModelModality.TEXT]))
 
 
 class ModelEntity(BaseModel):
@@ -72,6 +107,12 @@ class ModelEntity(BaseModel):
     model_type: ModelType = ModelType.CHAT  # 模型类型
     is_dynamic: bool = False  # 是否由第三方模型目录动态发现
     features: list[ModelFeature] = Field(default_factory=list)  # 模型特征信息
+    input_modalities: list[ModelModality] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("input_modalities", "modalities"),
+    )
+    output_modalities: list[ModelModality] = Field(default_factory=list)
+    native_file_input: bool = False
     context_window: int = 0  # 上下文窗口长度(输入+输出的总长度)
     max_output_tokens: int = 0  # 最大输出内容长度(输出)
     attributes: dict[str, Any] = Field(default_factory=dict)  # 模型固定属性字典
@@ -82,11 +123,60 @@ class ModelEntity(BaseModel):
         default_factory=dict
     )  # 模型元数据，用于存储模型的额外数据，例如价格、词表等等信息
 
+    @model_validator(mode="after")
+    def normalize_capabilities(self) -> "ModelEntity":
+        """兼容旧快照并补齐与模型用途一致的默认输入输出。"""
+        input_modalities = list(self.input_modalities)
+        if ModelModality.FILE in input_modalities:
+            self.native_file_input = True
+            input_modalities.remove(ModelModality.FILE)
+        if (
+            ModelFeature.IMAGE_INPUT in self.features
+            and ModelModality.IMAGE not in input_modalities
+        ):
+            input_modalities.append(ModelModality.IMAGE)
+        if (
+            ModelFeature.VIDEO_INPUT in self.features
+            and ModelModality.VIDEO not in input_modalities
+        ):
+            input_modalities.append(ModelModality.VIDEO)
+        if not input_modalities:
+            input_modalities = _default_input_modalities(self.model_type)
+        if (
+            self.model_type in {ModelType.CHAT, ModelType.COMPLETION}
+            and ModelModality.TEXT not in input_modalities
+        ):
+            input_modalities.insert(0, ModelModality.TEXT)
+        self.input_modalities = list(dict.fromkeys(input_modalities))
+        canonical_output_types = {
+            ModelType.EMBEDDING,
+            ModelType.RERANK,
+            ModelType.IMAGE_GENERATION,
+            ModelType.VIDEO_GENERATION,
+            ModelType.SPEECH_TO_TEXT,
+            ModelType.TEXT_TO_SPEECH,
+        }
+        output_modalities = (
+            _default_output_modalities(self.model_type)
+            if self.model_type in canonical_output_types
+            else self.output_modalities or _default_output_modalities(self.model_type)
+        )
+        self.output_modalities = list(dict.fromkeys(output_modalities))
+        return self
+
 
 class BaseLanguageModel(LCBaseLanguageModel, ABC):
     """基础语言模型"""
 
     features: list[ModelFeature] = Field(default_factory=list)  # 模型特性
+    input_modalities: list[ModelModality] = Field(
+        default_factory=lambda: [ModelModality.TEXT],
+        validation_alias=AliasChoices("input_modalities", "modalities"),
+    )
+    output_modalities: list[ModelModality] = Field(
+        default_factory=lambda: [ModelModality.TEXT]
+    )
+    native_file_input: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)  # 模型元数据信息
 
     def get_pricing(self) -> tuple[float, float, float]:
@@ -100,25 +190,67 @@ class BaseLanguageModel(LCBaseLanguageModel, ABC):
         return input_price, output_price, unit
 
     def convert_to_human_message(
-        self, query: str, image_urls: list[str] = None
+        self,
+        query: str,
+        image_urls: list[str] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> HumanMessage:
-        """将传递的query+image_url转换成人类消息HumanMessage，如果没有传递image_url或者该LLM不支持image_input，则直接返回普通人类消息"""
-        # 1.判断图片url是否为空，或者该LLM不支持图片输入，则直接返回普通消息
+        """按模型输入模态构造标准多模态 content blocks。"""
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": query}]
         if (
-            image_urls is None
-            or len(image_urls) == 0
-            or ModelFeature.IMAGE_INPUT not in self.features
+            ModelModality.IMAGE in self.input_modalities
+            or ModelFeature.IMAGE_INPUT in self.features
         ):
-            return HumanMessage(content=query)
+            blocks.extend(
+                {"type": "image", "url": image_url}
+                for image_url in image_urls or []
+            )
 
-        # 2.存在图片输入并且支持多模态输入，则按照OpenAI规则转换成人类消息，如果模型有差异则直接继承重写
-        #   链接: https://python.langchain.com/docs/how_to/multimodal_inputs/
-        return HumanMessage(
-            content=[
-                {"type": "text", "text": query},
-                *[
-                    {"type": "image_url", "image_url": {"url": image_url}}
-                    for image_url in image_urls
-                ],
-            ]
-        )
+        for attachment in attachments or []:
+            media_type = str(attachment.get("mime_type", "")).split("/", 1)[0]
+            url = str(attachment.get("url") or attachment.get("path") or "")
+            if (
+                media_type == "image"
+                and (
+                    ModelModality.IMAGE in self.input_modalities
+                    or ModelFeature.IMAGE_INPUT in self.features
+                )
+            ):
+                blocks.append({"type": "image", "url": url})
+            elif (
+                media_type == "video"
+                and (
+                    ModelModality.VIDEO in self.input_modalities
+                    or ModelFeature.VIDEO_INPUT in self.features
+                )
+            ):
+                blocks.append({"type": "video", "url": url})
+            elif (
+                media_type == "audio"
+                and ModelModality.AUDIO in self.input_modalities
+            ):
+                blocks.append({"type": "audio", "url": url})
+            elif self.native_file_input and url:
+                blocks.append(
+                    {
+                        "type": "file",
+                        "url": url,
+                        "mime_type": str(attachment.get("mime_type") or ""),
+                    }
+                )
+            else:
+                name = str(attachment.get("name") or "附件")
+                path = str(attachment.get("path") or "")
+                blocks.append(
+                    {
+                        "type": "text",
+                        "text": (
+                            f"用户提供了附件「{name}」，文件已保存到 {path}。"
+                            "需要查看内容时，请使用 read_file 读取该路径。"
+                        ),
+                    }
+                )
+
+        if len(blocks) == 1:
+            return HumanMessage(content=query)
+        return HumanMessage(content=blocks)
