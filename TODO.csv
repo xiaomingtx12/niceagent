@@ -1,0 +1,4 @@
+id,task,status,completed_at,notes
+1,Audit authoritative docs and current models,DONE,2026-07-28T23:59:00+08:00,"Checked 02-05, models, requirements, and d_v2_001-d_v2_007"
+2,Rewrite 00 and 01 to current decisions,DONE,2026-07-29T00:12:00+08:00,"Replaced stale design with current architecture and data contracts"
+3,Validate links terminology and stale-design removal,DONE,2026-07-29T00:16:00+08:00,"No broken relative links or stale contradictions in modified docs; code fences balanced"
