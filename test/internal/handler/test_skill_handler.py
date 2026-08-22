@@ -94,6 +94,30 @@ def test_list_catalog_returns_platform_skill_templates(web):
     handler.skill_service.list_catalog.assert_called_once_with()
 
 
+def test_get_catalog_skill_returns_skill_md_content(web):
+    _, _, _, handler = web
+    skill = MagicMock(
+        skill_md="# Research\n",
+        to_dict=lambda **_: {"name": "research", "enabled": True},
+    )
+    handler.skill_service.get_catalog_skill.return_value = skill
+
+    response = _call(
+        web,
+        "/skills/research",
+        "GET",
+        handler.get_catalog_skill,
+        skill_name="research",
+    )
+
+    assert response[0].get_json()["data"] == {
+        "name": "research",
+        "enabled": True,
+        "content": "# Research\n",
+    }
+    handler.skill_service.get_catalog_skill.assert_called_once_with("research")
+
+
 def test_router_only_exposes_skill_catalog_get():
     flask_app = Flask(__name__)
     router = Router.__new__(Router)
@@ -108,3 +132,13 @@ def test_router_only_exposes_skill_catalog_get():
         if rule.rule.startswith("/apps/<uuid:app_id>/skills")
     }
     assert skill_rules == {("/apps/<uuid:app_id>/skills", ("GET",))}
+
+    catalog_rules = {
+        (rule.rule, tuple(sorted(rule.methods - {"HEAD", "OPTIONS"})))
+        for rule in flask_app.url_map.iter_rules()
+        if rule.rule.startswith("/skills")
+    }
+    assert catalog_rules == {
+        ("/skills", ("GET",)),
+        ("/skills/<string:skill_name>", ("GET",)),
+    }

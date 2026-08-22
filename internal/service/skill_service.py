@@ -13,7 +13,7 @@ from typing import Any
 import yaml
 
 from config.config import Config
-from internal.exception import FailException
+from internal.exception import FailException, NotFoundException
 from .base_service import BaseService
 
 
@@ -65,6 +65,15 @@ class SkillService(BaseService):
 
     def list_catalog(self) -> list[BuiltinSkill]:
         return sorted(self._scan().values(), key=lambda item: item.name)
+
+    def get_catalog_skill(self, name: str) -> BuiltinSkill:
+        """按合法名称读取单个内置 Skill。"""
+        if not _SKILL_NAME.fullmatch(name):
+            raise NotFoundException("Skill 模板不存在")
+        skill = self._scan().get(name)
+        if skill is None:
+            raise NotFoundException("Skill 模板不存在")
+        return skill
 
     def list_skills(
         self,

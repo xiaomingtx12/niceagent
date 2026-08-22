@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from internal.exception import FailException
+from internal.exception import FailException, NotFoundException
 from internal.service.skill_service import SkillService
 
 
@@ -42,6 +42,18 @@ def test_list_catalog_reads_builtin_skill_metadata(service):
     assert rows[0].version == "1.0.0"
     assert rows[0].digest.startswith("sha256:")
     assert "# research" in rows[0].skill_md
+
+
+def test_get_catalog_skill_returns_exact_builtin_and_rejects_invalid_name(service):
+    row = service.get_catalog_skill("research")
+
+    assert row.name == "research"
+    assert "# research" in row.skill_md
+    with pytest.raises(NotFoundException) as missing:
+        service.get_catalog_skill("missing")
+    assert missing.value.message == "Skill 模板不存在"
+    with pytest.raises(NotFoundException):
+        service.get_catalog_skill("../research")
 
 
 def test_normalize_bindings_validates_version_digest_and_duplicates(service):

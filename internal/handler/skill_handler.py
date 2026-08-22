@@ -30,6 +30,12 @@ class SkillHandler:
         )
 
     @login_required
+    def get_catalog_skill(self, skill_name: str):
+        """返回单个 Skill 模板及其 SKILL.md 内容。"""
+        skill = self.skill_service.get_catalog_skill(skill_name)
+        return success_json({**skill.to_dict(enabled=True), "content": skill.skill_md})
+
+    @login_required
     def list_skills(self, app_id: UUID):
         app = self.app_service.get_app(app_id, current_user)
         rows = self.skill_service.list_skills(
