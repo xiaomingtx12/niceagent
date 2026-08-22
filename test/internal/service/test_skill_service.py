@@ -89,9 +89,14 @@ def test_scan_reads_skill_package_files(tmp_path):
         """---
 name: csv-analysis
 description: Analyze CSV files
+allowed-tools: read_file write_file execute
 metadata:
   my_dify:
     version: 1.0.0
+    category: data
+    execution_mode: sandbox
+    requires:
+      - pandas
     scripts:
       - id: run
         path: scripts/run.py
@@ -111,3 +116,7 @@ metadata:
 
     assert "scripts/run.py" in row.package_files
     assert row.package_root == skill.resolve()
+    assert row.category == "data"
+    assert row.execution_mode == "sandbox"
+    assert row.requires == ("pandas",)
+    assert row.allowed_tools == ("read_file", "write_file", "execute")

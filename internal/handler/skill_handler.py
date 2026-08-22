@@ -18,6 +18,18 @@ class SkillHandler:
     skill_service: SkillService
 
     @login_required
+    def list_catalog(self):
+        """返回平台内置 Skill 模板目录。"""
+        return success_json(
+            {
+                "items": [
+                    skill.to_dict(enabled=True)
+                    for skill in self.skill_service.list_catalog()
+                ]
+            }
+        )
+
+    @login_required
     def list_skills(self, app_id: UUID):
         app = self.app_service.get_app(app_id, current_user)
         rows = self.skill_service.list_skills(

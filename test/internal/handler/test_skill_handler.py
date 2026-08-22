@@ -80,6 +80,20 @@ def test_list_can_include_all_versions(web):
     assert response[0].get_json()["data"]["items"][0]["version"] == "1.0.0"
 
 
+def test_list_catalog_returns_platform_skill_templates(web):
+    _, _, _, handler = web
+    handler.skill_service.list_catalog.return_value = [
+        MagicMock(to_dict=lambda **_: {"name": "research", "enabled": True})
+    ]
+
+    response = _call(web, "/skills", "GET", handler.list_catalog)
+
+    assert response[0].get_json()["data"]["items"] == [
+        {"name": "research", "enabled": True}
+    ]
+    handler.skill_service.list_catalog.assert_called_once_with()
+
+
 def test_router_only_exposes_skill_catalog_get():
     flask_app = Flask(__name__)
     router = Router.__new__(Router)

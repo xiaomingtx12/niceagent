@@ -692,6 +692,11 @@ class Router:
             view_func=self.skill_handler.list_skills,
         )
         bp.add_url_rule(
+            "/skills",
+            methods=["GET"],
+            view_func=self.skill_handler.list_catalog,
+        )
+        bp.add_url_rule(
             "/apps/<uuid:app_id>/workspace/files",
             methods=["GET"],
             view_func=self.workspace_file_handler.list_app_files,

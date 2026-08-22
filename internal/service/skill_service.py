@@ -31,6 +31,10 @@ class BuiltinSkill:
     skill_md: str
     package_root: Path
     package_files: Mapping[str, str]
+    category: str = "general"
+    execution_mode: str = "inline"
+    requires: tuple[str, ...] = ()
+    allowed_tools: tuple[str, ...] = ()
     enabled: bool = True
 
     def to_dict(self, *, enabled: bool | None = None) -> dict[str, Any]:
@@ -39,6 +43,10 @@ class BuiltinSkill:
             "description": self.description,
             "version": self.version,
             "digest": self.digest,
+            "category": self.category,
+            "execution_mode": self.execution_mode,
+            "requires": list(self.requires),
+            "allowed_tools": list(self.allowed_tools),
             "enabled": self.enabled if enabled is None else enabled,
         }
 
@@ -157,6 +165,13 @@ class SkillService(BaseService):
                     "1.0.0",
                 )
             )
+            my_dify_metadata = (metadata.get("metadata") or {}).get("my_dify") or {}
+            category = str(my_dify_metadata.get("category") or "general").strip()
+            execution_mode = str(
+                my_dify_metadata.get("execution_mode") or "inline"
+            ).strip()
+            requires = _normalize_string_list(my_dify_metadata.get("requires"))
+            allowed_tools = _normalize_string_list(metadata.get("allowed-tools"))
             catalog[name] = BuiltinSkill(
                 name=name,
                 description=description,
@@ -165,6 +180,10 @@ class SkillService(BaseService):
                 skill_md=skill_md,
                 package_root=child.resolve(),
                 package_files=MappingProxyType(_read_text_package(child)),
+                category=category,
+                execution_mode=execution_mode,
+                requires=requires,
+                allowed_tools=allowed_tools,
             )
         return catalog
 
@@ -181,6 +200,17 @@ def _parse_frontmatter(skill_md: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise FailException("SKILL.md frontmatter 必须是对象")
     return data
+
+
+def _normalize_string_list(value: Any) -> tuple[str, ...]:
+    """兼容规范中的空格字符串和内置模板常用的 YAML 列表。"""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return tuple(item for item in value.split() if item)
+    if isinstance(value, (list, tuple)):
+        return tuple(str(item).strip() for item in value if str(item).strip())
+    return (str(value).strip(),) if str(value).strip() else ()
 
 
 def _digest_tree(root: Path) -> str:
