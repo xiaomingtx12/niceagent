@@ -6,41 +6,24 @@
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/mcp/entities/mcp_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/mcp/entities/mcp_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_node.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/workflow/nodes/tool/tool_node.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/00-harness-overall-upgrade.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/01-business-flow-and-db-tables.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/02-implementation-progress-and-roadmap.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/03-context-memory-compression-implementation.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/04-skill-filesystem-backend-permission-plan.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/05-synchronous-multi-agent-implementation.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/06-agent-v2-code-guide.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/07-agent-v2-runtime-architecture.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/08-service-handler-refactor-plan.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/09-todo-and-streaming-contract.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/deepagents-v2-plan/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/skill_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/skill_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/skill_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/skill_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/internal/handler/test_skill_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/handler/test_skill_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/internal/service/test_skill_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/service/test_skill_service.py" afterDir="false" />
     </list>
-    <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交">
-      <change afterPath="$PROJECT_DIR$/Dockerfile" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/01.项目API文档.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/02.LLMOps数据库ER图.drawio" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/03.Postman请求结构.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/04.并发写入日志冲突.jpg" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/05.weaviate连接未关闭.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/06.gpt2词库无配置错误.png" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250101.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250102.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/docs/bug_reports/bug_report_20250201.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-bert-2048/refs/main" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-bert-2048/snapshots/7710840340a098cfb869c4f65e87cf2b1b70caca/configuration_hf_nomic_bert.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-bert-2048/snapshots/7710840340a098cfb869c4f65e87cf2b1b70caca/modeling_hf_nomic_bert.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/.no_exist/e5cf08aadaa33385f5990def41f7a23405aec398/adapter_config.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/refs/main" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/README.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/config.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/config_sentence_transformers.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/modules.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/core/embeddings/models--nomic-ai--nomic-embed-text-v1.5/snapshots/e5cf08aadaa33385f5990def41f7a23405aec398/sentence_bert_config.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/1298e1141878_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/602c5d87cb9a_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/61ae5e82e226_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/88998d2b7a48_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/b49796d9c797_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/b6675a561f33_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/d8c9feddfa73_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/e203bd44d213_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/internal/migration/versions/eabe3494065e_.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/scripts/README.md" afterDir="false" />
-    </list>
+    <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -75,6 +58,18 @@
     </option>
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;xiaomingtx12&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/xiaomingtx12/my-dify.git&quot;,
+    &quot;accountId&quot;: &quot;2d62c13e-9a02-4433-b2d9-9fb332a4764e&quot;
+  }
+}</component>
   <component name="OptimizeOnSaveOptions">
     <option name="myRunOnSave" value="true" />
   </component>
@@ -114,7 +109,7 @@
     &quot;Shell Script.db upgrade.executor&quot;: &quot;Run&quot;,
     &quot;Shell Script.pipreqs.executor&quot;: &quot;Run&quot;,
     &quot;aidebugger.tracer.lastRunConfigName&quot;: &quot;mcp_demo_server&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;memory更改&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;deepagents-integration&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
     &quot;last_opened_file_path&quot;: &quot;D:/spring_project/py/my-dify/internal/core/language_model/providers/deepseek/_asset&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
@@ -324,6 +319,7 @@
       <method v="2" />
     </configuration>
     <list>
+      <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
       <item itemvalue="Python.mcp_demo_server" />
       <item itemvalue="Python.deploy_scf_function" />
       <item itemvalue="Python.import_to_faiss" />
@@ -333,7 +329,6 @@
       <item itemvalue="Shell Script.db migrate" />
       <item itemvalue="Shell Script.db upgrade" />
       <item itemvalue="Shell Script.pipreqs" />
-      <item itemvalue="Flask 服务器.Flask (app/http/app.py)" />
     </list>
     <recent_temporary>
       <list>
@@ -435,6 +430,26 @@
       <workItem from="1773479909138" duration="687000" />
       <workItem from="1773566141433" duration="4935000" />
       <workItem from="1773643165488" duration="6500000" />
+      <workItem from="1785205544456" duration="16620000" />
+      <workItem from="1785249753929" duration="7489000" />
+      <workItem from="1785318810000" duration="8018000" />
+      <workItem from="1785410953947" duration="94000" />
+      <workItem from="1785508359464" duration="600000" />
+      <workItem from="1785608217371" duration="1600000" />
+      <workItem from="1786014628318" duration="734000" />
+      <workItem from="1786016229304" duration="140000" />
+      <workItem from="1786527127744" duration="8878000" />
+      <workItem from="1786608531170" duration="1150000" />
+      <workItem from="1786633364337" duration="110000" />
+      <workItem from="1786870308052" duration="13666000" />
+      <workItem from="1786952246749" duration="17673000" />
+      <workItem from="1787036712499" duration="12890000" />
+      <workItem from="1787122494975" duration="15849000" />
+      <workItem from="1787158609520" duration="587000" />
+      <workItem from="1787159345112" duration="10922000" />
+      <workItem from="1787209207602" duration="17419000" />
+      <workItem from="1787296029185" duration="29676000" />
+      <workItem from="1787382936639" duration="9417000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -775,7 +790,19 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State />
+            <State>
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="deepagents-integration" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
           </value>
         </entry>
       </map>
@@ -826,7 +853,7 @@
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$mcp_demo_server.coverage" NAME="mcp_demo_server 覆盖结果" MODIFIED="1773473881642" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$check_checkpoint_data.coverage" NAME="check_checkpoint_data 覆盖结果" MODIFIED="1772276469901" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1773479981694" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1787383078058" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>
