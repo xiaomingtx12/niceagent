@@ -186,18 +186,20 @@ class AppHandler(object):
             PageModel(list=resp.dump(app_config_versions), paginator=paginator)
         )
 
+    # @deprecated 已由 Agent 工作台线程生命周期管理替代，暂保留兼容。
     @rate_limit(config_key="sensitive")
     @login_required
     def delete_debug_conversation(self, app_id: UUID):
-        """根据传递的应用id，清空该应用的调试会话记录"""
+        """旧版调试会话清理接口，已由工作台线程生命周期管理替代。"""
         self.app_service.delete_debug_conversation(app_id, current_user)
         return success_message("清空应用调试会话记录成功")
 
+    # @deprecated 已由 Agent 工作台 commands + stream 替代，暂保留兼容。
     @rate_limit(config_key="chat")
     @rate_limit(config_key="user")
     @login_required
     def debug_chat(self, app_id: UUID):
-        """根据传递的应用id+query，发起调试对话"""
+        """旧版调试流式接口，已由 Agent 工作台替代。"""
         # 1.提取数据并校验数据
         req = DebugChatReq()
         if not req.validate():
@@ -208,10 +210,11 @@ class AppHandler(object):
 
         return compact_generate_response(response)
 
+    # @deprecated 已由 Agent 工作台 messages 分页接口替代，暂保留兼容。
     @rate_limit(config_key="database_intensive")
     @login_required
     def get_debug_conversation_messages_with_page(self, app_id: UUID):
-        """根据传递的应用id，获取该应用的调试会话分页列表记录"""
+        """旧版调试消息接口，已由工作台 messages 分页接口替代。"""
         # 1.提取请求并校验数据
         req = GetDebugConversationMessagesWithPageReq(request.args)
         if not req.validate():
@@ -229,10 +232,11 @@ class AppHandler(object):
 
         return success_json(PageModel(list=resp.dump(messages), paginator=paginator))
 
+    # @deprecated 已由 Agent 工作台 Run 取消接口替代，暂保留兼容。
     @rate_limit(config_key="user")
     @login_required
     def stop_debug_chat(self, app_id: UUID, task_id: UUID):
-        """根据传递的应用id+任务id停止某个应用的指定调试会话"""
+        """旧版调试停止接口，已由工作台 Run 取消接口替代。"""
         self.app_service.stop_debug_chat(app_id, task_id, current_user)
         return success_message("停止应用调试会话成功")
 

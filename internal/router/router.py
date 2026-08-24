@@ -133,21 +133,25 @@ class Router:
             methods=["POST"],
             view_func=self.app_handler.fallback_history_to_draft,
         )
+        # 旧版调试会话接口：仅保留兼容，新的创建者工作台使用 /apps/*/threads/*。
         bp.add_url_rule(
             "/apps/<uuid:app_id>/conversations/delete-debug-conversation",
             methods=["POST"],
             view_func=self.app_handler.delete_debug_conversation,
         )
+        # 旧版调试流：已由工作台 commands + stream 替代。
         bp.add_url_rule(
             "/apps/<uuid:app_id>/conversations",
             methods=["POST"],
             view_func=self.app_handler.debug_chat,
         )
+        # 旧版调试停止：已由工作台 Run 取消接口替代。
         bp.add_url_rule(
             "/apps/<uuid:app_id>/conversations/tasks/<uuid:task_id>/stop",
             methods=["POST"],
             view_func=self.app_handler.stop_debug_chat,
         )
+        # 旧版调试消息分页：已由工作台 messages 接口替代。
         bp.add_url_rule(
             "/apps/<uuid:app_id>/conversations/messages",
             view_func=self.app_handler.get_debug_conversation_messages_with_page,
@@ -615,11 +619,13 @@ class Router:
         bp.add_url_rule(
             "/web-apps/<string:token>", view_func=self.web_app_handler.get_web_app
         )
+        # 旧版 WebApp 对话流：已由 /web-apps/*/threads/* 工作台替代。
         bp.add_url_rule(
             "/web-apps/<string:token>/chat",
             methods=["POST"],
             view_func=self.web_app_handler.web_app_chat,
         )
+        # 旧版 WebApp 停止接口：已由工作台 Run 取消接口替代。
         bp.add_url_rule(
             "/web-apps/<string:token>/chat/<uuid:task_id>/stop",
             methods=["POST"],
@@ -645,6 +651,7 @@ class Router:
             "/web-apps/<string:token>/threads/<uuid:thread_id>/messages",
             methods=["GET"], view_func=self.agent_workbench_handler.published_messages,
         )
+        # 旧版 WebApp 消息分页：已由工作台 messages 接口替代。
         bp.add_url_rule(
             "/web-apps/<string:token>/conversations/<uuid:conversation_id>/messages",
             view_func=self.web_app_handler.get_web_app_conversation_messages_with_page,

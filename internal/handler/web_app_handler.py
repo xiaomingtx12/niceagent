@@ -44,11 +44,12 @@ class WebAppHandler:
         # 2.返回成功响应
         return success_json(resp)
 
+    # @deprecated 已由 Agent 工作台 commands + stream 替代，暂保留兼容。
     @rate_limit(config_key="chat")
     @rate_limit(config_key="user")
     @login_required
     def web_app_chat(self, token: str):
-        """根据传递的token+query等信息与WebApp进行对话"""
+        """旧版 WebApp 对话流，已由 Agent 工作台替代。"""
         # 1.提取请求并校验
         req = WebAppChatReq()
         if not req.validate():
@@ -59,10 +60,11 @@ class WebAppHandler:
 
         return compact_generate_response(response)
 
+    # @deprecated 已由 Agent 工作台 Run 取消接口替代，暂保留兼容。
     @rate_limit(config_key="user")
     @login_required
     def stop_web_app_chat(self, token: str, task_id: UUID):
-        """根据传递的token+task_id停止与WebApp的对话"""
+        """旧版 WebApp 停止接口，已由工作台 Run 取消接口替代。"""
         self.web_app_service.stop_web_app_chat(token, task_id, current_user)
         return success_message("停止WebApp会话成功")
 
@@ -85,6 +87,7 @@ class WebAppHandler:
 
         return success_json(resp.dump(conversations))
 
+    # @deprecated 已由 Agent 工作台 messages 分页接口替代，暂保留兼容。
     @rate_limit(config_key="database_intensive")
     @login_required
     def get_web_app_conversation_messages_with_page(
@@ -92,7 +95,7 @@ class WebAppHandler:
         token: str,
         conversation_id: UUID,
     ):
-        """获取当前 WebApp 用户在指定会话中的消息。"""
+        """旧版 WebApp 消息接口，已由工作台 messages 分页接口替代。"""
         req = GetConversationMessagesWithPageReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
