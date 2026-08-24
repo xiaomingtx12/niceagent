@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
 
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 
@@ -196,6 +197,42 @@ def normalize_usage(raw: Any, *, source: str = "unknown") -> TokenUsage:
     )
 
 
+def build_framework_run_usage(
+    framework_usage: Mapping[str, Mapping[str, Any]] | None,
+    *,
+    task_id: UUID | str,
+    trace_id: UUID | str,
+    tool_call_count: int = 0,
+) -> dict[str, Any] | None:
+    """把 LangChain 回调用量转换为统一的 Run 级持久化结构。"""
+    aggregate = TokenUsageAccumulator()
+    if framework_usage:
+        aggregate.add_mapping(framework_usage, source="langchain_callback")
+    if not aggregate.present and not tool_call_count:
+        return None
+
+    total = aggregate.total
+    return {
+        "trace_id": str(trace_id),
+        "task_id": str(task_id),
+        "model_count": len(aggregate.by_model),
+        "model_call_count": aggregate.call_count,
+        "tool_call_count": tool_call_count,
+        "usage_source": "langchain_callback",
+        "usage_present": aggregate.present,
+        "input_tokens": total.input_tokens,
+        "output_tokens": total.output_tokens,
+        "total_tokens": total.total_tokens
+        or total.input_tokens + total.output_tokens,
+        "input_details": dict(total.input_details),
+        "output_details": dict(total.output_details),
+        "models": {
+            model_name: usage.to_dict()
+            for model_name, usage in aggregate.by_model.items()
+        },
+    }
+
+
 def response_messages(response: Any) -> list[BaseMessage]:
     """从类似 LangChain ModelResponse 的包装对象中提取消息。"""
     model_response = getattr(response, "model_response", response)
@@ -208,6 +245,7 @@ def response_messages(response: Any) -> list[BaseMessage]:
 
 
 def _first_int(raw: Mapping[str, Any], keys: Iterable[str]) -> int:
+    """按候选字段顺序读取第一个有效整数。"""
     for key in keys:
         value = raw.get(key)
         if isinstance(value, bool):
@@ -218,6 +256,7 @@ def _first_int(raw: Mapping[str, Any], keys: Iterable[str]) -> int:
 
 
 def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
+    """提取指定方向的缓存、推理等 Token 明细。"""
     details: dict[str, int] = {}
     detail_keys = (
         f"{direction}_token_details",
@@ -245,11 +284,13 @@ def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
 
 
 def _add_details(target: dict[str, int], source: Mapping[str, int]) -> None:
+    """把一组 Token 明细累加到目标字典。"""
     for key, value in source.items():
         target[key] = target.get(key, 0) + value
 
 
 def _safe_detail_name(value: str) -> str:
+    """把明细名称规范为稳定且安全的字段片段。"""
     return "".join(
         character if character.isalnum() else "_"
         for character in value.lower()
@@ -268,4 +309,5 @@ __all__ = [
     "normalize_message",
     "normalize_response",
     "normalize_usage",
+    "build_framework_run_usage",
 ]

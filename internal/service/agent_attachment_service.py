@@ -74,12 +74,14 @@ class AgentAttachmentService:
         owner_id: UUID,
     ) -> list[AgentAttachment]:
         """按提交顺序校验附件归属并返回元数据。"""
+        # 1.限制附件数量，并保留客户端提交顺序。
         raw_ids = list(file_ids or [])
         if len(raw_ids) > MAX_AGENT_ATTACHMENTS:
             raise FailException(
                 f"一次对话最多只能携带 {MAX_AGENT_ATTACHMENTS} 个附件"
             )
 
+        # 2.规范化 UUID，并拒绝重复附件。
         normalized: list[UUID] = []
         for value in raw_ids:
             try:
@@ -92,6 +94,7 @@ class AgentAttachmentService:
         if not normalized:
             return []
 
+        # 3.按当前用户查询上传记录，阻断跨用户读取。
         rows = (
             self.db.session.query(UploadFile)
             .filter(
@@ -105,6 +108,7 @@ class AgentAttachmentService:
         if missing:
             raise ForbiddenException("附件不存在或不属于当前用户")
 
+        # 4.按原始顺序转换为 Agent 可见的安全元数据。
         return [
             AgentAttachment(
                 id=row.id,
@@ -130,11 +134,14 @@ class AgentAttachmentService:
         """把附件字节写入当前运行的 Workspace 路由。"""
         if not attachments:
             return
+        # 1.从对象存储下载附件内容，并映射为 Workspace 虚拟路径。
         files = [
             (attachment.path, self.cos_service.download_file_bytes(attachment.key))
             for attachment in attachments
         ]
+        # 2.批量上传到本次运行的 Backend。
         responses = backend.upload_files(files)
+        # 3.检查每个上传结果，失败时阻止 Agent 继续执行。
         failed = next((response for response in responses if response.error), None)
         if failed is not None:
             raise FailException(f"附件写入 Agent Workspace 失败: {failed.error}")

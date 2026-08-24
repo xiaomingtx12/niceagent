@@ -48,7 +48,7 @@ class GraphExecutionDriver:
     ) -> None:
         """消费图输出，由中间件发布业务事件。"""
         usage_callback = UsageMetadataCallbackHandler()
-        effective_config = _append_callback(config, usage_callback)
+        effective_config = append_usage_callback(config, usage_callback)
         with bind_event_translation(
             task_id=task_id,
             publisher=self.publisher,
@@ -134,7 +134,7 @@ def _translate_stream_item(
     return []
 
 
-def _append_callback(
+def append_usage_callback(
     config: RunnableConfig | None,
     callback: UsageMetadataCallbackHandler,
 ) -> RunnableConfig:
@@ -198,6 +198,7 @@ def close_runtime_backends(backend: BackendProtocol | None) -> None:
 
 __all__ = [
     "GraphExecutionDriver",
+    "append_usage_callback",
     "checkpoint_has_state",
     "close_runtime_backends",
 ]

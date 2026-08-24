@@ -44,7 +44,7 @@ from .language_model_service import LanguageModelService
 @inject
 @dataclass
 class AppConfigService(BaseService):
-    """应用配置服务"""
+    """应用配置服务，负责配置校验、标准化和运行时转换。"""
 
     db: SQLAlchemy
     api_provider_manager: ApiProviderManager
@@ -61,6 +61,7 @@ class AppConfigService(BaseService):
         app_id: UUID | None = None,
     ) -> dict[str, Any]:
         """校验并标准化可保存的应用草稿配置。"""
+        # 1.限制配置字段范围，并复制输入避免修改调用方对象。
         acceptable_fields = {
             "model_config",
             "dialog_round",
@@ -87,6 +88,7 @@ class AppConfigService(BaseService):
             raise ValidateErrorException("草稿配置字段出错，请核实后重试")
 
         normalized = dict(draft_app_config)
+        # 2.校验主模型配置，确保后续可以加载对应模型。
         if "model_config" in normalized:
             normalized["model_config"] = self._validate_strict_model_config(
                 normalized["model_config"],
@@ -105,6 +107,7 @@ class AppConfigService(BaseService):
                     "人设与回复逻辑必须是字符串，长度在0-2000个字符"
                 )
 
+        # 3.校验 SubAgent 结构，并检查发布应用引用的租户边界和循环。
         if "subagents" in normalized:
             try:
                 normalized["subagents"] = validate_platform_subagents(
@@ -121,6 +124,7 @@ class AppConfigService(BaseService):
             except SubAgentSpecError as exc:
                 raise ValidateErrorException(str(exc)) from exc
 
+        # 4.标准化主 Agent 的 Skill，并确保 SubAgent 只能使用已挂载 Skill。
         if "skills" in normalized:
             try:
                 normalized["skills"] = self.skill_service.normalize_bindings(
@@ -145,6 +149,7 @@ class AppConfigService(BaseService):
                         + ", ".join(missing)
                     )
 
+        # 5.校验工具、工作流和知识库绑定，保留运行时可解析的配置。
         if "tools" in normalized:
             normalized["tools"] = self._validate_tool_bindings(
                 normalized["tools"],
@@ -166,6 +171,7 @@ class AppConfigService(BaseService):
         if "retrieval_config" in normalized:
             self._validate_retrieval_config(normalized["retrieval_config"])
 
+        # 6.补齐长期记忆、展示和审查配置后返回标准化结果。
         normalized["long_term_memory"] = self._normalize_long_term_memory(
             normalized.get("long_term_memory")
         )
@@ -577,8 +583,8 @@ class AppConfigService(BaseService):
                 raise ValidateErrorException("输入审核预设响应不能为空")
 
     def get_draft_app_config(self, app: App) -> dict[str, Any]:
-        """根据传递的应用获取该应用的草稿配置"""
-        # 1.提取应用的草稿配置
+        """获取应用草稿配置，并清理已失效的关联数据。"""
+        # 1.读取应用草稿配置。
         draft_app_config = app.draft_app_config
 
         normalized_long_term_memory = self._normalize_long_term_memory(
@@ -590,7 +596,7 @@ class AppConfigService(BaseService):
                 long_term_memory=normalized_long_term_memory,
             )
 
-        # 2.校验model_config信息，如果使用了不存在的提供者或者模型，则使用默认值(宽松校验)
+        # 2.校验模型配置；无效的提供方或模型回退到默认值。
         validate_model_config = self._process_and_validate_model_config(
             draft_app_config.model_config,
             account_id=app.account_id,
@@ -598,35 +604,35 @@ class AppConfigService(BaseService):
         if draft_app_config.model_config != validate_model_config:
             self.update(draft_app_config, model_config=validate_model_config)
 
-        # 3.循环遍历工具列表删除已经被删除的工具信息
+        # 3.校验工具列表并移除已删除的工具。
         tools, validate_tools = self._process_and_validate_tools(
             draft_app_config.tools,
             account_id=app.account_id,
         )
 
-        # 4.判断是否需要更新草稿配置中的工具列表信息
+        # 4.有变化时更新草稿配置中的工具列表。
         if draft_app_config.tools != validate_tools:
-            # 14.更新草稿配置中的工具列表
+            # 5.保存校验后的工具列表。
             self.update(draft_app_config, tools=validate_tools)
 
-        # 5.校验知识库列表，如果引用了不存在/被删除的知识库，需要剔除数据并更新，同时获取知识库的额外信息
+        # 6.校验知识库列表，移除不存在或已删除的知识库。
         datasets, validate_datasets = self._process_and_validate_datasets(
             draft_app_config.datasets,
             account_id=app.account_id,
         )
 
-        # 6.判断是否存在已删除的知识库，如果存在则更新
+        # 7.有变化时更新草稿配置中的知识库列表。
         if set(validate_datasets) != set(draft_app_config.datasets):
             self.update(draft_app_config, datasets=validate_datasets)
 
-        # 7.校验工作流列表对应的数据
+        # 8.校验工作流列表。
         workflows, validate_workflows = self._process_and_validate_workflows(
             draft_app_config.workflows,
             account_id=app.account_id,
         )
         if set(validate_workflows) != set(draft_app_config.workflows):
             self.update(draft_app_config, workflows=validate_workflows)
-        # 20.将数据转换成字典后返回
+        # 9.转换为接口字典并返回。
         return self._process_and_transformer_app_config(
             validate_model_config,
             tools,
@@ -636,8 +642,8 @@ class AppConfigService(BaseService):
         )
 
     def get_app_config(self, app: App) -> dict[str, Any]:
-        """根据传递的应用获取该应用的运行配置"""
-        # 1.提取应用的草稿配置
+        """获取应用运行配置，并清理已失效的关联数据。"""
+        # 1.读取应用运行配置。
         app_config = app.app_config
 
         normalized_long_term_memory = self._normalize_long_term_memory(
@@ -649,7 +655,7 @@ class AppConfigService(BaseService):
                 long_term_memory=normalized_long_term_memory,
             )
 
-        # 2.校验model_config信息，如果运行时配置里的model_config发生变化则进行更新
+        # 2.校验模型配置，发现变化时同步更新。
         validate_model_config = self._process_and_validate_model_config(
             app_config.model_config,
             account_id=app.account_id,
@@ -657,18 +663,18 @@ class AppConfigService(BaseService):
         if app_config.model_config != validate_model_config:
             self.update(app_config, model_config=validate_model_config)
 
-        # 3.循环遍历工具列表删除已经被删除的工具信息
+        # 3.校验工具列表并移除已删除的工具。
         tools, validate_tools = self._process_and_validate_tools(
             app_config.tools,
             account_id=app.account_id,
         )
 
-        # 4.判断是否需要更新草稿配置中的工具列表信息
+        # 4.有变化时更新运行配置中的工具列表。
         if app_config.tools != validate_tools:
-            # 14.更新草稿配置中的工具列表
+            # 5.保存校验后的工具列表。
             self.update(app_config, tools=validate_tools)
 
-        # 5.校验知识库列表，如果引用了不存在/被删除的知识库，需要剔除数据并更新，同时获取知识库的额外信息
+        # 6.校验知识库列表，移除不存在或已删除的知识库。
         app_dataset_joins = app_config.app_dataset_joins
         origin_datasets = [
             str(app_dataset_join.dataset_id) for app_dataset_join in app_dataset_joins
@@ -678,7 +684,7 @@ class AppConfigService(BaseService):
             account_id=app.account_id,
         )
 
-        # 6.判断是否存在已删除的知识库，如果存在则更新
+        # 7.删除已失效的知识库关联。
         for dataset_id in set(origin_datasets) - set(validate_datasets):
             with self.db.auto_commit():
                 self.db.session.query(AppDatasetJoin).filter(
@@ -686,7 +692,7 @@ class AppConfigService(BaseService):
                     AppDatasetJoin.dataset_id == dataset_id
                 ).delete()
 
-        # 7.校验工作流列表对应的数据
+        # 8.校验工作流列表。
         workflows, validate_workflows = self._process_and_validate_workflows(
             app_config.workflows,
             account_id=app.account_id,
@@ -694,7 +700,7 @@ class AppConfigService(BaseService):
         if set(validate_workflows) != set(app_config.workflows):
             self.update(app_config, workflows=validate_workflows)
 
-        # 20.将数据转换成字典后返回
+        # 9.转换为接口字典并返回。
         return self._process_and_transformer_app_config(
             validate_model_config,
             tools,
@@ -709,13 +715,13 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID,
     ) -> list[BaseTool]:
-        """根据传递的工具配置列表获取langchain工具列表"""
-        # 1.循环遍历所有工具配置列表信息
+        """根据工具配置列表构造可调用的 LangChain 工具。"""
+        # 1.遍历工具配置列表。
         tools = []
         for tool in tools_config:
-            # 2.根据不同的工具类型执行不同的操作
+            # 2.按工具类型加载对应实例。
             if tool["type"] == "builtin_tool":
-                # 3.内置工具，通过builtin_provider_manager获取工具实例
+                # 3.从内置工具提供方获取工具实例。
                 builtin_tool = self.builtin_provider_manager.get_tool(
                     tool["provider"]["id"], tool["tool"]["name"]
                 )
@@ -742,7 +748,7 @@ class AppConfigService(BaseService):
                 except Exception:
                     continue
             else:
-                # 4.API工具，首先根据id找到ApiTool记录，然后创建示例
+                # 4.查询 API 工具记录并创建工具实例。
                 api_tool = (
                     self.db.session.query(ApiTool)
                     .filter(
@@ -775,8 +781,8 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID,
     ) -> list[BaseTool]:
-        """根据传递的工作流配置列表获取langchain工具列表"""
-        # 1.根据传递的工作流id查询工作流记录信息
+        """根据工作流 ID 列表构造可调用的 LangChain 工具。"""
+        # 1.查询已发布的工作流记录。
         workflow_records = (
             self.db.session.query(Workflow)
             .filter(
@@ -787,11 +793,11 @@ class AppConfigService(BaseService):
             .all()
         )
 
-        # 2.循环遍历所有工作流记录列表
+        # 2.遍历工作流记录。
         workflows = []
         for workflow_record in workflow_records:
             try:
-                # 3.创建工作流工具
+                # 3.创建工作流工具实例。
                 workflow_tool = WorkflowTool(
                     workflow_config=WorkflowConfig(
                         account_id=workflow_record.account_id,
@@ -816,7 +822,7 @@ class AppConfigService(BaseService):
         datasets: list[dict],
         app_config: Union[AppConfig, AppConfigVersion],
     ) -> dict[str, Any]:
-        """根据传递的插件列表、工作流列表、知识库列表以及应用配置创建字典信息"""
+        """把模型、工具、工作流、知识库和应用配置转换为接口字典。"""
         return {
             "id": str(app_config.id),
             "model_config": model_config,
@@ -847,25 +853,25 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID,
     ) -> tuple[list[dict], list[dict]]:
-        """根据传递的原始工具信息进行处理和校验"""
-        # 1.循环遍历工具列表删除已被删除的工具
+        """处理并校验原始工具配置，返回展示数据和有效配置。"""
+        # 1.遍历工具列表并移除已删除的工具。
         validate_tools = []
         tools = []
         for tool in origin_tools:
             if tool["type"] == "builtin_tool":
-                # 2.查询内置工具提供者，并检测是否存在
+                # 2.查询内置工具提供方并确认其存在。
                 provider = self.builtin_provider_manager.get_provider(
                     tool["provider_id"]
                 )
                 if not provider:
                     continue
 
-                # 3.获取提供者下的工具实体，并检测是否存在
+                # 3.获取提供方下的工具定义并确认其存在。
                 tool_entity = provider.get_tool_entity(tool["tool_id"])
                 if not tool_entity:
                     continue
 
-                # 4.判断工具的params和草稿中的params是否一致，如果不一致则全部重置为默认值（或者考虑删除这个工具的引用）
+                # 4.校验工具参数；异常参数回退到默认值。
                 param_keys = set([param.name for param in tool_entity.params])
                 params = tool["params"]
                 if set(tool["params"].keys()) - param_keys:
@@ -875,10 +881,10 @@ class AppConfigService(BaseService):
                         if param.default is not None
                     }
 
-                # 5.数据都存在，并且参数已经校验完毕，可以将数据添加到validate_tools
+                # 5.保存校验后的工具配置。
                 validate_tools.append({**tool, "params": params})
 
-                # 6.组装内置工具展示信息
+                # 6.组装内置工具展示信息。
                 provider_entity = provider.provider_entity
                 tools.append(
                     {
@@ -900,7 +906,7 @@ class AppConfigService(BaseService):
                     }
                 )
             elif tool["type"] == "api_tool":
-                # 7.查询数据库获取对应的工具记录，并检测是否存在
+                # 7.查询 API 工具记录并确认其存在。
                 tool_record = (
                     self.db.session.query(ApiTool)
                     .filter(
@@ -913,10 +919,10 @@ class AppConfigService(BaseService):
                 if not tool_record:
                     continue
 
-                # 8.数据校验通过，往validate_tools中添加数据
+                # 8.保存校验后的 API 工具配置。
                 validate_tools.append(tool)
 
-                # 9.组装api工具展示信息
+                # 9.组装 API 工具展示信息。
                 provider = tool_record.provider
                 tools.append(
                     {
@@ -990,8 +996,8 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID,
     ) -> tuple[list[dict], list[dict]]:
-        """根据传递的知识库并返回知识库配置与校验后的数据"""
-        # 1.校验知识库配置列表，如果引用了不存在的/被删除的知识库，则需要剔除数据并更新，同时获取知识库的额外信息
+        """处理并校验知识库配置，返回展示数据和有效 ID。"""
+        # 1.查询有效知识库并移除不存在或已删除的引用。
         datasets = []
         dataset_records = (
             self.db.session.query(Dataset)
@@ -1011,12 +1017,12 @@ class AppConfigService(BaseService):
         if len(embedding_fingerprints) > 1:
             raise ValidateErrorException("关联知识库必须使用相同的向量模型")
 
-        # 2.计算存在的知识库id列表，为了保留原始顺序，使用列表循环的方式来判断
+        # 2.按原始顺序保留有效的知识库 ID。
         validate_datasets = [
             dataset_id for dataset_id in origin_datasets if dataset_id in dataset_sets
         ]
 
-        # 3.循环获取知识库数据
+        # 3.组装知识库展示数据。
         for dataset_id in validate_datasets:
             dataset = dataset_dict.get(str(dataset_id))
             datasets.append(
@@ -1039,15 +1045,16 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID | None = None,
     ) -> dict[str, Any]:
-        """根据传递的模型配置处理并校验，随后返回校验后的信息"""
+        """处理并校验模型配置，返回当前账号可用的标准结构。"""
         def default_active_model_config() -> dict[str, Any]:
+            """返回当前账号可用的默认激活模型配置。"""
             return self.language_model_service.get_default_model_config(account_id)
 
-        # 1.判断model_config是否为字典，如果不是则直接返回默认值
+        # 1.非字典配置直接回退到默认模型。
         if not isinstance(origin_model_config, dict):
             return default_active_model_config()
 
-        # 2.提取origin_model_config中provider、model、parameters对应的信息
+        # 2.提取模型提供方、模型名称和参数配置。
         model_config = {
             "provider": origin_model_config.get("provider", ""),
             "model": origin_model_config.get("model", ""),
@@ -1057,7 +1064,7 @@ class AppConfigService(BaseService):
             "parameters": origin_model_config.get("parameters", {}),
         }
 
-        # 3.判断provider是否存在、类型是否正确，如果不符合规则则返回默认值
+        # 3.校验模型提供方，不合法时回退到默认模型。
         if not model_config["provider"] or not isinstance(
             model_config["provider"], str
         ):
@@ -1067,7 +1074,7 @@ class AppConfigService(BaseService):
         except Exception:
             return default_active_model_config()
 
-        # 4.判断model是否存在、类型是否正确，如果不符合则返回默认值
+        # 4.校验模型名称、类型和当前账号的可用性。
         if not model_config["model"] or not isinstance(model_config["model"], str):
             return default_active_model_config()
         model_entity = self.language_model_service.get_enabled_model_entity(
@@ -1081,46 +1088,46 @@ class AppConfigService(BaseService):
         if model_entity.model_type.value != "chat":
             return default_active_model_config()
 
-        # 5.判断parameters信息类型是否错误，如果错误则设置为默认值
+        # 5.参数配置类型错误时使用模型默认参数。
         if not isinstance(model_config["parameters"], dict):
             model_config["parameters"] = {
                 parameter.name: parameter.default
                 for parameter in model_entity.parameters
             }
 
-        # 6.剔除传递的多余的parameter，亦或者是少传递的参数使用默认值补上
+        # 6.过滤多余参数，并为缺失参数补充默认值。
         parameters = {}
         for parameter in model_entity.parameters:
-            # 7.从model_config中获取参数值，如果不存在则设置为默认值
+            # 7.读取参数值，不存在时使用默认值。
             parameter_value = model_config["parameters"].get(
                 parameter.name, parameter.default
             )
 
-            # 8.判断参数是否必填
+            # 8.校验参数是否必填。
             if parameter.required:
-                # 9.参数必填，则值不允许为None，如果为None则设置默认值
+                # 9.必填参数为空时使用默认值。
                 if parameter_value is None:
                     parameter_value = parameter.default
                 else:
-                    # 10.值非空则校验数据类型是否正确，不正确则设置默认值
+                    # 10.校验已填写参数的数据类型。
                     if get_value_type(parameter_value) != parameter.type.value:
                         parameter_value = parameter.default
             else:
-                # 11.参数非必填，数据非空的情况下需要校验
+                # 11.非必填参数仅在有值时校验类型。
                 if parameter_value is not None:
                     if get_value_type(parameter_value) != parameter.type.value:
                         parameter_value = parameter.default
 
-            # 12.判断参数是否存在options，如果存在则数值必须在options中选择
+            # 12.存在可选值时，参数必须来自可选列表。
             if parameter.options and parameter_value not in parameter.options:
                 parameter_value = parameter.default
 
-            # 13.参数类型为int/float，如果存在min/max时候需要校验
+            # 13.数值参数存在最小值或最大值时继续校验。
             if (
                 parameter.type in [ModelParameterType.INT, ModelParameterType.FLOAT]
                 and parameter_value is not None
             ):
-                # 14.校验数值的min/max
+                # 14.校验数值范围。
                 if (parameter.min and parameter_value < parameter.min) or (
                     parameter.max and parameter_value > parameter.max
                 ):
@@ -1128,7 +1135,7 @@ class AppConfigService(BaseService):
 
             parameters[parameter.name] = parameter_value
 
-        # 15.完成数据校验，赋值parameters参数
+        # 15.保存校验后的参数。
         model_config["parameters"] = parameters
         model_config["provider_connection_id"] = str(
             model_entity.attributes.get("provider_api_key_id") or ""
@@ -1163,8 +1170,8 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID,
     ) -> tuple[list[dict], list[UUID]]:
-        """根据传递的工作流列表并返回工作流配置和校验后的数据"""
-        # 1.校验工作流配置列表，如果引用了不存在/被删除的工作流，则需要提出数据并更新，同时获取工作流的额外信息
+        """处理并校验工作流配置，返回展示数据和有效 ID。"""
+        # 1.查询已发布工作流并移除无效引用。
         workflows = []
         workflow_records = (
             self.db.session.query(Workflow)
@@ -1181,14 +1188,14 @@ class AppConfigService(BaseService):
         }
         workflow_sets = set(workflow_dict.keys())
 
-        # 2.计算存在的工作流id列表，为了保留原始顺序，使用列表循环的方式来判断
+        # 2.按原始顺序保留有效的工作流 ID。
         validate_workflows = [
             workflow_id
             for workflow_id in origin_workflows
             if workflow_id in workflow_sets
         ]
 
-        # 3.循环获取工作流数据
+        # 3.组装工作流展示数据。
         for workflow_id in validate_workflows:
             workflow = workflow_dict.get(str(workflow_id))
             workflows.append(

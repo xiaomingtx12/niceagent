@@ -78,6 +78,19 @@ class Config:
         self.REDIS_HEALTH_CHECK_INTERVAL = int(
             _get_env("REDIS_HEALTH_CHECK_INTERVAL")
         )
+        self.AGENT_WORKBENCH_REPLAY_KEY_PREFIX = str(
+            _get_env("AGENT_WORKBENCH_REPLAY_KEY_PREFIX")
+        )
+        self.AGENT_WORKBENCH_REPLAY_TTL_SECONDS = int(
+            _get_env("AGENT_WORKBENCH_REPLAY_TTL_SECONDS")
+        )
+        self.AGENT_WORKBENCH_REPLAY_MAX_LENGTH = int(
+            _get_env("AGENT_WORKBENCH_REPLAY_MAX_LENGTH")
+        )
+        if self.AGENT_WORKBENCH_REPLAY_TTL_SECONDS < 60:
+            raise ValueError("AGENT_WORKBENCH_REPLAY_TTL_SECONDS 必须至少为 60 秒")
+        if self.AGENT_WORKBENCH_REPLAY_MAX_LENGTH < 100:
+            raise ValueError("AGENT_WORKBENCH_REPLAY_MAX_LENGTH 必须至少为 100")
 
         # Celery配置
         self.CELERY = {

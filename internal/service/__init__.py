@@ -42,6 +42,8 @@ from .wechat_service import WechatService
 from .workspace_file_service import WorkspaceFileService
 from .memory_file_service import MemoryFileService
 from .workflow_service import WorkflowService
+from .agent_workbench_service import AgentWorkbenchService
+from .agent_workbench_replay import AgentWorkbenchReplayStore, ReplayCursorExpired
 
 __all__ = [
     "BaseService",
@@ -77,6 +79,9 @@ __all__ = [
     "AppConfigService",
     "OpenAPIService",
     "WorkflowService",
+    "AgentWorkbenchService",
+    "AgentWorkbenchReplayStore",
+    "ReplayCursorExpired",
     "BuiltinAppService",
     "AssistantAgentService",
     "FaissService",

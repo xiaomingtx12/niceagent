@@ -16,7 +16,7 @@ def build_memory_namespace(
     app_id: UUID,
     end_user_id: UUID | None,
 ) -> tuple[str, ...]:
-    """Return the shared namespace used by runtime and management APIs."""
+    """构造运行时和管理接口共用的长期记忆命名空间。"""
     return (
         "mydify",
         str(account_id),
@@ -83,7 +83,7 @@ class AgentRunContext:
 
     @property
     def memory_namespace(self) -> tuple[str, ...]:
-        """返回 native Store 使用的租户和用户命名空间。"""
+        """返回原生 Store 使用的租户和用户命名空间。"""
         return build_memory_namespace(
             account_id=self.account_id,
             app_id=self.app_id,

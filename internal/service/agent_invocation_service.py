@@ -55,6 +55,7 @@ class AgentInvocationSpec:
     llm: BaseChatModel | None = None
     app_name: str = ""
     app_description: str = ""
+    input_message_id: str | None = None
 
 
 @inject
@@ -75,6 +76,7 @@ class AgentInvocationService(BaseService):
         spec: AgentInvocationSpec,
     ) -> tuple[BaseAgent, BaseChatModel]:
         """根据业务配置构造一次性的 DeepAgents 运行实例。"""
+        # 1.确定应用身份并加载本次调用使用的主模型。
         app_id = spec.app_id or (spec.app.id if spec.app else None)
         if app_id is None:
             raise ValueError("Agent 调用缺少 app_id")
@@ -82,14 +84,16 @@ class AgentInvocationService(BaseService):
             spec.app_config.get("model_config", {}),
             account_id=spec.account_id,
         )
+        # 2.把额外工具和应用配置中的工具转换成 LangChain 工具实例。
         tools = list(spec.extra_tools)
         tools.extend(
             self.app_config_service.get_langchain_tools_by_tools_config(
                 spec.app_config.get("tools", []),
                 account_id=spec.account_id,
             )
-        )
+            )
 
+        # 3.把知识库检索和工作流绑定转换为 Agent 可调用工具。
         if spec.app_config.get("datasets"):
             tools.append(
                 self.retrieval_service.create_langchain_tool_from_search(
@@ -112,12 +116,14 @@ class AgentInvocationService(BaseService):
                 )
             )
 
+        # 4.解析 SubAgent 的模型、工具和发布应用引用。
         runtime_subagents, subagent_tools, subagent_models = (
             self._prepare_subagents(
                 spec.app_config.get("subagents", []),
                 account_id=spec.account_id,
             )
         )
+        # 5.按会话作用域装配 Workspace、Skill、Memory、Sandbox 等资源。
         runtime = self.agent_runtime_service.prepare(
             account_id=spec.account_id,
             app_id=app_id,
@@ -130,6 +136,7 @@ class AgentInvocationService(BaseService):
         runtime_app_config = dict(spec.app_config)
         runtime_app_config["subagents"] = runtime_subagents
         try:
+            # 6.先把附件投影到 Workspace，再创建持有这些资源的 BaseAgent。
             self.agent_attachment_service.materialize(
                 spec.attachments,
                 runtime.backend,
@@ -160,9 +167,8 @@ class AgentInvocationService(BaseService):
                 ),
             )
         except Exception:
-            # BaseAgent normally closes its backend on construction failure.
-            # Keep this guard for custom runtime resources that fail before
-            # BaseAgent takes ownership.
+            # BaseAgent 通常会在构造失败时关闭 Backend；
+            # 这里继续保留兜底，处理资源尚未交给 BaseAgent 前的异常。
             try:
                 close = getattr(runtime.backend, "close", None)
                 if callable(close):
@@ -183,11 +189,13 @@ class AgentInvocationService(BaseService):
         dict[str, BaseChatModel],
     ]:
         """把发布 Agent 引用解析为当前图可装配的原生同步子 Agent。"""
+        # 1.复制持久化配置，并准备每个 SubAgent 的工具和模型覆盖。
         normalized = [dict(item) for item in subagents or []]
         tool_overrides: dict[str, list[BaseTool]] = {}
         model_overrides: dict[str, BaseChatModel] = {}
 
         for item in normalized:
+            # 2.先解析显式模型配置，形成运行时模型覆盖。
             model_ref = item.get("model")
             if model_ref:
                 provider_name = str(item.get("model_provider") or "").strip()
@@ -217,6 +225,7 @@ class AgentInvocationService(BaseService):
             if item.get("source", "custom") != "published":
                 continue
 
+            # 3.校验发布应用属于当前租户且仍处于发布状态。
             target_id = UUID(str(item["published_app_id"]))
             target_app = (
                 self.db.session.query(App)
@@ -232,6 +241,7 @@ class AgentInvocationService(BaseService):
                     f"子 Agent 引用的发布应用 {target_id} 不存在或已取消发布"
                 )
 
+            # 4.加载发布应用的工具、知识库和工作流能力。
             target_config = self.app_config_service.get_app_config(target_app)
             target_tools = self.app_config_service.get_langchain_tools_by_tools_config(
                 target_config.get("tools", []),
@@ -258,6 +268,7 @@ class AgentInvocationService(BaseService):
                     )
                 )
 
+            # 5.拒绝工具冲突，并把发布应用转换为同步 SubAgent 配置。
             tool_names = [tool.name for tool in target_tools]
             if len(tool_names) != len(set(tool_names)):
                 raise FailException(
@@ -295,6 +306,7 @@ class AgentInvocationService(BaseService):
             tool_overrides[item["name"]] = target_tools
             model_overrides[item["name"]] = target_model
 
+        # 6.返回图构建阶段所需的规范化配置和运行时覆盖项。
         return normalized, tool_overrides, model_overrides
 
     def stream(
@@ -312,15 +324,14 @@ class AgentInvocationService(BaseService):
             thought_map: dict[str, AgentThought] = {}
             completed = False
             try:
-                input_state = {
-                    "messages": [
-                        llm.convert_to_human_message(
-                            spec.query,
-                            spec.image_urls,
-                            [attachment.to_dict() for attachment in spec.attachments],
-                        )
-                    ],
-                }
+                input_message = llm.convert_to_human_message(
+                    spec.query,
+                    spec.image_urls,
+                    [attachment.to_dict() for attachment in spec.attachments],
+                )
+                if spec.input_message_id:
+                    input_message.id = spec.input_message_id
+                input_state = {"messages": [input_message]}
                 for thought in agent.stream(input_state):
                     self._collect_thought(thought_map, thought)
                     yield thought
@@ -363,6 +374,7 @@ class AgentInvocationService(BaseService):
         error_thought: AgentThought,
         run_usage: Mapping[str, Any] | None = None,
     ) -> None:
+        """尽力持久化 Agent 错误事件，避免覆盖原始执行异常。"""
         try:
             self._persist(spec, [error_thought], run_usage=run_usage)
         except Exception:
@@ -370,6 +382,7 @@ class AgentInvocationService(BaseService):
 
     @staticmethod
     def _build_error_thought(error: Exception) -> AgentThought:
+        """把异常转换为统一的 Agent 错误轨迹对象。"""
         if isinstance(error, FailException):
             message = error.message.strip() or "Agent 执行失败"
             current_app.logger.warning("Agent 执行失败: %s", message)
@@ -389,18 +402,19 @@ class AgentInvocationService(BaseService):
 
     def invoke(self, spec: AgentInvocationSpec):
         """非流式执行 Agent，并统一持久化轨迹。"""
+        # 1.构造本次调用的 Agent 和模型适配器。
         agent, llm = self.build_agent(spec)
-        result = agent.invoke(
-            {
-                "messages": [
-                    llm.convert_to_human_message(
-                        spec.query,
-                        spec.image_urls,
-                        [attachment.to_dict() for attachment in spec.attachments],
-                    )
-                ],
-            }
+        # 2.把业务请求转换为模型可接受的 HumanMessage。
+        input_message = llm.convert_to_human_message(
+            spec.query,
+            spec.image_urls,
+            [attachment.to_dict() for attachment in spec.attachments],
         )
+        if spec.input_message_id:
+            input_message.id = spec.input_message_id
+        # 3.执行非流式 Agent 调用并聚合最终结果。
+        result = agent.invoke({"messages": [input_message]})
+        # 4.把推理轨迹和本次运行用量统一写回会话消息。
         self._persist(
             spec,
             result.agent_thoughts,
@@ -434,6 +448,8 @@ class AgentInvocationService(BaseService):
         thoughts: Sequence[AgentThought],
         run_usage: Mapping[str, Any] | None = None,
     ) -> None:
+        """把一次 Agent 调用的轨迹和 Run 用量交给会话服务持久化。"""
+        # 1.由 ConversationService 统一处理轨迹、消息状态和 Run 用量。
         self.conversation_service.save_agent_thoughts(
             account_id=spec.account_id,
             app_id=spec.app_id or spec.app.id,

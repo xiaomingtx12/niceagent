@@ -24,6 +24,9 @@ def build_agent_config_from_app_config(
     opening_statement: str = "",
 ) -> AgentConfig:
     """把前端或已发布 AppConfig 转为 Agent 配置和展示数据。"""
+    # 1.读取应用级提示词、工具和运行限制。
+    # 2.补齐 SubAgent、审查配置和默认值。
+    # 3.统一封装为 BaseAgent 使用的 AgentConfig。
     return AgentConfig(
         user_id=user_id,
         invoke_from=invoke_from,

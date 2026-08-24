@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.middleware.filesystem import FilesystemPermission
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.load import Serializable
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -15,6 +16,7 @@ from pydantic import ConfigDict, PrivateAttr
 
 from internal.core.agent_v2.agents.execution import (
     GraphExecutionDriver,
+    append_usage_callback,
     close_runtime_backends,
 )
 from internal.core.agent_v2.agents.invocation import extract_query_and_images
@@ -28,6 +30,7 @@ from internal.core.agent_v2.runtime.telemetry import (
     NOOP_AGENT_TELEMETRY,
 )
 from internal.core.agent_v2.runtime.thread_config import merge_thread_config
+from internal.core.agent_v2.runtime.token_usage import build_framework_run_usage
 from internal.exception import FailException
 from .agent_queue_manager import AgentQueueManager
 
@@ -102,10 +105,12 @@ class BaseAgent(Serializable, Runnable):
     ):
         """初始化 Agent 并构造 DeepAgents 图。"""
         super().__init__(*args, llm=llm, agent_config=agent_config, **kwargs)
+        # 1.保存本次运行需要关闭的底层资源。
         self._checkpointer = checkpointer
         self._backend = backend
         self._store = store
         self._permissions = list(permissions or [])
+        # 2.复制外部传入的可变配置，避免运行中被调用方修改。
         self._skill_sources = list(skill_sources or [])
         self._memory_sources = list(memory_sources or [])
         self._subagent_skill_sources = dict(subagent_skill_sources or {})
@@ -117,7 +122,9 @@ class BaseAgent(Serializable, Runnable):
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._runtime_context = runtime_context
         try:
+            # 3.根据业务配置和运行时资源构建 DeepAgents 图。
             self._agent = self._build_agent()
+            # 4.初始化兼容现有调用协议的本地事件队列。
             self._agent_queue_manager = AgentQueueManager(
                 user_id=agent_config.user_id,
                 invoke_from=agent_config.invoke_from,
@@ -128,6 +135,8 @@ class BaseAgent(Serializable, Runnable):
 
     def _build_agent(self) -> CompiledStateGraph:
         """根据 Agent 配置和运行时依赖构造 DeepAgents 图。"""
+        # 1.合并并校验应用工具，避免覆盖 DeepAgents 内置能力。
+        # 2.生成应用身份提示词，并注入本次运行的限制与持久化依赖。
         return build_deep_agent(
             llm=self.llm,
             tools=self._merge_agent_tools(),
@@ -153,26 +162,33 @@ class BaseAgent(Serializable, Runnable):
 
     def _merge_agent_tools(self) -> list[BaseTool]:
         """合并应用工具并拒绝同名覆盖。"""
+        # 1.复制应用工具列表，保持 AgentConfig 本身不被修改。
         tools = list(self.agent_config.tools)
         names = [tool.name for tool in tools]
+        # 2.先拒绝应用工具之间的重名。
         if len(names) != len(set(names)):
             raise FailException("Agent 工具名称冲突，无法安全装配运行时工具")
+        # 3.再拒绝覆盖 DeepAgents 的内置文件和委派工具。
         reserved = sorted(set(names) & _DEEPAGENTS_TOOL_NAMES)
         if reserved:
             raise FailException(
                 "Agent 工具名称与 DeepAgents 内置工具冲突: "
                 + ", ".join(reserved)
             )
+        # 4.校验通过后返回可交给图构建器的工具列表。
         return tools
 
     def close(self) -> None:
         """关闭尚未开始或已经结束的运行时资源。"""
+        # 1.在锁内确认当前没有正在执行的调用。
         with self._run_lock:
             if self._run_active:
                 raise FailException("智能体仍在运行，不能提前关闭运行时资源")
             if self._resources_closed:
                 return
+            # 2.先标记资源已关闭，避免重复释放。
             self._resources_closed = True
+        # 3.释放复合 Backend 及其下挂载的运行时资源。
         close_runtime_backends(self._backend)
 
     def __enter__(self) -> "BaseAgent":
@@ -285,6 +301,48 @@ class BaseAgent(Serializable, Runnable):
                         "agent.run_thread_join_timeout",
                         attributes={"task_id": str(task_id)},
                     )
+
+    def stream_protocol(
+        self,
+        input: dict[str, Any],
+        config: Optional[RunnableConfig] = None,
+        **kwargs: Any,
+    ) -> Iterator[dict[str, Any]]:
+        """Stream native Deep Agents v3 events for the workbench protocol."""
+        if not self._agent:
+            raise FailException("智能体未成功构建，请核实后尝试")
+        messages = list(input.get("messages", []) or [])
+        if not messages:
+            self.close()
+            raise FailException("智能体输入消息不能为空")
+        self._begin_run()
+        effective_config = self._merge_thread_config(config)
+        usage_callback = UsageMetadataCallbackHandler()
+        effective_config = append_usage_callback(effective_config, usage_callback)
+        usage_task_id = uuid4()
+        usage_trace_id = uuid4()
+        completed = False
+        try:
+            yield from self._agent.stream_events(
+                {"messages": messages},
+                config=effective_config,
+                context=self._runtime_context,
+                version="v3",
+                **kwargs,
+            )
+            completed = True
+        finally:
+            run_usage = build_framework_run_usage(
+                usage_callback.usage_metadata,
+                task_id=usage_task_id,
+                trace_id=usage_trace_id,
+            )
+            if run_usage is not None:
+                self._record_run_usage(run_usage)
+            if not completed:
+                with self._run_lock:
+                    self._run_active = False
+            self._close_after_run()
 
     def _run_stream_in_thread(
         self,

@@ -202,7 +202,7 @@ def build_filesystem_permissions(
 ) -> list[FilesystemPermission]:
     """构建非 Sandbox 模式的文件工具权限。"""
     if sandbox_enabled:
-        # Sandbox provider 自己提供隔离边界，不能向 execute 传入规则。
+        # Sandbox 服务自身提供隔离边界，不能再向 execute 传入规则。
         return []
 
     return [
@@ -270,6 +270,7 @@ class AgentContextAssembler:
         settings: Config,
     ) -> AgentRuntimeResources:
         """按固定顺序构造一次运行的全部能力。"""
+        # 1.创建本次运行独立的遥测上下文。
         telemetry = AgentTelemetry(
             LoggingAgentTelemetrySink(),
             attributes=run_context.telemetry_attributes,
@@ -277,19 +278,23 @@ class AgentContextAssembler:
         workspace_projection: WorkspaceProjection | None = None
         sandbox_projection: SandboxProjection | None = None
         try:
+            # 2.创建会话级 Workspace，后续文件能力都通过它暴露。
             workspace_projection = WorkspaceContextAssembler().build(
                 runtime_session=runtime_session,
                 run_context=run_context,
                 settings=settings,
                 telemetry=telemetry,
             )
+            # 3.把已授权 Skill 和 SubAgent Skill 映射为虚拟路径。
             skill_projection = SkillContextAssembler().build(
                 skills=skills,
                 subagents=subagents,
             )
+            # 4.创建租户隔离的长期记忆 Store 和文件路由。
             memory_projection = MemoryContextAssembler(
                 store_provider=self.store_provider,
             ).build()
+            # 5.按当前 provider 决定是否创建 Sandbox 隔离层。
             sandbox_projection = SandboxContextAssembler().build(
                 settings=settings,
                 workspace=workspace_projection.backend,
@@ -302,6 +307,7 @@ class AgentContextAssembler:
                 skill_projection=skill_projection,
                 telemetry=telemetry,
             )
+            # 6.合并 Workspace、Skill、Memory 和 Sandbox 路由。
             backend = build_composite_backend(
                 routes={
                     **workspace_projection.routes,
@@ -314,6 +320,7 @@ class AgentContextAssembler:
                     else None
                 ),
             )
+            # 7.获取线程检查点，供 DeepAgents 恢复本次会话状态。
             checkpointer = self.checkpointer_provider()
         except Exception:
             if sandbox_projection is not None:

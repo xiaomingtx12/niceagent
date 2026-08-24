@@ -5,6 +5,8 @@ from flask import current_app
 
 from alembic import context
 
+from internal.migration.ownership import langgraph_aware_include_name
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -93,6 +95,9 @@ def run_migrations_online():
     conf_args = current_app.extensions['migrate'].configure_args
     if conf_args.get("process_revision_directives") is None:
         conf_args["process_revision_directives"] = process_revision_directives
+    conf_args["include_name"] = langgraph_aware_include_name(
+        conf_args.get("include_name")
+    )
 
     connectable = get_engine()
 

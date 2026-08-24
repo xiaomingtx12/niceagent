@@ -46,6 +46,7 @@ def validate_platform_subagents(
     subagents: list[dict[str, Any]] | dict[str, dict] | None,
 ) -> list[dict[str, Any]]:
     """校验持久化的同步、异步和发布 Agent 团队配置。"""
+    # 1.统一字典和数组两种持久化形态。
     if subagents is None:
         return []
     if isinstance(subagents, dict):
@@ -61,6 +62,7 @@ def validate_platform_subagents(
     normalized: list[dict[str, Any]] = []
     seen: set[str] = set()
     for index, raw in enumerate(subagents):
+        # 2.检查字段集合、名称唯一性和调用模式。
         if not isinstance(raw, dict):
             raise SubAgentSpecError(f"subagents[{index}] 必须是对象")
         unexpected = set(raw) - _FIELDS
@@ -91,6 +93,7 @@ def validate_platform_subagents(
                 "主 Agent必须在 task.description 中提供自包含任务说明"
             )
 
+        # 3.校验描述、提示词、来源和工具/Skill 名称。
         description = raw.get("description")
         if not isinstance(description, str) or not description.strip():
             raise SubAgentSpecError(f"subagent {name!r} 缺 description")
@@ -131,6 +134,7 @@ def validate_platform_subagents(
             "tools": tools,
             "skills": skills,
         }
+        # 4.按同步或异步模式补充各自必需的模型、图和服务地址。
         if mode == "sync":
             item["system_prompt"] = system_prompt.strip()
             if source == "published":
@@ -193,6 +197,7 @@ def validate_platform_subagents(
                 raw.get("headers", {}),
                 name=name,
             )
+        # 5.保存已规范化的配置，供运行时资源和图构建阶段复用。
         normalized.append(item)
     return normalized
 
@@ -213,6 +218,7 @@ def build_subagent_specs(
     字段，只负责把已授权的工具、Skill 和文件权限映射为 DeepAgents
     原生 ``SubAgent`` 规格。
     """
+    # 1.这里只接收同步 SubAgent，异步规格由独立转换函数处理。
     normalized = [
         item
         for item in (subagents or [])
@@ -225,6 +231,7 @@ def build_subagent_specs(
     specs: list[dict[str, Any]] = []
     for config in normalized:
         name = config["name"]
+        # 2.解析每个 SubAgent 被授权的工具和 Skill 路径。
         requested_tools = config.get("tools", [])
         if name in tool_overrides:
             resolved_tools = list(tool_overrides[name])
@@ -254,6 +261,7 @@ def build_subagent_specs(
             # 显式空列表避免继承父 Agent 的全部工具。
             "tools": resolved_tools,
         }
+        # 3.补充文件权限、模型覆盖和原生 Skill 配置。
         if not sandbox_enabled:
             # 非 Sandbox 模式显式限制子 Agent 的文件范围；Sandbox 的隔离
             # 由原生 SandboxBackend 提供，不能再叠加工具级权限规则。
@@ -274,6 +282,7 @@ def build_async_subagent_specs(
     subagents: Sequence[Mapping[str, Any]] | None,
 ) -> list[dict[str, Any]]:
     """将已标准化的配置转换为 DeepAgents 原生 AsyncSubAgent 规格。"""
+    # 1.筛选异步委派配置，并保留远程图所需的最小字段。
     specs: list[dict[str, Any]] = []
     for config in subagents or []:
         if config.get("mode", "sync") != "async":
@@ -352,6 +361,7 @@ def _normalize_name_list(value: Any, *, name: str, field: str) -> list[str]:
 
 
 def _normalize_uuid(value: Any, *, name: str, field: str) -> str:
+    """校验并规范发布 SubAgent 配置中的 UUID 字段。"""
     try:
         return str(UUID(str(value)))
     except (TypeError, ValueError, AttributeError) as exc:
@@ -361,6 +371,7 @@ def _normalize_uuid(value: Any, *, name: str, field: str) -> str:
 
 
 def _normalize_headers(value: Any, *, name: str) -> dict[str, str]:
+    """校验并规范远程 SubAgent 的请求头配置。"""
     if not isinstance(value, dict):
         raise SubAgentSpecError(f"subagent {name!r} headers 必须是对象")
     if len(value) > 32:

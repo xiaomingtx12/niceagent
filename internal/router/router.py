@@ -33,6 +33,7 @@ from internal.handler import (
     SkillHandler,
     WorkspaceFileHandler,
     MemoryFileHandler,
+    AgentWorkbenchHandler,
 )
 
 
@@ -70,6 +71,7 @@ class Router:
     skill_handler: SkillHandler
     workspace_file_handler: WorkspaceFileHandler
     memory_file_handler: MemoryFileHandler
+    agent_workbench_handler: AgentWorkbenchHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -448,6 +450,26 @@ class Router:
             view_func=self.provider_api_key_handler.update_provider_api_key,
         )
         bp.add_url_rule(
+            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/commands",
+            methods=["POST"], view_func=self.agent_workbench_handler.creator_command,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/stream",
+            methods=["POST"], view_func=self.agent_workbench_handler.creator_stream,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/state",
+            methods=["GET"], view_func=self.agent_workbench_handler.creator_state,
+        )
+        bp.add_url_rule(
+            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/messages",
+            methods=["GET"], view_func=self.agent_workbench_handler.creator_messages,
+        )
+        bp.add_url_rule(
+            "/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+            methods=["POST"], view_func=self.agent_workbench_handler.cancel_run,
+        )
+        bp.add_url_rule(
             "/provider-api-keys/<uuid:provider_api_key_id>/models",
             methods=["POST"],
             view_func=self.provider_api_key_handler.update_provider_api_key_models,
@@ -606,6 +628,22 @@ class Router:
         bp.add_url_rule(
             "/web-apps/<string:token>/conversations",
             view_func=self.web_app_handler.get_conversations,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/threads/<uuid:thread_id>/commands",
+            methods=["POST"], view_func=self.agent_workbench_handler.published_command,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/threads/<uuid:thread_id>/stream",
+            methods=["POST"], view_func=self.agent_workbench_handler.published_stream,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/threads/<uuid:thread_id>/state",
+            methods=["GET"], view_func=self.agent_workbench_handler.published_state,
+        )
+        bp.add_url_rule(
+            "/web-apps/<string:token>/threads/<uuid:thread_id>/messages",
+            methods=["GET"], view_func=self.agent_workbench_handler.published_messages,
         )
         bp.add_url_rule(
             "/web-apps/<string:token>/conversations/<uuid:conversation_id>/messages",

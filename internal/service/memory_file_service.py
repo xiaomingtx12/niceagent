@@ -1,4 +1,4 @@
-"""Long-term memory file management backed by LangGraph Store."""
+"""基于 LangGraph Store 的长期记忆文件管理。"""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ _STORE_CONNECTION_ERRORS = (
 
 
 def normalize_memory_path(path: str) -> str:
-    """Validate and normalize a StoreBackend memory file key."""
+    """校验并规范 StoreBackend 使用的记忆文件路径。"""
     normalized = (path or "").strip().replace("\\", "/")
     if not normalized.startswith(MEMORY_ROOT):
         raise FailException("记忆文件路径必须以 /memories/ 开头")
@@ -61,6 +61,7 @@ def normalize_memory_path(path: str) -> str:
 
 
 def _isoformat(value: Any) -> str | None:
+    """把 Store 时间字段转换为 API 使用的 ISO 字符串。"""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -69,6 +70,7 @@ def _isoformat(value: Any) -> str | None:
 
 
 def _content_bytes(content: str, encoding: str) -> bytes:
+    """按声明的编码把记忆文件内容转换为字节。"""
     if encoding == "utf-8":
         return content.encode("utf-8")
     if encoding == "base64":
@@ -81,7 +83,7 @@ def _content_bytes(content: str, encoding: str) -> bytes:
 
 @dataclass(frozen=True)
 class MemoryFile:
-    """A StoreBackend file projected into the API contract."""
+    """投影到 API 契约中的长期记忆文件。"""
 
     namespace: tuple[str, ...]
     path: str
@@ -92,26 +94,31 @@ class MemoryFile:
 
     @property
     def content_bytes(self) -> bytes:
+        """返回文件内容的原始字节。"""
         return _content_bytes(self.content, self.encoding)
 
     @property
     def mime_type(self) -> str:
+        """根据文件名和编码推断 MIME 类型。"""
         return mimetypes.guess_type(PurePosixPath(self.path).name)[0] or (
             "text/plain" if self.encoding == "utf-8" else "application/octet-stream"
         )
 
     @property
     def content_sha256(self) -> str:
+        """返回文件内容的 SHA-256 摘要。"""
         return hashlib.sha256(self.content_bytes).hexdigest()
 
     @property
     def file_id(self) -> str:
+        """根据租户命名空间和路径生成稳定文件 ID。"""
         digest = hashlib.sha256(
             f"{'|'.join(self.namespace)}|{self.path}".encode("utf-8")
         )
         return digest.hexdigest()
 
     def to_dict(self, *, include_content: bool = False) -> dict[str, Any]:
+        """转换为前端和管理接口使用的文件字典。"""
         data: dict[str, Any] = {
             "id": self.file_id,
             "path": self.path,
@@ -133,7 +140,7 @@ class MemoryFile:
 
 @dataclass
 class MemoryFileService:
-    """List and mutate the current user's persistent memory files."""
+    """管理当前用户隔离的长期记忆文件，并适配 LangGraph Store。"""
 
     store_provider: Callable[[], BaseStore] = get_configured_store
 
@@ -164,9 +171,13 @@ class MemoryFileService:
         app_id: str | UUID,
         end_user_id: str | UUID | None = None,
     ) -> list[MemoryFile]:
+        """分页读取当前作用域下的长期记忆文件。"""
+        # 1.根据租户、应用和终端用户确定 Store 命名空间。
         namespace = self._namespace(account_id, app_id, end_user_id)
 
         def list_from_store(store: BaseStore) -> list[MemoryFile]:
+            """分页查询并转换 Store 中的记忆文件条目。"""
+            # 2.分页读取 Store，并过滤不属于记忆目录的条目。
             rows: list[MemoryFile] = []
             offset = 0
             while True:
@@ -194,6 +205,7 @@ class MemoryFileService:
                 reverse=True,
             )
 
+        # 3.统一处理 Store 连接断开后的重建和重试。
         return self._with_store_retry(list_from_store)
 
     def read_file(
@@ -204,15 +216,19 @@ class MemoryFileService:
         end_user_id: str | UUID | None,
         path: str,
     ) -> MemoryFile:
+        """读取当前作用域下的单个长期记忆文件。"""
+        # 1.校验虚拟路径并解析当前用户的记忆命名空间。
         key = normalize_memory_path(path)
         namespace = self._namespace(account_id, app_id, end_user_id)
 
         def read_from_store(store: BaseStore) -> MemoryFile:
+            """从 Store 读取并转换一个记忆文件条目。"""
             item = store.get(namespace, key)
             if item is None:
                 raise FailException("记忆文件不存在")
             return self._from_item(namespace, item)
 
+        # 2.从 LangGraph Store 读取单个记忆文件。
         return self._with_store_retry(read_from_store)
 
     def write_file(
@@ -224,12 +240,15 @@ class MemoryFileService:
         path: str,
         content: str,
     ) -> MemoryFile:
+        """校验并写入当前作用域的长期记忆文件。"""
+        # 1.校验内容、路径和租户命名空间。
         if not isinstance(content, str):
             raise FailException("记忆文件内容必须是字符串")
         key = normalize_memory_path(path)
         namespace = self._namespace(account_id, app_id, end_user_id)
 
         def write_to_store(store: BaseStore) -> MemoryFile:
+            """写入记忆文件并读取保存后的标准化条目。"""
             existing = store.get(namespace, key)
             old_value = existing.value if existing is not None else {}
             created_at = (
@@ -253,6 +272,7 @@ class MemoryFileService:
                 raise FailException("记忆文件保存失败")
             return self._from_item(namespace, item)
 
+        # 2.写入 Store 后重新读取，返回规范化后的文件对象。
         return self._with_store_retry(write_to_store)
 
     def delete_file(
@@ -263,14 +283,18 @@ class MemoryFileService:
         end_user_id: str | UUID | None,
         path: str,
     ) -> None:
+        """删除当前作用域下的长期记忆文件。"""
+        # 1.校验路径和命名空间，避免跨用户删除。
         key = normalize_memory_path(path)
         namespace = self._namespace(account_id, app_id, end_user_id)
 
         def delete_from_store(store: BaseStore) -> None:
+            """删除 Store 中指定命名空间下的记忆文件。"""
             if store.get(namespace, key) is None:
                 raise FailException("记忆文件不存在")
             store.delete(namespace, key)
 
+        # 2.删除目标文件，并复用连接异常重试机制。
         self._with_store_retry(delete_from_store)
 
     @staticmethod
@@ -279,6 +303,7 @@ class MemoryFileService:
         app_id: str | UUID,
         end_user_id: str | UUID | None,
     ) -> tuple[str, ...]:
+        """把业务身份转换为长期记忆 Store 的租户命名空间。"""
         try:
             account_uuid = UUID(str(account_id))
             app_uuid = UUID(str(app_id))
@@ -293,6 +318,7 @@ class MemoryFileService:
 
     @staticmethod
     def _from_item(namespace: tuple[str, ...], item: Any) -> MemoryFile:
+        """把 LangGraph Store 条目转换为 API 层 MemoryFile。"""
         path = normalize_memory_path(str(item.key))
         value = item.value
         if not isinstance(value, dict) or not isinstance(value.get("content"), str):

@@ -1,4 +1,4 @@
-"""Workspace file management and visibility service."""
+"""Workspace 文件管理和可见性校验服务。"""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ MAX_WORKSPACE_PATH_LENGTH = 512
 
 
 def _like_pattern(value: str) -> str:
-    """Escape user input before using it in a SQL LIKE expression."""
+    """在拼接 SQL LIKE 条件前转义用户输入。"""
     escaped = (
         value.replace("\\", "\\\\")
         .replace("%", "\\%")
@@ -44,7 +44,7 @@ def _like_pattern(value: str) -> str:
 
 
 def _workspace_path_like_patterns(value: str) -> list[str]:
-    """Build patterns for both stored and virtual Workspace paths."""
+    """为物理存储路径和虚拟 Workspace 路径构造查询模式。"""
     normalized = value.strip().replace("\\", "/")
     raw_pattern = _like_pattern(normalized)
     patterns = [raw_pattern]
@@ -70,7 +70,7 @@ def normalize_workspace_relative_path(
     *,
     conversation_id: UUID,
 ) -> str:
-    """Validate a stored relative path and enforce its visibility scope."""
+    """校验物理相对路径，并强制绑定当前会话的可见范围。"""
     normalized = (path or "").strip().replace("\\", "/").strip("/")
     segments = normalized.split("/") if normalized else []
     if (
@@ -111,7 +111,7 @@ def _conversation_storage_path(path: str, conversation_id: UUID) -> str:
 @inject
 @dataclass
 class WorkspaceFileService(BaseService):
-    """Versioned file CRUD with creator/end-user visibility rules."""
+    """管理 Workspace 文件版本，并执行创建者和终端用户可见性校验。"""
 
     db: SQLAlchemy
 
@@ -123,7 +123,7 @@ class WorkspaceFileService(BaseService):
         conversation_id: str | UUID | None = None,
         prefix: str | None = None,
     ) -> list[WorkspaceFile]:
-        """列出 Creator 作用域内最新的可见文件。"""
+        """列出创建者作用域内最新的可见文件。"""
         if conversation_id is None:
             return []
         conversation_uuid = _uuid(conversation_id, "conversation_id")
@@ -156,7 +156,7 @@ class WorkspaceFileService(BaseService):
         owner_ids: list[str | UUID],
         query: str | None = None,
     ) -> list[WorkspaceFile]:
-        """List Workspace files from every WebApp conversation owned by a user."""
+        """列出终端用户在多个 WebApp 会话中的 Workspace 文件。"""
         account_uuid = _uuid(account_id, "account_id")
         app_uuid = _uuid(app_id, "app_id")
         owner_uuids = [_uuid(value, "owner_id") for value in owner_ids]
@@ -205,7 +205,7 @@ class WorkspaceFileService(BaseService):
         app_id: str | UUID,
         conversation_ids: list[str | UUID],
     ) -> dict[str, str]:
-        """Return names for Workspace list presentation."""
+        """返回 Workspace 文件列表所需的会话名称映射。"""
         if not conversation_ids:
             return {}
         app_uuid = _uuid(app_id, "app_id")
@@ -234,6 +234,7 @@ class WorkspaceFileService(BaseService):
         mime_type: str = "text/plain",
     ) -> WorkspaceFile:
         """校验作用域并追加经配额检查的文本版本。"""
+        # 1.校验租户、应用和会话归属。
         account_uuid = _uuid(account_id, "account_id")
         app_uuid = _uuid(app_id, "app_id")
         conversation_uuid = _uuid(conversation_id, "conversation_id")
@@ -248,6 +249,7 @@ class WorkspaceFileService(BaseService):
         )
         if conversation is None:
             raise FailException("Workspace 会话不存在或不属于当前应用")
+        # 2.把虚拟路径转换为会话隔离的物理存储路径。
         storage_path = _conversation_storage_path(path, conversation_uuid)
         relative = normalize_workspace_relative_path(
             storage_path,
@@ -277,6 +279,7 @@ class WorkspaceFileService(BaseService):
             ),
         )
         try:
+            # 3.由仓储层执行版本追加、配额检查和遥测记录。
             return repository.write_text(
                 relative,
                 content,
@@ -297,6 +300,7 @@ class WorkspaceFileService(BaseService):
         end_user_conversation_id: str | UUID | None = None,
     ) -> WorkspaceFile:
         """在校验归属后读取最新可见文件。"""
+        # 1.拒绝保留命名空间，并解析调用方作用域。
         normalized_path = path.strip("/")
         if contains_reserved_segment(normalized_path):
             raise FailException("Workspace 文件不存在")
@@ -313,6 +317,7 @@ class WorkspaceFileService(BaseService):
             conversation_uuid,
         )
         row = self._latest_one(account_uuid, app_uuid, storage_path)
+        # 2.只返回当前会话可见且未删除的最新版本。
         if row is None or row.is_deleted:
             raise FailException("Workspace 文件不存在")
         if row.conversation_id != conversation_uuid:
@@ -327,7 +332,8 @@ class WorkspaceFileService(BaseService):
         path: str,
         conversation_id: str | UUID,
     ) -> None:
-        """Hide the latest owned file version from subsequent reads."""
+        """软删除当前会话拥有的最新 Workspace 文件版本。"""
+        # 1.复用读取权限校验，定位当前会话拥有的最新版本。
         row = self.read_owned(
             account_id=account_id,
             app_id=app_id,
@@ -336,6 +342,7 @@ class WorkspaceFileService(BaseService):
         )
         row.is_deleted = True
         row.updated_at = datetime.now(timezone.utc)
+        # 2.软删除文件版本，保留历史记录和版本链。
         self.db.session.commit()
 
     def _latest_one(
@@ -344,7 +351,7 @@ class WorkspaceFileService(BaseService):
         app_id: UUID,
         path: str,
     ) -> WorkspaceFile | None:
-        """Return the newest version for one scoped storage path."""
+        """读取指定租户和应用路径下的最新文件版本。"""
         return (
             self.db.session.query(WorkspaceFile)
             .filter(
@@ -358,7 +365,7 @@ class WorkspaceFileService(BaseService):
 
     @staticmethod
     def _latest(rows: list[WorkspaceFile]) -> list[WorkspaceFile]:
-        """Collapse version rows to the latest row per path."""
+        """按路径折叠多个版本，只保留每个路径的最新记录。"""
         rows.sort(key=lambda row: (row.path, -row.version))
         latest: dict[str, WorkspaceFile] = {}
         for row in rows:

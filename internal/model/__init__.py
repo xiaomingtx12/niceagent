@@ -11,6 +11,7 @@ from .provider_api_key import ProviderApiKey
 from .upload_file import UploadFile
 from .workflow import Workflow, WorkflowResult
 from .workspace_file import WorkspaceFile
+from .agent_run import AgentRun, AgentRunEvent
 
 __all__ = [
     "App",
@@ -40,4 +41,6 @@ __all__ = [
     "WorkflowResult",
     "WechatConfig", "WechatEndUser", "WechatMessage",
     "WorkspaceFile",
+    "AgentRun",
+    "AgentRunEvent",
 ]

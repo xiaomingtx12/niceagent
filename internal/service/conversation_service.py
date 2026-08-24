@@ -46,22 +46,70 @@ def _usage_detail(details: Mapping[str, Any], name: str) -> int:
 @inject
 @dataclass
 class ConversationService(BaseService):
-    """会话服务"""
+    """会话服务，负责 Agent 轨迹、消息状态和 Run 用量持久化。"""
 
     db: SQLAlchemy
+
+    @staticmethod
+    def build_run_usage_updates(
+        run_usage: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        """把统一 Run 用量映射为 Message 统计字段。"""
+        # 1.没有 Run 用量时不覆盖消息原有统计。
+        if not run_usage:
+            return {}
+        # 2.规范化输入、输出 Token 明细，兼容缺失或异常结构。
+        input_details = run_usage.get("input_details", {})
+        output_details = run_usage.get("output_details", {})
+        if not isinstance(input_details, Mapping):
+            input_details = {}
+        if not isinstance(output_details, Mapping):
+            output_details = {}
+
+        # 3.先写入调用次数、Trace 和按模型拆分的原始统计。
+        updates: dict[str, Any] = {
+            "trace_id": run_usage.get("trace_id"),
+            "model_call_count": int(run_usage.get("model_call_count", 0) or 0),
+            "tool_call_count": int(run_usage.get("tool_call_count", 0) or 0),
+            "token_usage": dict(run_usage.get("models", {}) or {}),
+        }
+        if run_usage.get("usage_present"):
+            # 4.补充输入、输出、缓存、推理和总 Token 统计。
+            updates.update(
+                {
+                    "input_token_count": int(
+                        run_usage.get("input_tokens", 0) or 0
+                    ),
+                    "output_token_count": int(
+                        run_usage.get("output_tokens", 0) or 0
+                    ),
+                    "cached_token_count": _usage_detail(
+                        input_details,
+                        "cached",
+                    ),
+                    "reasoning_token_count": max(
+                        _usage_detail(input_details, "reasoning"),
+                        _usage_detail(output_details, "reasoning"),
+                    ),
+                    "total_token_count": int(
+                        run_usage.get("total_tokens", 0) or 0
+                    ),
+                }
+            )
+        return updates
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None
 
     def _load_model_from_config(
         self, model_config: dict = None, account_id: UUID = None
     ):
-        """从模型配置加载模型实例，如果失败则使用默认模型"""
+        """从模型配置加载模型实例，失败时回退到默认模型。"""
         from internal.service.language_model_service import LanguageModelService
         from app.http.module import injector
 
         try:
             if model_config and account_id:
-                # 使用应用配置的模型
+                # 使用应用配置指定的模型。
                 language_model_service = injector.get(LanguageModelService)
                 return language_model_service.load_language_model(
                     model_config, account_id
@@ -73,7 +121,7 @@ class ConversationService(BaseService):
     def generate_conversation_name(
         cls, query: str, account_id: UUID = None, model_config: dict = None
     ) -> str:
-        """根据传递的query生成对应的会话名字，并且语言与用户的输入保持一致"""
+        """根据用户问题生成会话名称，并保持与输入相同的语言。"""
         from internal.service.language_model_service import LanguageModelService
         from app.http.module import injector
 
@@ -96,26 +144,26 @@ class ConversationService(BaseService):
             logging.warning("模型加载结果为None，跳过会话命名")
             return "新的会话"
 
-        # 2.创建prompt
+        # 2.创建会话命名提示词。
         prompt = ChatPromptTemplate.from_messages(
             [("system", CONVERSATION_NAME_TEMPLATE), ("human", "{query}")]
         )
 
-        # 3.构建结构化输出
+        # 3.配置结构化输出。
         structured_llm = llm.with_structured_output(ConversationInfo)
 
-        # 4.构建链应用
+        # 4.组装模型调用链。
         chain = prompt | structured_llm
 
-        # 5.提取并整理query，截取长度过长的部分
+        # 5.提取并整理用户问题，截断过长内容。
         if len(query) > 2000:
             query = query[:300] + "...[TRUNCATED]..." + query[-300:]
         query = query.replace("\n", " ")
 
-        # 6.调用链并获取会话信息
+        # 6.调用模型链并获取会话信息。
         conversation_info = chain.invoke({"query": query})
 
-        # 7.提取会话名称
+        # 7.提取并规范会话名称。
         name = "新的会话"
         try:
             if conversation_info and hasattr(conversation_info, "subject"):
@@ -133,7 +181,7 @@ class ConversationService(BaseService):
     def generate_suggested_questions(
         cls, histories: str, account_id: UUID = None, model_config: dict = None
     ) -> list[str]:
-        """根据传递的历史信息生成最多不超过3个的建议问题"""
+        """根据历史对话生成最多 3 个建议问题。"""
         import json as json_module
         from internal.service.language_model_service import LanguageModelService
         from app.http.module import injector
@@ -158,7 +206,7 @@ class ConversationService(BaseService):
                 logging.warning("模型加载结果为None，跳过建议问题生成")
                 return []
 
-            # 2.创建prompt（不使用with_structured_output，直接让模型输出JSON数组）
+            # 2.创建提示词，直接要求模型输出 JSON 数组。
             prompt = ChatPromptTemplate.from_messages(
                 [
                     (
@@ -172,19 +220,19 @@ class ConversationService(BaseService):
                 ]
             )
 
-            # 3.构建链应用（使用StrOutputParser直接获取文本输出）
+            # 3.组装调用链，使用 StrOutputParser 获取文本结果。
             chain = prompt | llm | StrOutputParser()
 
-            # 4.调用链并获取原始文本
+            # 4.调用模型链并获取原始文本。
             raw_output = chain.invoke({"histories": histories})
 
-            # 5.解析JSON数组
+            # 5.解析 JSON 数组。
             questions = []
             if raw_output:
-                # 去除可能的markdown代码块标记
+                # 去除可能存在的 Markdown 代码块标记。
                 text = raw_output.strip()
                 if text.startswith("```"):
-                    # 移除 ```json 或 ``` 开头和结尾
+                    # 移除 ```json 或 ``` 的起止标记。
                     lines = text.split("\n")
                     lines = [l for l in lines if not l.strip().startswith("```")]
                     text = "\n".join(lines).strip()
@@ -196,7 +244,7 @@ class ConversationService(BaseService):
                 except json_module.JSONDecodeError:
                     logging.warning(f"建议问题JSON解析失败, raw_output: {raw_output[:200]}")
 
-            # 6.限制问题数量
+            # 6.限制建议问题数量。
             if len(questions) > 3:
                 questions = questions[:3]
 
@@ -206,7 +254,7 @@ class ConversationService(BaseService):
             logging.exception(
                 f"生成建议问题失败, histories: {histories[:200]}..., 错误信息: {str(e)}"
             )
-            # 返回空列表，避免影响用户体验
+            # 返回空列表，避免影响主流程。
             return []
 
     def save_agent_thoughts(
@@ -224,7 +272,7 @@ class ConversationService(BaseService):
         position = 0
         latency = 0
 
-        # 2.在子线程中重新查询conversation以及message，确保对象会被子线程的会话管理到
+        # 2.重新查询会话和消息，确保对象由当前线程的数据库会话管理。
         conversation = self.get(Conversation, conversation_id)
         message = self.get(Message, message_id)
 
@@ -283,7 +331,7 @@ class ConversationService(BaseService):
                     latency=agent_thought.latency,
                 )
 
-            # 7.检测事件是否为Agent_message
+            # 7.判断当前事件是否为 Agent 消息。
             if agent_thought.event == QueueEvent.AGENT_MESSAGE:
                 # 8.更新消息信息
                 self.update(
@@ -304,8 +352,8 @@ class ConversationService(BaseService):
                     latency=latency,
                 )
 
-                # 9.处理生成新会话名称。历史摘要由 DeepAgents 默认
-                # SummarizationMiddleware + workspace offload 接管。
+                # 9.生成新会话名称；历史摘要由 DeepAgents 默认的
+                # SummarizationMiddleware 和 Workspace 转存机制接管。
                 if conversation.is_new:
                     Thread(
                         target=self._generate_conversation_name_and_update,
@@ -332,43 +380,8 @@ class ConversationService(BaseService):
                 break
 
         # Run 级用量只在一次执行结束后写入，避免把流式分片重复累加。
-        if run_usage:
-            input_details = run_usage.get("input_details", {})
-            output_details = run_usage.get("output_details", {})
-            if not isinstance(input_details, Mapping):
-                input_details = {}
-            if not isinstance(output_details, Mapping):
-                output_details = {}
-
-            usage_updates: dict[str, Any] = {
-                "trace_id": run_usage.get("trace_id"),
-                "model_call_count": int(run_usage.get("model_call_count", 0) or 0),
-                "tool_call_count": int(run_usage.get("tool_call_count", 0) or 0),
-                "token_usage": dict(run_usage.get("models", {}) or {}),
-            }
-            if run_usage.get("usage_present"):
-                usage_updates.update(
-                    {
-                        "input_token_count": int(
-                            run_usage.get("input_tokens", 0) or 0
-                        ),
-                        "output_token_count": int(
-                            run_usage.get("output_tokens", 0) or 0
-                        ),
-                        "cached_token_count": _usage_detail(
-                            input_details,
-                            "cached",
-                        ),
-                        "reasoning_token_count": max(
-                            _usage_detail(input_details, "reasoning"),
-                            _usage_detail(output_details, "reasoning"),
-                        ),
-                        # 新口径覆盖旧总量，历史消息仍继续使用旧字段。
-                        "total_token_count": int(
-                            run_usage.get("total_tokens", 0) or 0
-                        ),
-                    }
-                )
+        usage_updates = self.build_run_usage_updates(run_usage)
+        if usage_updates:
             self.update(message, **usage_updates)
 
     def _generate_conversation_name_and_update(
@@ -379,25 +392,25 @@ class ConversationService(BaseService):
         account_id: UUID,
         model_config: dict = None,
     ) -> None:
-        """生成会话名字并更新"""
+        """生成会话名称并更新数据库记录。"""
         with flask_app.app_context():
-            # 1.根据会话id获取会话
+            # 1.根据会话 ID 获取会话。
             conversation = self.get(Conversation, conversation_id)
 
-            # 3.计算获取新会话名字
+            # 2.生成新的会话名称。
             new_conversation_name = self.generate_conversation_name(
                 query, account_id, model_config
             )
 
-            # 4.调用更新服务更新会话名称
+            # 3.更新会话名称。
             self.update(
                 conversation,
                 name=new_conversation_name,
             )
 
     def get_conversation(self, conversation_id: UUID, account: Account) -> Conversation:
-        """根据传递的会话id+account，获取指定的会话信息"""
-        # 1.根据conversation_id查询会话记录
+        """根据会话 ID 和账号获取指定会话。"""
+        # 1.根据会话 ID 查询会话记录。
         conversation = self.get(Conversation, conversation_id)
         if (
             not conversation
@@ -406,17 +419,17 @@ class ConversationService(BaseService):
         ):
             raise NotFoundException("该会话不存在或被删除，请核实后重试")
 
-        # 2.校验通过返回会话
+        # 2.校验通过后返回会话。
         return conversation
 
     def get_message(self, message_id: UUID, account: Account) -> Message:
-        """根据传递的消息id+账号，获取指定的消息"""
-        # 1.根据message_id查询消息记录
+        """根据消息 ID 和账号获取指定消息。"""
+        # 1.根据消息 ID 查询消息记录。
         message = self.get(Message, message_id)
         if not message or message.created_by != account.id or message.is_deleted:
             raise NotFoundException("该消息不存在或被删除，请核实后重试")
 
-        # 2.校验通过返回消息
+        # 2.校验通过后返回消息。
         return message
 
     def get_conversation_messages_with_page(
@@ -425,19 +438,19 @@ class ConversationService(BaseService):
         req: GetConversationMessagesWithPageReq,
         account: Account,
     ) -> tuple[list[Message], Paginator]:
-        """根据传递的会话id+请求数据，获取当前账号下该会话的消息分页列表数据"""
-        # 1.获取会话并校验权限
+        """根据会话和分页请求获取当前账号可见的消息列表。"""
+        # 1.获取会话并校验访问权限。
         conversation = self.get_conversation(conversation_id, account)
 
-        # 2.构建分页器并设置游标条件
+        # 2.构建分页器并设置游标条件。
         paginator = Paginator(db=self.db, req=req)
         filters = []
         if req.created_at.data:
-            # 3.将时间戳转换成DateTime
+            # 3.将时间戳转换为日期时间对象。
             created_at_datetime = datetime.fromtimestamp(req.created_at.data)
             filters.append(Message.created_at <= created_at_datetime)
 
-        # 4.执行分页并查询数据
+        # 4.执行分页查询。
         messages = paginator.paginate(
             self.db.session.query(Message)
             .options(joinedload(Message.agent_thoughts))
@@ -456,11 +469,11 @@ class ConversationService(BaseService):
     def delete_conversation(
         self, conversation_id: UUID, account: Account
     ) -> Conversation:
-        """根据传递的会话id+账号删除指定的会话记录"""
-        # 1.获取会话记录并校验权限
+        """根据会话 ID 和账号删除指定会话。"""
+        # 1.获取会话记录并校验访问权限。
         conversation = self.get_conversation(conversation_id, account)
 
-        # 2.更新会话的删除状态
+        # 2.清理运行时资源并更新会话删除状态。
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_conversation(
@@ -475,18 +488,18 @@ class ConversationService(BaseService):
     def delete_message(
         self, conversation_id: UUID, message_id: UUID, account: Account
     ) -> Message:
-        """根据传递的会话id+消息id删除指定的消息记录"""
-        # 1.获取会话记录并校验权限
+        """根据会话 ID 和消息 ID 删除指定消息。"""
+        # 1.获取会话记录并校验访问权限。
         conversation = self.get_conversation(conversation_id, account)
 
-        # 2.获取消息并校验权限
+        # 2.获取消息并校验访问权限。
         message = self.get_message(message_id, account)
 
-        # 3.判断消息和会话是否关联
+        # 3.确认消息属于当前会话。
         if conversation.id != message.conversation_id:
             raise NotFoundException("该会话下不存在该消息，请核实后重试")
 
-        # 4.校验通过修改消息is_deleted属性标记删除
+        # 4.校验通过后标记消息已删除。
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_message(
@@ -502,11 +515,11 @@ class ConversationService(BaseService):
     def update_conversation(
         self, conversation_id: UUID, account: Account, **kwargs
     ) -> Conversation:
-        """根据传递的会话id+账号+kwargs更新会话信息"""
-        # 1.获取会话记录并校验权限
+        """根据会话 ID、账号和更新字段修改会话信息。"""
+        # 1.获取会话记录并校验访问权限。
         conversation = self.get_conversation(conversation_id, account)
 
-        # 2.更新会话信息
+        # 2.更新会话信息。
         self.update(conversation, **kwargs)
 
         return conversation

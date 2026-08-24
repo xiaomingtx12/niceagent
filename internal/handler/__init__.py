@@ -27,6 +27,7 @@ from .wechat_handler import WechatHandler
 from .workflow_handler import WorkflowHandler
 from .workspace_file_handler import WorkspaceFileHandler
 from .memory_file_handler import MemoryFileHandler
+from .agent_workbench_handler import AgentWorkbenchHandler
 
 __all__ = [
     "AppHandler",
@@ -59,4 +60,5 @@ __all__ = [
     "SkillHandler",
     "WorkspaceFileHandler",
     "MemoryFileHandler",
+    "AgentWorkbenchHandler",
 ]

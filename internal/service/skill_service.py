@@ -1,4 +1,4 @@
-"""Builtin Skill catalog and AppConfig binding validation."""
+"""内置 Skill 目录和 AppConfig 绑定校验。"""
 
 from __future__ import annotations
 
@@ -24,6 +24,8 @@ _MAX_PACKAGE_BYTES = 20 * 1024 * 1024
 
 @dataclass(frozen=True)
 class BuiltinSkill:
+    """从内置目录加载并经过摘要校验的 Skill 元数据。"""
+
     name: str
     description: str
     version: str
@@ -38,6 +40,7 @@ class BuiltinSkill:
     enabled: bool = True
 
     def to_dict(self, *, enabled: bool | None = None) -> dict[str, Any]:
+        """转换为 Skill 目录接口使用的字典。"""
         return {
             "name": self.name,
             "description": self.description,
@@ -52,18 +55,19 @@ class BuiltinSkill:
 
 
 class SkillService(BaseService):
-    """Read-only platform Skill catalog.
+    """只读的内置 Skill 目录服务。
 
-    Skill content is loaded from the versioned builtin directory. AppConfig and
-    AppConfigVersion store binding references only.
+    Skill 内容来自版本化内置目录，应用配置只保存绑定引用。
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """初始化内置 Skill 根目录，不在服务启动时加载全部内容。"""
         del args, kwargs
         settings = Config()
         self._root = Path(settings.BUILTIN_SKILLS_ROOT)
 
     def list_catalog(self) -> list[BuiltinSkill]:
+        """读取当前版本的全部内置 Skill，并按名称排序。"""
         return sorted(self._scan().values(), key=lambda item: item.name)
 
     def get_catalog_skill(self, name: str) -> BuiltinSkill:
@@ -83,6 +87,7 @@ class SkillService(BaseService):
         bindings: list[dict[str, Any]] | None = None,
         include_versions: bool = False,
     ) -> list[dict[str, Any]]:
+        """返回 Skill 目录及其在当前应用中的启用状态。"""
         del account_id, app_id, include_versions
         normalized = self.normalize_bindings(bindings or [])
         enabled_names = {item["name"] for item in normalized if item["enabled"]}
@@ -98,9 +103,12 @@ class SkillService(BaseService):
         app_id,
         bindings: list[dict[str, Any]] | None = None,
     ) -> list[BuiltinSkill]:
+        """返回当前应用启用且版本校验通过的 Skill。"""
         del account_id, app_id
+        # 1.扫描当前版本的内置 Skill 目录。
         catalog = self._scan()
         selected: list[BuiltinSkill] = []
+        # 2.只返回配置中启用且摘要校验通过的 Skill。
         for binding in self.normalize_bindings(bindings or []):
             if not binding["enabled"]:
                 continue
@@ -111,6 +119,8 @@ class SkillService(BaseService):
         self,
         bindings: list[dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
+        """校验并标准化应用配置中的 Skill 绑定。"""
+        # 1.空配置表示当前 Agent 不挂载 Skill。
         if not bindings:
             return []
         if not isinstance(bindings, list):
@@ -119,6 +129,7 @@ class SkillService(BaseService):
         normalized: list[dict[str, Any]] = []
         seen: set[str] = set()
         for raw in bindings:
+            # 2.校验名称、版本、摘要和重复绑定。
             if not isinstance(raw, dict):
                 raise FailException("Skill 绑定项必须是对象")
             name = str(raw.get("name", "")).strip()
@@ -140,9 +151,11 @@ class SkillService(BaseService):
                 }
             )
             seen.add(name)
+        # 3.返回可保存、可传递给运行时装配器的标准结构。
         return normalized
 
     def _scan(self) -> dict[str, BuiltinSkill]:
+        """扫描并校验内置 Skill 目录，生成名称到元数据的映射。"""
         root = self._root
         if not root.is_absolute():
             root = Path.cwd() / root
@@ -198,6 +211,7 @@ class SkillService(BaseService):
 
 
 def _parse_frontmatter(skill_md: str) -> dict[str, Any]:
+    """解析 Skill Markdown 顶部的 YAML frontmatter。"""
     lines = skill_md.splitlines()
     if not lines or lines[0].strip() != "---":
         raise FailException("SKILL.md 必须包含 YAML frontmatter")
@@ -223,6 +237,7 @@ def _normalize_string_list(value: Any) -> tuple[str, ...]:
 
 
 def _digest_tree(root: Path) -> str:
+    """计算 Skill 文件包的稳定摘要，用于版本绑定校验。"""
     hasher = hashlib.sha256()
     for file in _iter_package_files(root):
         if file.is_symlink():

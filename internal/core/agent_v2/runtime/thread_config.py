@@ -12,12 +12,15 @@ def merge_thread_config(
     config: RunnableConfig | None,
 ) -> RunnableConfig | None:
     """合并调用参数并锁定租户线程标识。"""
+    # 1.生成由服务端上下文决定的默认线程和元数据。
     defaults = runtime_context.thread.to_config()
     if config is None:
         return defaults
 
+    # 2.保留调用方的其他 Runnable 配置。
     merged: RunnableConfig = dict(defaults)
     merged.update(config)
+    # 3.用可信服务端身份覆盖调用方可能传入的线程标识。
     merged["configurable"] = {
         **(config.get("configurable") or {}),
         **defaults["configurable"],

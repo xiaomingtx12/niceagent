@@ -28,7 +28,7 @@ from .base_service import BaseService
 @inject
 @dataclass
 class WebAppService(BaseService):
-    """WebApp服务"""
+    """WebApp 入口服务，负责用户、会话和 Agent 调用上下文。"""
 
     db: SQLAlchemy
     app_config_service: AppConfigService
@@ -42,7 +42,8 @@ class WebAppService(BaseService):
         app: App,
         account: Account,
     ) -> EndUser:
-        """Resolve the authenticated WebApp account to an app-scoped EndUser."""
+        """把已认证的 WebApp 账号解析为应用作用域内的终端用户。"""
+        # 1.优先读取当前账号在应用下已有的终端用户映射。
         end_user = (
             self.db.session.query(EndUser)
             .filter(
@@ -57,6 +58,7 @@ class WebAppService(BaseService):
                 raise ForbiddenException("终端用户不属于当前应用")
             return end_user
 
+        # 2.首次访问使用数据库唯一约束处理并发创建。
         # WebApp 页面会并发加载置顶和普通会话列表。两个请求可能同时
         # 发现终端用户不存在，因此必须让数据库负责处理首次创建竞态。
         statement = (
@@ -73,6 +75,7 @@ class WebAppService(BaseService):
         self.db.session.execute(statement)
         self.db.session.commit()
 
+        # 3.插入或冲突后重新查询，返回数据库中的真实记录。
         # 插入成功或发生冲突后统一重新查询，确保返回数据库中的真实记录。
         end_user = (
             self.db.session.query(EndUser)
@@ -96,8 +99,10 @@ class WebAppService(BaseService):
         account: Account,
     ) -> tuple[App, EndUser, Conversation]:
         """获取当前登录账号可访问的 WebApp 会话及其终端用户。"""
+        # 1.校验 WebApp token 并解析当前账号对应的终端用户。
         app = self.get_web_app(token)
         end_user = self.resolve_web_app_end_user(app=app, account=account)
+        # 2.按应用、调用方式和创建者限制会话可见范围。
         conversation = (
             self.db.session.query(Conversation)
             .filter(
@@ -113,9 +118,43 @@ class WebAppService(BaseService):
             raise ForbiddenException("会话不存在或不属于当前用户")
         return app, end_user, conversation
 
+    def get_or_create_owned_web_conversation(
+        self,
+        *,
+        token: str,
+        conversation_id: UUID,
+        account: Account,
+        ) -> tuple[App, EndUser, Conversation]:
+        """获取工作台会话；客户端新 thread 在首次 command 时落库。"""
+        # 1.校验作用域并解析 WebApp 终端用户。
+        app = self.get_web_app(token)
+        end_user = self.resolve_web_app_end_user(app=app, account=account)
+        # 2.已有 thread 只允许返回属于当前应用和用户的会话。
+        existing = self.get(Conversation, conversation_id)
+        if existing is not None:
+            if (
+                existing.app_id != app.id
+                or existing.invoke_from != InvokeFrom.WEB_APP
+                or existing.created_by not in {end_user.id, account.id}
+                or existing.is_deleted is True
+            ):
+                raise ForbiddenException("会话不存在或不属于当前用户")
+            return app, end_user, existing
+
+        # 3.首次 command 时创建对应的业务会话记录。
+        conversation = self.create(
+            Conversation,
+            id=conversation_id,
+            app_id=app.id,
+            name="新任务",
+            invoke_from=InvokeFrom.WEB_APP,
+            created_by=end_user.id,
+        )
+        return app, end_user, conversation
+
     def get_web_app(self, token: str) -> App:
-        """根据传递的token获取WebApp实例"""
-        # 1.在数据库中查询token对应的应用
+        """根据访问令牌获取已发布的 WebApp 应用。"""
+        # 1.在数据库中查询令牌对应的应用。
         app = (
             self.db.session.query(App)
             .filter(
@@ -126,24 +165,24 @@ class WebAppService(BaseService):
         if not app or app.status != AppStatus.PUBLISHED:
             raise NotFoundException("该WebApp不存在或者未发布，请核实后重试")
 
-        # 2.返回查询的应用
+        # 2.返回校验通过的应用。
         return app
 
     def get_web_app_info(self, token: str) -> dict[str, Any]:
-        """根据传递的token获取WebApp信息"""
-        # 1.获取App基础信息
+        """根据访问令牌获取 WebApp 的基础信息和运行配置。"""
+        # 1.获取应用基础信息。
         app = self.get_web_app(token)
 
-        # 2.获取应用配置
+        # 2.获取应用配置。
         app_config = self.app_config_service.get_app_config(app)
         
-        # 3.从模型配置中获取输入模态（不需要真正加载模型实例）
+        # 3.从模型配置中读取输入模态，不实际加载模型实例。
         model_config = app_config.get("model_config", {})
         input_modalities = model_config.get("input_modalities", ["text"])
         if not isinstance(input_modalities, list):
             input_modalities = ["text"]
 
-        # 4.提取信息并返回
+        # 4.提取接口需要的信息并返回。
         return {
             "id": str(app.id),
             "icon": app.icon,
@@ -248,12 +287,12 @@ class WebAppService(BaseService):
         return generate()
 
     def stop_web_app_chat(self, token: str, task_id: UUID, account: Account):
-        """根据传递的token+task_id停止与指定WebApp对话"""
-        # 1.获取WebApp应用并校验应用是否发布
+        """根据访问令牌和任务 ID 停止指定 WebApp 对话。"""
+        # 1.获取 WebApp 应用并校验是否已发布。
         app = self.get_web_app(token)
         end_user = self.resolve_web_app_end_user(app=app, account=account)
 
-        # 2.调用智能体队列管理器停止特定任务
+        # 2.调用 Agent 队列管理器停止指定任务。
         AgentQueueManager.set_stop_flag(
             task_id,
             InvokeFrom.WEB_APP,
@@ -263,12 +302,12 @@ class WebAppService(BaseService):
     def get_conversations(
         self, token: str, is_pinned: bool, account: Account
     ) -> list[Conversation]:
-        """根据传递的token+is_pinned+account获取指定账号在该WebApp下的会话列表数据"""
-        # 1.获取WebApp应用并校验应用是否发布
+        """获取当前账号在指定 WebApp 下的会话列表。"""
+        # 1.获取 WebApp 应用并校验是否已发布。
         app = self.get_web_app(token)
         end_user = self.resolve_web_app_end_user(app=app, account=account)
 
-        # 2.筛选过滤并查询数据
+        # 2.按用户和置顶状态筛选会话并查询数据。
         conversations = (
             self.db.session.query(Conversation)
             .filter(

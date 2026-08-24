@@ -14,6 +14,11 @@ def init_app(app: Flask):
         else logging.WARNING
     )
 
+    # StructuredTool 的 args_schema 是 Pydantic 模型类。LangSmith 会先尝试
+    # JSON mode，失败后自动使用兼容序列化；这是预期降级，不应在开发环境
+    # 为每个工具重复打印 DEBUG 日志。
+    logging.getLogger("langsmith._internal._serde").setLevel(logging.INFO)
+
     # 2.设置日志存储的文件夹，如果不存在则创建
     log_folder = os.path.join(os.getcwd(), "storage", "log")
     if not os.path.exists(log_folder):
