@@ -4,12 +4,15 @@ from internal.exception import ValidateErrorException
 from internal.service.app_config_service import AppConfigService
 
 
-def test_long_term_memory_normalization_always_enables_memory():
+def test_long_term_memory_normalization_preserves_switch():
     assert AppConfigService._normalize_long_term_memory({"enable": False}) == {
+        "enable": False
+    }
+    assert AppConfigService._normalize_long_term_memory({"enable": True}) == {
         "enable": True
     }
-    assert AppConfigService._normalize_long_term_memory({}) == {"enable": True}
-    assert AppConfigService._normalize_long_term_memory(None) == {"enable": True}
+    assert AppConfigService._normalize_long_term_memory({}) == {"enable": False}
+    assert AppConfigService._normalize_long_term_memory(None) == {"enable": False}
 
 
 def test_long_term_memory_normalization_rejects_invalid_shape():

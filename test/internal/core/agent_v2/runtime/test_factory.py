@@ -281,6 +281,33 @@ def test_build_deep_agent_routes_native_runtime_options(monkeypatch):
     assert "state_schema" not in captured
 
 
+def test_build_deep_agent_registers_prebuilt_subagent_models(monkeypatch):
+    """主 Agent 与预构建子 Agent 模型都必须绑定 Harness Profile。"""
+    main_model = _llm()
+    subagent_model = _llm()
+    registered = []
+
+    monkeypatch.setattr(
+        factory,
+        "register_platform_harness_profile",
+        registered.append,
+    )
+    monkeypatch.setattr(factory, "create_deep_agent", lambda **kwargs: object())
+
+    build_deep_agent(
+        llm=main_model,
+        tools=[],
+        system_prompt="test prompt",
+        review_config={},
+        subagent_models_by_name={
+            "researcher": subagent_model,
+            "remote": "openai:gpt-5",
+        },
+    )
+
+    assert registered == [main_model, subagent_model]
+
+
 def test_native_memory_middleware_loads_store_backend_file():
     """原生 MemoryMiddleware 从 StoreBackend 读取 AGENTS.md。"""
     from langgraph.store.memory import InMemoryStore

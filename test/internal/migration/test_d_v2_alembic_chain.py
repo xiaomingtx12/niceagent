@@ -75,7 +75,7 @@ def test_d_v2_single_head():
     from alembic.script import ScriptDirectory
 
     heads = ScriptDirectory("internal/migration").get_heads()
-    assert heads == ["05f098262b28"]
+    assert heads == ["4c63aa230960"]
 
 
 def test_d_v2_013_is_head():
@@ -100,7 +100,7 @@ def test_alembic_native_revision_map_loads_with_one_head():
 
     script = ScriptDirectory("internal/migration")
 
-    assert script.get_heads() == ["05f098262b28"]
+    assert script.get_heads() == ["4c63aa230960"]
     assert script.get_revision("deepagents_v2").revision == (
         "d_v2_001_drop_agent_checkpoints"
     )
