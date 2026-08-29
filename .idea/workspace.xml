@@ -4,126 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
-      <change beforePath="$PROJECT_DIR$/.env.example" beforeDir="false" afterPath="$PROJECT_DIR$/.env.example" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.gitignore" beforeDir="false" afterPath="$PROJECT_DIR$/.gitignore" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/default_config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/default_config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/01.项目API文档.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/01.项目API文档.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/agent-workbench-upgrade/01-streaming-protocol-and-backend.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/agent-workbench-upgrade/01-streaming-protocol-and-backend.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/agent-workbench-upgrade/03-roadmap-and-acceptance.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/agent-workbench-upgrade/03-roadmap-and-acceptance.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/agent-workbench-upgrade/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/agent-workbench-upgrade/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/agent_queue_manager.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/base_agent.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/execution.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/invocation.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/models.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/agents/results.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/backends/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/composite.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/read_only.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/sandbox.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/skill_catalog.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/workspace.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/workspace_path.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/workspace_quota.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/events/__init__.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/events/protocol.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/events/serialization.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/events/session.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/events/translator.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/events/visibility.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/middleware/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/middleware/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/middleware/event_translation_middleware.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/middleware/review_middleware.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/middleware/review_middleware.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/middleware/runtime_context_middleware.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/middleware/runtime_context_middleware.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/middleware/trace_middleware.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/middleware/trace_middleware.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/persistence/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/persistence/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/persistence/checkpoint.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/persistence/store.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/persistence/workspace.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/runtime/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/assembly.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/configuration.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/factory.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/harness_profile.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/memory.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/models.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/prompt.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/subagents.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/telemetry.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/thread_config.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/runtime/token_usage.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/api_doc_generator.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/api_doc_generator.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/code_reviewer.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/code_reviewer.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/daily_report_assistant.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/daily_report_assistant.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/english_tutor.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/english_tutor.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/llm_product_manager.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/resume_optimizer.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/resume_optimizer.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/sql_expert.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/sql_expert.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/xiaohongshu_writer.yaml" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/builtin_apps/builtin_apps/xiaohongshu_writer.yaml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/app_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/app_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/exception/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/exception/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/agent_workbench_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/agent_workbench_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/assistant_agent_handler.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/memory_file_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/memory_file_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/openapi_handler.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/web_app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/web_app_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/workspace_file_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/workspace_file_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/migration/alembic.ini" beforeDir="false" afterPath="$PROJECT_DIR$/internal/migration/alembic.ini" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/migration/env.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/migration/env.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/migration/versions/d_v2_018_remove_workbench_visibility.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/agent_run.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/agent_run.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/conversation.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/conversation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/workspace_file.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/workspace_file.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/router/router.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/router.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/agent_thought_schema.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/assistant_agent_schema.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/conversation_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/conversation_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/openapi_schema.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_attachment_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_attachment_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_conversation_cleanup_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_conversation_cleanup_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_invocation_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_runtime_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_workbench_replay.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_workbench_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_workbench_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_config_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/assistant_agent_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/cos_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/cos_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/faiss_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/faiss_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/memory_file_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/memory_file_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/openapi_service.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/retrieval_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/retrieval_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/skill_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/skill_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/web_app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/web_app_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/wechat_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/wechat_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/workspace_file_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/workspace_file_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pkg/paginator/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/paginator/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pkg/paginator/paginator.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/paginator/paginator.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pkg/response/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/response/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/pkg/response/response.py" beforeDir="false" afterPath="$PROJECT_DIR$/pkg/response/response.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/internal/core/agent_v2/runtime/test_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/core/agent_v2/runtime/test_factory.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/internal/migration/test_d_v2_alembic_chain.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/migration/test_d_v2_alembic_chain.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/internal/scripts/test_validate_deepagents_v2.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/internal/service/test_agent_attachment_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/service/test_agent_attachment_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/internal/service/test_agent_runtime_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/service/test_agent_runtime_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/internal/service/test_app_config_memory.py" beforeDir="false" afterPath="$PROJECT_DIR$/test/internal/service/test_app_config_memory.py" afterDir="false" />
-    </list>
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="" />
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -562,7 +443,7 @@
       <workItem from="1787746051037" duration="11116000" />
       <workItem from="1787816484093" duration="26136000" />
       <workItem from="1787897860404" duration="6893000" />
-      <workItem from="1787992309833" duration="733000" />
+      <workItem from="1787992309833" duration="1285000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
