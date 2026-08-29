@@ -10,7 +10,7 @@ from langchain_core.messages import AIMessage
 
 
 class ReviewBlocked(Exception):
-    """output 命中关键词时由中间件抛出，BaseAgent 捕获后置 message 状态。"""
+    """output 命中关键词时由中间件抛出，由执行边界统一处理。"""
 
 
 def apply_keyword_filter(
@@ -77,9 +77,7 @@ class ReviewMiddleware(AgentMiddleware):
             return {
                 "jump_to": "end",
                 "messages": [
-                    AIMessage(
-                        content=self._preset_response or "输入内容未通过审核。"
-                    )
+                    AIMessage(content=self._preset_response or "输入内容未通过审核。")
                 ],
             }
         return None
@@ -97,9 +95,7 @@ class ReviewMiddleware(AgentMiddleware):
             return None
         hit = apply_keyword_filter(text, self._keywords)
         if hit is not None:
-            raise ReviewBlocked(
-                f"LLM 输出命中关键词 '{hit}'，已拦截。"
-            )
+            raise ReviewBlocked(f"LLM 输出命中关键词 '{hit}'，已拦截。")
         return None
 
 

@@ -13,13 +13,12 @@ from uuid import uuid4
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
-from internal.core.agent_v2.events.session import current_event_session
-from internal.core.agent_v2.events.translator import response_messages
-from internal.core.agent_v2.runtime.telemetry import (
+from internal.core.agent_v2.protocol.message_parser import response_messages
+from internal.core.agent_v2.runtime.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-from internal.core.agent_v2.runtime.token_usage import normalize_response
+from internal.core.agent_v2.runtime.observability.token_usage import normalize_response
 
 
 _span_stack: ContextVar[tuple[str, ...]] = ContextVar(
@@ -58,9 +57,6 @@ class TraceMiddleware(AgentMiddleware):
     ) -> Any:
         """记录一次同步模型调用，包括失败情况。"""
         model_name = _model_name(getattr(request, "model", None))
-        session = current_event_session()
-        if session is not None:
-            session.record_model_call()
         span = self._start_span(
             "model",
             model_name,
@@ -75,10 +71,7 @@ class TraceMiddleware(AgentMiddleware):
                 error_type=type(exc).__name__,
             )
             raise
-        usage = normalize_response(response, model_name=model_name)
-        session = current_event_session()
-        if session is not None:
-            session.record_model_usage(usage, model_name=model_name)
+        usage = normalize_response(response)
         self._finish_span(
             span,
             status="error" if _model_response_is_error(response) else "ok",
@@ -107,10 +100,7 @@ class TraceMiddleware(AgentMiddleware):
                 error_type=type(exc).__name__,
             )
             raise
-        usage = normalize_response(response, model_name=model_name)
-        session = current_event_session()
-        if session is not None:
-            session.record_model_usage(usage, model_name=model_name)
+        usage = normalize_response(response)
         self._finish_span(
             span,
             status="error" if _model_response_is_error(response) else "ok",
@@ -124,9 +114,6 @@ class TraceMiddleware(AgentMiddleware):
         handler: Callable[[Any], Any],
     ) -> Any:
         """记录一次同步工具调用，但不序列化业务载荷。"""
-        session = current_event_session()
-        if session is not None:
-            session.record_tool_call()
         span = self._start_span("tool", _tool_name(request), request)
         try:
             result = handler(request)
@@ -149,9 +136,6 @@ class TraceMiddleware(AgentMiddleware):
         handler: Callable[[Any], Any],
     ) -> Any:
         """记录一次异步工具调用，但不序列化业务载荷。"""
-        session = current_event_session()
-        if session is not None:
-            session.record_tool_call()
         span = self._start_span("tool", _tool_name(request), request)
         try:
             result = await handler(request)
@@ -174,18 +158,12 @@ class TraceMiddleware(AgentMiddleware):
         name: str,
         request: Any,
     ) -> _ActiveSpan:
-        session = current_event_session()
-        trace_id = (
-            str(session.trace_id)
-            if session is not None
-            else _fallback_trace_id(request)
-        )
+        trace_id = _fallback_trace_id(request)
         stack = _span_stack.get()
         parent_span_id = stack[-1] if stack else None
         span_id = uuid4().hex
         attributes = {
             "operation": name,
-            "task_id": str(session.task_id) if session is not None else None,
             **_runtime_attributes(request),
         }
         if operation == "model":
@@ -205,7 +183,7 @@ class TraceMiddleware(AgentMiddleware):
 
         started_at = perf_counter()
         token = _span_stack.set((*stack, span_id))
-        self._telemetry_for(session).emit_span(
+        self._telemetry_for().emit_span(
             operation,
             phase="started",
             trace_id=trace_id,
@@ -236,9 +214,8 @@ class TraceMiddleware(AgentMiddleware):
         finish_attributes.update(attributes or {})
         if error_type is not None:
             finish_attributes["error_type"] = error_type
-        session = current_event_session()
         try:
-            self._telemetry_for(session).emit_span(
+            self._telemetry_for().emit_span(
                 span.operation,
                 phase="failed" if status != "ok" else "finished",
                 trace_id=span.trace_id,
@@ -251,12 +228,9 @@ class TraceMiddleware(AgentMiddleware):
         finally:
             _span_stack.reset(span.token)
 
-    def _telemetry_for(self, session: Any) -> AgentTelemetry:
-        return (
-            session.telemetry
-            if session is not None
-            else self._telemetry or NOOP_AGENT_TELEMETRY
-        )
+    def _telemetry_for(self) -> AgentTelemetry:
+        """返回当前图显式注入的遥测出口。"""
+        return self._telemetry or NOOP_AGENT_TELEMETRY
 
 
 def _fallback_trace_id(request: Any) -> str:
@@ -277,7 +251,8 @@ def _runtime_attributes(request: Any) -> dict[str, str | None]:
             "account_id",
             "app_id",
             "conversation_id",
-            "end_user_id",
+            "principal_id",
+            "memory_enabled",
             "agent_id",
         )
         if (value := getattr(context, key, None)) is not None
