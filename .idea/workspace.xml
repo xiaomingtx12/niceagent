@@ -4,7 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/.codex-tasks/20260728-deepagents-plan-alignment/ACCEPTANCE.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.codex-tasks/20260728-deepagents-plan-alignment/PROGRESS.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.codex-tasks/20260728-deepagents-plan-alignment/SPEC.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.codex-tasks/20260728-deepagents-plan-alignment/TODO.csv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+    </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -443,7 +449,7 @@
       <workItem from="1787746051037" duration="11116000" />
       <workItem from="1787816484093" duration="26136000" />
       <workItem from="1787897860404" duration="6893000" />
-      <workItem from="1787992309833" duration="1285000" />
+      <workItem from="1787992309833" duration="2241000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
