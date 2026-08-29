@@ -1,27 +1,18 @@
-"""WorkspaceFile 模型（R1 deepagents FilesystemMiddleware 持久化层）
+"""Workspace 文件元数据模型。"""
 
-详见 migration d_v2_002_create_workspace_files.py 顶部 docstring + plan
-`docs/deepagents-v2-plan/00-harness-overall-upgrade.md` §1.4。
-
-约束（硬约束 #5）：复用 SQLAlchemy + master 现有 db.Model 模式，不自建 ORM；
-约束（多层路径）：路径白名单校验放在 service 层 + FilesystemBackend 双重校验，
-DB 字段仅做存储，不在 schema 里约束路径格式（避免 SQLite/PG 大小写差异）。
-"""
 from datetime import datetime
 
 from sqlalchemy import (
-    PrimaryKeyConstraint,
-    UniqueConstraint,
-    CheckConstraint,
-    Index,
-    UUID,
-    Column,
-    String,
-    Integer,
-    DateTime,
-    Boolean,
     BigInteger,
-    LargeBinary,
+    Boolean,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    PrimaryKeyConstraint,
+    String,
+    UUID,
+    UniqueConstraint,
     text,
 )
 
@@ -29,61 +20,37 @@ from internal.extension.database_extension import db
 
 
 class WorkspaceFile(db.Model):
-    """workspace 文件实体（R1 FilesystemMiddleware 持久化）。
-
-    路径约定：
-      Agent 使用 `/workspace/<rest>`，数据库保存为
-      `{conversation_id}/<rest>`。
-
-    软版本：`version` 每次写入 +1，老行保留（agent 读 version 最大）。
-    软删除：`is_deleted=True` + 30 天 GC；creator 面板默认隐藏已删除。
-    """
+    """记录 Workspace 当前文件元数据，文件内容由 COS 持久化。"""
 
     __tablename__ = "workspace_files"
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_workspace_files"),
-        # 写路径：(account_id, app_id, path, version) UNIQUE
         UniqueConstraint(
-            "account_id", "app_id", "path", "version",
-            name="uq_workspace_files_path_version",
+            "account_id",
+            "app_id",
+            "path",
+            name="uq_workspace_files_scope_path",
         ),
-        # 读路径热点：按 (account_id, app_id, path) 找最新 version
-        Index("idx_workspace_files_account_app_path", "account_id", "app_id", "path"),
-        # end-user "本对话文件" 列表按 conversation_id 过滤
+        UniqueConstraint("object_key", name="uq_workspace_files_object_key"),
         Index("idx_workspace_files_conversation", "conversation_id"),
-        # creator workspace 面板按 app + 时间排序
-        Index("idx_workspace_files_app_created", "app_id", "created_at"),
-        # storage_backend 白名单
-        CheckConstraint(
-            "storage_backend IN ('db', 'cos')",
-            name="ck_workspace_files_storage_backend",
-        ),
+        Index("idx_workspace_files_app_updated", "app_id", "updated_at"),
     )
 
     id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
     account_id = Column(UUID, nullable=False)
     app_id = Column(UUID, nullable=False)
-    conversation_id = Column(UUID, nullable=True)
+    conversation_id = Column(UUID, nullable=False)
     path = Column(String(512), nullable=False)
-    version = Column(Integer, nullable=False, server_default=text("1"))
-    storage_backend = Column(
-        String(32), nullable=False, server_default=text("'db'")
-    )
+    object_key = Column(String(1024), nullable=False)
     mime_type = Column(
-        String(128), nullable=True, server_default=text("'text/plain'")
+        String(128), nullable=False, server_default=text("'application/octet-stream'")
     )
     size_bytes = Column(BigInteger, nullable=False, server_default=text("0"))
-    content_sha256 = Column(
-        String(64), nullable=False, server_default=text("''")
-    )
-    content = Column(LargeBinary, nullable=True)  # 仅 storage_backend='db' 时填充
+    content_sha256 = Column(String(64), nullable=False)
+    revision = Column(Integer, nullable=False, server_default=text("1"))
     created_by = Column(UUID, nullable=True)
-    is_deleted = Column(
-        Boolean, nullable=False, server_default=text("false")
-    )
-    created_at = Column(
-        DateTime, default=datetime.now, nullable=False
-    )
+    is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
     updated_at = Column(
         DateTime,
         default=datetime.now,
@@ -91,35 +58,11 @@ class WorkspaceFile(db.Model):
         nullable=False,
     )
 
-    def to_dict(self, *, include_content: bool = False) -> dict:
-        conversation_prefix = f"{self.conversation_id}/"
+    @property
+    def virtual_path(self) -> str:
+        """返回前端和 Agent 使用的虚拟路径。"""
+        prefix = f"{self.conversation_id}/"
         relative_path = (
-            self.path[len(conversation_prefix):]
-            if self.path.startswith(conversation_prefix)
-            else self.path
+            self.path[len(prefix) :] if self.path.startswith(prefix) else self.path
         )
-        virtual_path = f"/workspace/{relative_path}"
-        data = {
-            "id": str(self.id),
-            "app_id": str(self.app_id),
-            "conversation_id": (
-                str(self.conversation_id) if self.conversation_id else None
-            ),
-            "path": virtual_path,
-            "virtual_path": virtual_path,
-            "version": self.version,
-            "storage_backend": self.storage_backend,
-            "mime_type": self.mime_type,
-            "size_bytes": self.size_bytes,
-            "content_sha256": self.content_sha256,
-            "created_by": str(self.created_by) if self.created_by else None,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-        }
-        if include_content:
-            data["content"] = (
-                self.content.decode("utf-8", errors="replace")
-                if self.content is not None
-                else None
-            )
-        return data
+        return f"/workspace/{relative_path}"

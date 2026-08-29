@@ -1,477 +1,340 @@
-"""创建者与发布应用共用的 Agent Protocol 工作台桥接层。"""
+"""Agent Protocol 工作台的应用服务入口。
+
+本模块只负责 Run 生命周期、并发控制、事件投影和传输适配；
+Agent 图的构建与执行委托给 ``AgentAssemblyService`` 和 Agent Core。
+"""
 
 from __future__ import annotations
 
 import threading
 import time
-from collections import deque
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
-from typing import Any, ClassVar, Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Iterator
 from uuid import UUID, uuid4
 
-from flask import current_app, has_app_context
+from flask import current_app
 from injector import inject
-from redis import Redis
+from pydantic import ValidationError
 from redis.exceptions import RedisError
-from sqlalchemy import and_, func, or_
-from internal.core.agent_v2.events.protocol import ProtocolEventProjector
-from internal.core.agent_v2.events.visibility import project_safe_workbench_event
+
+from internal.core.agent_v2.protocol.event_projector import (
+    AgentProtocolEventProjector,
+)
+from internal.core.agent_v2.protocol.message_parser import (
+    message_content_to_text,
+)
+from internal.entity import (
+    WORKBENCH_TERMINAL_STATUSES,
+    WorkbenchRun,
+    WorkbenchRunInput,
+    WorkbenchRunStartReservation,
+    WorkbenchRunStatus,
+)
+from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
-from internal.exception import ForbiddenException, NotFoundException
-from internal.model import AgentRun, AgentRunEvent, App, Conversation, Message
+from internal.exception import (
+    AgentInvocationException,
+    ForbiddenException,
+    NotFoundException,
+    WorkbenchReplayCursorExpired,
+)
+from internal.model import Account, AgentRun, App, Conversation, EndUser, Message
+from internal.repository import AgentWorkbenchRedisRepository
+from internal.schema.agent_attachment_schema import AgentAttachmentResolveReq
+from internal.schema.agent_attachment_schema import dump_agent_attachments
+from internal.schema.agent_runtime_schema import AgentInvocation
+from internal.schema.agent_workbench_schema import (
+    WorkbenchCancelResp,
+    WorkbenchCommandErrorResp,
+    WorkbenchCommandReq,
+    WorkbenchCommandSuccessResp,
+    WorkbenchEvent,
+    WorkbenchMessagePageResp,
+    WorkbenchStateResp,
+    WorkbenchSubscriptionReq,
+)
+from internal.schema.app_config_schema import AgentAppConfigReq
 from pkg.sqlalchemy import SQLAlchemy
+from .agent_assembly_service import AgentAssemblyService
 from .agent_attachment_service import AgentAttachmentService
-from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
+from .agent_workbench_access_service import AgentWorkbenchAccessService
+from .agent_workbench_run_service import AgentWorkbenchRunService
 from .app_config_service import AppConfigService
+from .assistant_agent_service import AssistantAgentService
 from .base_service import BaseService
 from .conversation_service import ConversationService
 from .web_app_service import WebAppService
-from .agent_workbench_replay import (
-    AgentWorkbenchReplayStore,
-    ReplayCursorExpired,
-)
 
 
-@dataclass
-class _PendingRun:
-    run_id: UUID
-    thread_id: UUID
-    spec: AgentInvocationSpec
-    status: str = "queued"
-    initial_sequence: int = 0
-    last_sequence: int = 0
-    values: dict[str, Any] | None = None
-    error: str = ""
-    events: deque[dict[str, Any]] = None  # type: ignore[assignment]
-    done: threading.Event = None  # type: ignore[assignment]
-    cancel_requested: threading.Event = None  # type: ignore[assignment]
-    last_cancel_poll: float = 0.0
-    include_opening_statement: bool = False
-
-    def __post_init__(self) -> None:
-        self.events = deque(maxlen=2000)
-        self.done = threading.Event()
-        self.cancel_requested = threading.Event()
-
-
-@dataclass(frozen=True)
-class _RunReservation:
-    run_id: UUID
-    input_message_id: str | None
+def _is_root_terminal_event(event: WorkbenchEvent) -> bool:
+    """只有根 namespace 的应用终态才能结束整个 Run 订阅。"""
+    if event.method != "lifecycle" or event.params.namespace:
+        return False
+    data = event.params.data
+    if not isinstance(data, Mapping):
+        return False
+    return any(
+        data.get(field_name) in WORKBENCH_TERMINAL_STATUSES
+        for field_name in ("status", "event")
+    )
 
 
 @inject
 @dataclass
 class AgentWorkbenchService(BaseService):
-    """薄协议适配层；Deep Agents 仍是执行状态权威。"""
+    """协调一次 Agent Protocol Run 的完整业务流程。
+
+    负责权限入口、Run 入队、数据库状态、取消、事件重放和 SSE 输出，
+    不负责查询 App 配置细节，也不直接构建 LangGraph 图。
+    """
 
     db: SQLAlchemy
+    agent_assembly_service: AgentAssemblyService
+    access_service: AgentWorkbenchAccessService
+    run_service: AgentWorkbenchRunService
+    redis_repository: AgentWorkbenchRedisRepository
     app_config_service: AppConfigService
-    agent_invocation_service: AgentInvocationService
-    agent_attachment_service: AgentAttachmentService
+    attachment_service: AgentAttachmentService
     web_app_service: WebAppService
-    redis_client: Redis
+    assistant_agent_service: AssistantAgentService
 
-    _runs: ClassVar[dict[tuple[str, str], _PendingRun]]
-    _starting_runs: ClassVar[dict[tuple[str, str], _RunReservation]]
-    _lock: ClassVar[threading.RLock]
-    _condition: ClassVar[threading.Condition]
+    _runs: dict[str, WorkbenchRun] = field(init=False, default_factory=dict)
+    _starting_runs: dict[str, WorkbenchRunStartReservation] = field(
+        init=False,
+        default_factory=dict,
+    )
+    _condition: threading.Condition = field(
+        init=False,
+        default_factory=threading.Condition,
+    )
     # 1、Redis 可用时不再用数据库轮询发现下一轮任务；该间隔只作为 Redis
     # 不可用时的低频降级检查间隔，避免长连接持续占用数据库连接。
     _db_poll_interval: ClassVar[float] = 5.0
+    _cancel_signal_poll_interval: ClassVar[float] = 0.25
+    _cancel_status_poll_interval: ClassVar[float] = 1.0
     _sse_heartbeat_interval: ClassVar[float] = 15.0
-    _message_page_size: ClassVar[int] = 20
 
-    def __post_init__(self) -> None:
-        self._runs = {}
-        self._starting_runs = {}
-        self._lock = threading.RLock()
-        self._condition = threading.Condition(self._lock)
-        config = current_app.config if has_app_context() else {}
-        self._replay_store = AgentWorkbenchReplayStore(
-            self.redis_client,
-            key_prefix=config.get(
-                "AGENT_WORKBENCH_REPLAY_KEY_PREFIX",
-                "my-dify:agent-workbench:events:v1",
-            ),
-            # 2、工作台事件只用于短期断线恢复，默认保留 10 分钟。
-            ttl_seconds=config.get("AGENT_WORKBENCH_REPLAY_TTL_SECONDS", 600),
-            max_length=config.get("AGENT_WORKBENCH_REPLAY_MAX_LENGTH", 2000),
-        )
+    # ---------- 对外工作台查询 ----------
 
-    def _get_replay_store(self) -> AgentWorkbenchReplayStore | None:
-        """获取共享 Redis replay store；连接失败时由调用方走数据库降级。"""
-        return getattr(self, "_replay_store", None)
-
-    @staticmethod
-    def _scope_key(kind: str, value: str) -> str:
-        return f"{kind}:{value}"
-
-    def authorize(
+    def subscribe(
         self,
         *,
-        kind: str,
-        scope: str,
+        invoke_from: InvokeFrom,
+        access_value: str,
         thread_id: UUID,
-        account: Any,
-        release_session: bool = True,
-    ) -> None:
-        """每次读取或订阅都重新校验应用与任务线程归属。"""
-        if kind == "app":
-            app = (
-                self.db.session.query(App)
-                .filter(App.id == UUID(scope), App.account_id == account.id)
-                .one_or_none()
-            )
-            conversation = self.get(Conversation, thread_id)
-            if (
-                app is None
-                or conversation is None
-                or conversation.app_id != app.id
-                or conversation.invoke_from != InvokeFrom.DEBUGGER
-            ):
-                raise ForbiddenException("工作台线程不存在或无权访问")
-            # 4、鉴权只做短查询，完成后立即释放连接，不能把连接带进 SSE 长请求。
-            # 取消接口会继续更新同一个实体，因此由调用方暂时保留 Session。
-            if release_session:
-                self.db.session.close()
-            return
-        if kind == "web_app":
-            try:
-                self.web_app_service.get_owned_web_conversation(
-                    token=scope,
-                    conversation_id=thread_id,
-                    account=account,
-                )
-            finally:
-                # 5、发布态鉴权同样不保留数据库 Session。
-                if release_session:
-                    self.db.session.close()
-            return
-        raise NotFoundException("未知工作台作用域")
-
-    def _persist_run(self, run: _PendingRun, *, kind: str, scope: str) -> None:
-        """返回 command 响应前持久化运行主体。"""
-        if run.spec.app_id is None:
-            raise ValueError("工作台运行缺少 app_id")
-        self.db.session.add(
-            AgentRun(
-                id=run.run_id,
-                app_id=run.spec.app_id,
-                conversation_id=run.spec.conversation_id,
-                thread_id=run.thread_id,
-                scope_kind=kind,
-                scope_value=scope,
-                invoke_from=run.spec.invoke_from,
-                created_by=run.spec.created_by,
-                message_id=run.spec.message_id,
-                status=run.status,
-                query=run.spec.query,
-                last_sequence=run.initial_sequence,
-            )
+        account: Account,
+        subscription: WorkbenchSubscriptionReq,
+    ) -> Iterator[dict[str, Any] | None]:
+        """校验线程归属后创建事件订阅。"""
+        self.access_service.authorize_thread(
+            invoke_from=invoke_from,
+            access_value=access_value,
+            thread_id=thread_id,
+            account=account,
         )
-        self.db.session.flush()
-
-    def _persist_status(self, run: _PendingRun, *, status: str, error: str = "") -> None:
-        row = self.db.session.query(AgentRun).filter(AgentRun.id == run.run_id).one_or_none()
-        if row is None:
-            return
-        now = datetime.utcnow()
-        updates: dict[str, Any] = {"status": status, "error": error}
-        if status == "running" and row.started_at is None:
-            updates["started_at"] = now
-        if status in {"completed", "failed", "cancelled"}:
-            updates["finished_at"] = now
-        self.update(row, **updates)
-
-    def _persist_event(self, run: _PendingRun, event: Mapping[str, Any]) -> None:
-        params = event.get("params") if isinstance(event.get("params"), Mapping) else {}
-        replay_store = self._get_replay_store()
-        if replay_store is not None:
-            replay_store.append(run.run_id, event)
-
-        # token/message 增量只保留在短期 Redis 窗口；最终 messages 由 values 快照持久化。
-        if event.get("method") == "messages":
-            return
-        existing = None
-        existing = (
-            self.db.session.query(AgentRunEvent)
-            .filter(AgentRunEvent.run_id == run.run_id, AgentRunEvent.seq == event["seq"])
-            .one_or_none()
+        return self._subscribe_events(
+            invoke_from=invoke_from,
+            thread_id=thread_id,
+            subscription=subscription,
         )
-        if existing is None:
-            existing = (
-                self.db.session.query(AgentRunEvent)
-                .filter(
-                    AgentRunEvent.run_id == run.run_id,
-                    AgentRunEvent.event_id == event["event_id"],
-                )
-                .one_or_none()
-            )
-        inserted = existing is None
-        if inserted:
-            self.create(
-                AgentRunEvent,
-                run_id=run.run_id,
-                seq=event["seq"],
-                event_id=event["event_id"],
-                method=event["method"],
-                namespace=params.get("namespace", []),
-                payload=event,
-            )
-        row = self.db.session.query(AgentRun).filter(AgentRun.id == run.run_id).one_or_none()
-        if row is not None:
-            values = params.get("data") if event.get("method") == "values" else None
-            updates: dict[str, Any] = {
-                "last_sequence": max(int(row.last_sequence or 0), int(event["seq"]))
-            }
-            if isinstance(values, dict):
-                run.values = values
-                updates["values"] = values
-            self.update(row, **updates)
 
-    def _load_db_run(self, *, kind: str, scope: str, thread_id: UUID) -> Any | None:
-        runs = self._load_db_runs(kind=kind, scope=scope, thread_id=thread_id)
-        return runs[-1] if runs else None
-
-    def _thread_sequence_cursor(
+    def get_state(
         self,
         *,
-        kind: str,
-        scope: str,
+        invoke_from: InvokeFrom,
+        access_value: str,
         thread_id: UUID,
-        close_session: bool = True,
-    ) -> int:
-        """返回任务线程已发布的最大序号，供下一轮继续编号。"""
-        persisted = int(
-            self.db.session.query(func.max(AgentRun.last_sequence))
-            .filter(
-                AgentRun.thread_id == thread_id,
-                AgentRun.scope_kind == kind,
-                AgentRun.scope_value == scope,
-            )
-            .scalar()
-            or 0
+        account: Account,
+    ) -> WorkbenchStateResp:
+        """校验线程归属后读取工作台状态。"""
+        self.access_service.authorize_thread(
+            invoke_from=invoke_from,
+            access_value=access_value,
+            thread_id=thread_id,
+            account=account,
         )
-        # 6、命令创建事务中不能提前关闭 Session；独立读操作完成后再释放连接。
-        if close_session:
-            self.db.session.close()
-        key = (self._scope_key(kind, scope), str(thread_id))
-        with self._lock:
-            local = self._runs.get(key)
-            local_sequence = int(local.last_sequence or 0) if local else 0
-        return max(persisted, local_sequence)
+        key = str(thread_id)
+        with self._condition:
+            active_run = self._runs.get(key)
+        return self.run_service.get_state(
+            invoke_from=invoke_from,
+            thread_id=thread_id,
+            active_run=active_run,
+        )
 
-    def _load_db_runs(
+    def get_message_page(
         self,
         *,
-        kind: str,
-        scope: str,
+        invoke_from: InvokeFrom,
+        access_value: str,
         thread_id: UUID,
-    ) -> list[AgentRun]:
-        """按创建顺序返回任务内的所有运行。"""
-        rows = (
-            self.db.session.query(AgentRun)
-            .populate_existing()
-            .filter(
-                AgentRun.thread_id == thread_id,
-                AgentRun.scope_kind == kind,
-                AgentRun.scope_value == scope,
-            )
-            .order_by(AgentRun.created_at.asc())
-            .all()
+        account: Account,
+        before: UUID | None = None,
+        page_size: int | None = None,
+    ) -> WorkbenchMessagePageResp:
+        """校验线程归属后读取一页业务消息。"""
+        self.access_service.authorize_thread(
+            invoke_from=invoke_from,
+            access_value=access_value,
+            thread_id=thread_id,
+            account=account,
         )
-        # 7、返回前关闭本次只读 Session；实体字段已加载，可安全用于状态投影。
-        self.db.session.close()
-        return rows
+        return self.run_service.get_message_page(
+            thread_id=thread_id,
+            before=before,
+            page_size=page_size,
+        )
 
-    def _load_db_events(self, run_id: UUID, since: int) -> list[dict[str, Any]]:
-        rows = (
-            self.db.session.query(AgentRunEvent)
-            .filter(AgentRunEvent.run_id == run_id, AgentRunEvent.seq > since)
-            .order_by(AgentRunEvent.seq.asc())
-            .all()
-        )
-        payloads = [row.payload for row in rows]
-        # 8、事件回放只需要已加载的 payload，立即归还数据库连接。
-        self.db.session.close()
-        return payloads
+    # ---------- 跨进程 Run 的事件流 ----------
 
     def _stream_db_run(
         self,
         db_run: AgentRun,
         *,
         since: int,
-        body: Mapping[str, Any] | None,
+        subscription: WorkbenchSubscriptionReq,
     ):
         """从 Redis 重放并跟随其他进程执行的运行，故障时回退数据库。"""
         cursor = since
         heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
-        terminal_statuses = {"completed", "failed", "cancelled"}
-        replay_store = self._get_replay_store()
+        redis_repository = self.redis_repository
         terminal_seen = False
-        while True:
+        next_db_check_at = time.monotonic() + self._db_poll_interval
+        # Redis Stream 可能暂时没有新事件，因此循环不能用“读一次就结束”。
+        # 只有收到根 Run 终态或数据库确认终态时才退出。
+        while not terminal_seen:
             try:
-                replay_batch = (
-                    replay_store.read_since(db_run.id, cursor, block_ms=1000)
-                    if replay_store is not None
-                    else None
+                replay_batch = redis_repository.read_events(
+                    db_run.id,
+                    cursor,
+                    block_ms=1000,
                 )
-            except ReplayCursorExpired as expired:
+            except WorkbenchReplayCursorExpired as expired:
                 yield self._cursor_reset_event(
                     db_run,
                     requested_sequence=cursor,
-                    oldest_sequence=expired.oldest_sequence,
-                )
-                cursor = max(0, expired.oldest_sequence - 1)
+                    oldest_event_sequence=expired.oldest_event_sequence,
+                ).model_dump(mode="json")
+                cursor = max(0, expired.oldest_event_sequence - 1)
                 continue
             events = (
                 replay_batch.events
                 if replay_batch is not None
-                else self._load_db_events(db_run.id, cursor)
+                else self.run_service.list_events(
+                    db_run.id,
+                    after_sequence=cursor,
+                )
             )
             for event in events:
-                sequence = int(event.get("seq", cursor))
-                cursor = max(cursor, sequence)
-                if (
-                    event.get("method") == "lifecycle"
-                    and isinstance(event.get("params"), Mapping)
-                    and isinstance(event["params"].get("data"), Mapping)
-                    and event["params"]["data"].get("event") in terminal_statuses
-                ):
-                    # 9、终态事件已经进入流后，本轮订阅无需再查询数据库确认结束。
+                cursor = max(cursor, event.seq)
+                if _is_root_terminal_event(event):
+                    # 根终态已经进入流后，本轮订阅无需再查询数据库确认结束。
                     terminal_seen = True
-                visible = project_safe_workbench_event(event)
-                if visible is not None and self._matches_subscription(visible, body or {}):
-                    yield visible
+                if subscription.matches(event):
+                    yield event.model_dump(mode="json")
 
-            # 10、Redis 正常时由阻塞读取等待事件；只有 Redis 不可用时才低频
+            # Redis 正常时由阻塞读取等待事件；只有 Redis 不可用时才低频
             # 查询数据库状态，避免每个 SSE 连接持续占用数据库连接。
             latest = None
-            if replay_batch is None:
-                latest = (
-                    self.db.session.query(AgentRun)
-                    .populate_existing()
-                    .filter(AgentRun.id == db_run.id)
-                    .one_or_none()
-                )
+            now = time.monotonic()
+            if replay_batch is None or (not events and now >= next_db_check_at):
+                latest = self.run_service.get_run(db_run.id)
                 self.db.session.close()
+                next_db_check_at = now + self._db_poll_interval
                 if (
                     not events
                     and latest is not None
-                    and int(getattr(latest, "last_sequence", 0) or 0) > cursor
+                    and int(latest.last_event_sequence or 0) > cursor
                 ):
-                    events = self._load_db_events(db_run.id, cursor)
+                    events = self.run_service.list_events(
+                        db_run.id,
+                        after_sequence=cursor,
+                    )
                     for event in events:
-                        sequence = int(event.get("seq", cursor))
-                        cursor = max(cursor, sequence)
-                        visible = project_safe_workbench_event(event)
-                        if visible is not None and self._matches_subscription(visible, body or {}):
-                            yield visible
+                        cursor = max(cursor, event.seq)
+                        if _is_root_terminal_event(event):
+                            terminal_seen = True
+                        if subscription.matches(event):
+                            yield event.model_dump(mode="json")
             status = latest.status if latest is not None else db_run.status
-            if terminal_seen or (status in terminal_statuses and not events):
+            if terminal_seen or (status in WORKBENCH_TERMINAL_STATUSES and not events):
                 return
 
             if events:
-                heartbeat_at = (
-                    time.monotonic() + self._sse_heartbeat_interval
-                )
+                heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
             elif time.monotonic() >= heartbeat_at:
-                heartbeat_at = (
-                    time.monotonic() + self._sse_heartbeat_interval
-                )
+                heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
                 yield None
             if replay_batch is None:
                 time.sleep(self._db_poll_interval)
 
+    # ---------- 协议快照辅助 ----------
+
     def _cursor_reset_event(
         self,
-        db_run: AgentRun | _PendingRun,
+        db_run: AgentRun | WorkbenchRun,
         *,
         requested_sequence: int,
-        oldest_sequence: int,
-    ) -> dict[str, Any]:
+        oldest_event_sequence: int,
+    ) -> WorkbenchEvent:
         """构造客户端可识别的快照重置事件。"""
         run_id = getattr(db_run, "id", getattr(db_run, "run_id", "unknown"))
         event = {
             "type": "event",
-            "event_id": f"{run_id}:cursor-reset:{oldest_sequence}",
-            "seq": max(0, oldest_sequence - 1),
+            "event_id": f"{run_id}:cursor-reset:{oldest_event_sequence}",
+            "seq": max(0, oldest_event_sequence - 1),
             "method": "values",
             "params": {
                 "namespace": [],
-                "data": db_run.values or {"messages": [], "files": {}},
+                "timestamp": None,
+                "data": db_run.state_snapshot or {"messages": [], "files": {}},
                 "metadata": {
                     "my_dify": {
                         "cursor_reset": True,
                         "requested_sequence": requested_sequence,
-                        "oldest_sequence": oldest_sequence,
+                        "oldest_event_sequence": oldest_event_sequence,
                     }
                 },
             },
         }
-        return project_safe_workbench_event(event) or event
+        visible = AgentProtocolEventProjector.to_public_event(event)
+        if visible is None:
+            raise ValueError("游标重置事件被协议安全策略拒绝")
+        return visible
 
-    @staticmethod
-    def _content_to_text(content: Any) -> str:
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            return "".join(
-                str(part.get("text", ""))
-                for part in content
-                if isinstance(part, Mapping) and part.get("type") in {"text", None}
-            )
-        return str(content or "")
-
-    def _query_from_command(
+    def _resolve_attachments(
         self,
-        command: Mapping[str, Any],
-    ) -> tuple[str, list[str], list[str], str | None]:
-        params = command.get("params") if isinstance(command.get("params"), Mapping) else command
-        input_data = params.get("input") if isinstance(params, Mapping) else None
-        if not isinstance(input_data, Mapping):
-            input_data = params if isinstance(params, Mapping) else {}
-        messages = input_data.get("messages")
-        if isinstance(messages, list) and messages:
-            last = messages[-1]
-            if isinstance(last, Mapping):
-                raw_message_id = last.get("id")
-                message_id = (
-                    str(raw_message_id)
-                    if isinstance(raw_message_id, (str, UUID))
-                    and 0 < len(str(raw_message_id)) <= 255
-                    else None
-                )
-                return (
-                    self._content_to_text(last.get("content")),
-                    list(input_data.get("image_urls") or []),
-                    list(input_data.get("file_ids") or []),
-                    message_id,
-                )
-        query = input_data.get("query") or command.get("query")
-        if not query:
-            raise ValueError("run.start 需要 input.messages 或 query")
-        return (
-            str(query),
-            list(input_data.get("image_urls") or []),
-            list(input_data.get("file_ids") or []),
-            None,
+        run_input: WorkbenchRunInput,
+        *,
+        owner_id: UUID,
+    ):
+        """解析并校验本次 Run 引用的附件。"""
+        return self.attachment_service.resolve(
+            AgentAttachmentResolveReq.from_values(
+                run_input.file_ids,
+                owner_id=owner_id,
+            )
         )
 
-    def _creator_run(
+    # ---------- Run 创建和配置水合 ----------
+
+    def _create_debug_run(
         self,
+        *,
         app_id: UUID,
         thread_id: UUID,
-        account: Any,
-        command: Mapping[str, Any],
+        account: Account,
+        run_input: WorkbenchRunInput,
         run_id: UUID,
-    ) -> _PendingRun:
-        account_id = account.id
+    ) -> WorkbenchRun:
+        """创建调试入口的 Message 和 WorkbenchRun。"""
         app = (
             self.db.session.query(App)
-            .filter(App.id == app_id, App.account_id == account_id)
+            .filter(
+                App.id == app_id,
+                App.account_id == account.id,
+            )
             .one_or_none()
         )
         if app is None:
@@ -483,185 +346,373 @@ class AgentWorkbenchService(BaseService):
             or conversation.invoke_from != InvokeFrom.DEBUGGER
         ):
             raise ForbiddenException("工作台线程不存在或不属于当前应用")
-        query, image_urls, file_ids, input_message_id = self._query_from_command(command)
-        attachments = self.agent_attachment_service.resolve(
-            file_ids,
-            owner_id=account_id,
-        )
-        conversation_id = conversation.id
-        is_new = conversation.is_new
-        app_name = app.name
-        app_description = app.description
+        attachments = self._resolve_attachments(run_input, owner_id=account.id)
         message = Message(
             app_id=app_id,
-            conversation_id=conversation_id,
+            conversation_id=conversation.id,
             invoke_from=InvokeFrom.DEBUGGER,
-            created_by=account_id,
-            query=query,
-            image_urls=image_urls,
-            attachments=[attachment.to_dict() for attachment in attachments],
+            created_by=account.id,
+            query=run_input.query,
+            image_urls=list(run_input.image_urls),
+            attachments=dump_agent_attachments(attachments),
             status=MessageStatus.NORMAL,
         )
         self.db.session.add(message)
         self.db.session.flush()
-        spec = AgentInvocationSpec(
-            account_id=account_id,
-            app=None,
+        request = AgentInvocation(
+            account_id=account.id,
             app_id=app_id,
-            app_name=app_name,
-            app_description=app_description,
-            app_config={},
-            conversation_id=conversation_id,
+            app_name=app.name,
+            app_description=app.description,
+            app_config=AgentAppConfigReq(),
+            conversation_id=conversation.id,
             message_id=message.id,
-            created_by=account_id,
-            user_id=account_id,
+            created_by=account.id,
+            user_id=account.id,
             end_user_id=None,
             invoke_from=InvokeFrom.DEBUGGER,
-            query=query,
-            image_urls=image_urls,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
             attachments=attachments,
-            input_message_id=input_message_id,
-            opening_statement="",
+            input_message_id=run_input.input_message_id,
         )
-        return _PendingRun(
-            run_id,
-            thread_id,
-            spec,
-            include_opening_statement=is_new,
+        return WorkbenchRun(
+            run_id=run_id,
+            thread_id=thread_id,
+            spec=request,
+            include_opening_statement=conversation.is_new,
         )
 
-    def _published_run(
+    def _create_web_app_run(
         self,
+        *,
         token: str,
         thread_id: UUID,
-        account: Any,
-        command: Mapping[str, Any],
+        account: Account,
+        run_input: WorkbenchRunInput,
         run_id: UUID,
-    ) -> _PendingRun:
-        app, end_user, conversation = self.web_app_service.get_or_create_owned_web_conversation(
-            token=token, conversation_id=thread_id, account=account
+    ) -> WorkbenchRun:
+        """创建 WebApp 入口的 Message 和 WorkbenchRun。"""
+        app, end_user, conversation = (
+            self.web_app_service.get_or_create_owned_web_conversation(
+                token=token,
+                conversation_id=thread_id,
+                account=account,
+                conversation_name=run_input.query,
+            )
         )
-        app_id = app.id
-        app_name = app.name
-        app_description = app.description
-        account_id = app.account_id
-        end_user_id = end_user.id
-        conversation_id = conversation.id
-        is_new = conversation.is_new
-        query, image_urls, file_ids, input_message_id = self._query_from_command(command)
-        attachments = self.agent_attachment_service.resolve(
-            file_ids,
-            owner_id=account.id,
-        )
+        attachments = self._resolve_attachments(run_input, owner_id=account.id)
         message = Message(
-            app_id=app_id,
-            conversation_id=conversation_id,
+            app_id=app.id,
+            conversation_id=conversation.id,
             invoke_from=InvokeFrom.WEB_APP,
-            created_by=end_user_id,
-            query=query,
-            image_urls=image_urls,
-            attachments=[attachment.to_dict() for attachment in attachments],
+            created_by=end_user.id,
+            query=run_input.query,
+            image_urls=list(run_input.image_urls),
+            attachments=dump_agent_attachments(attachments),
             status=MessageStatus.NORMAL,
         )
         self.db.session.add(message)
         self.db.session.flush()
-        spec = AgentInvocationSpec(
-            account_id=account_id,
-            app=None,
-            app_id=app_id,
-            app_name=app_name,
-            app_description=app_description,
-            app_config={},
-            conversation_id=conversation_id,
+        request = AgentInvocation(
+            account_id=app.account_id,
+            app_id=app.id,
+            app_name=app.name,
+            app_description=app.description,
+            app_config=AgentAppConfigReq(),
+            conversation_id=conversation.id,
             message_id=message.id,
-            created_by=end_user_id,
-            user_id=end_user_id,
-            end_user_id=end_user_id,
+            created_by=end_user.id,
+            user_id=end_user.id,
+            end_user_id=end_user.id,
             invoke_from=InvokeFrom.WEB_APP,
-            query=query,
-            image_urls=image_urls,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
             attachments=attachments,
-            input_message_id=input_message_id,
-            opening_statement="",
+            input_message_id=run_input.input_message_id,
         )
-        return _PendingRun(
-            run_id,
-            thread_id,
-            spec,
-            include_opening_statement=is_new,
+        return WorkbenchRun(
+            run_id=run_id,
+            thread_id=thread_id,
+            spec=request,
+            include_opening_statement=conversation.is_new,
         )
 
-    def _hydrate_run_config(self, run: _PendingRun) -> None:
-        """在后台执行阶段加载并校验完整应用配置。"""
-        app_id = run.spec.app_id
-        if app_id is None:
-            raise ValueError("工作台运行缺少 app_id")
+    def _create_assistant_run(
+        self,
+        *,
+        thread_id: UUID,
+        account: Account,
+        run_input: WorkbenchRunInput,
+        run_id: UUID,
+    ) -> WorkbenchRun:
+        """创建 Creator 辅助 Agent 入口的 WorkbenchRun。"""
+        conversation = account.assistant_agent_conversation
+        if conversation.id != thread_id:
+            raise ForbiddenException("辅助 Agent 线程不存在或无权访问")
+        attachments = self._resolve_attachments(run_input, owner_id=account.id)
+        message = Message(
+            app_id=conversation.app_id,
+            conversation_id=conversation.id,
+            invoke_from=InvokeFrom.ASSISTANT_AGENT,
+            created_by=account.id,
+            query=run_input.query,
+            image_urls=list(run_input.image_urls),
+            attachments=dump_agent_attachments(attachments),
+            status=MessageStatus.NORMAL,
+        )
+        self.db.session.add(message)
+        self.db.session.flush()
+        llm, tools = self.assistant_agent_service.prepare_runtime(account)
+        request = AgentInvocation(
+            account_id=account.id,
+            app_id=conversation.app_id,
+            app_name="应用构建助手",
+            app_description="帮助 Creator 创建应用和工作流。",
+            app_config=AgentAppConfigReq(),
+            conversation_id=conversation.id,
+            message_id=message.id,
+            created_by=account.id,
+            user_id=account.id,
+            end_user_id=None,
+            invoke_from=InvokeFrom.ASSISTANT_AGENT,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
+            attachments=attachments,
+            extra_tools=tools,
+            llm=llm,
+            input_message_id=run_input.input_message_id,
+        )
+        return WorkbenchRun(run_id=run_id, thread_id=thread_id, spec=request)
+
+    def _create_service_api_run(
+        self,
+        *,
+        app_id: UUID,
+        thread_id: UUID,
+        account: Account,
+        run_input: WorkbenchRunInput,
+        run_id: UUID,
+    ) -> WorkbenchRun:
+        """创建 Service API 入口的 Message 和 WorkbenchRun。"""
+        app = (
+            self.db.session.query(App)
+            .filter(
+                App.id == app_id,
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+            )
+            .one_or_none()
+        )
+        if app is None:
+            raise NotFoundException("应用不存在、未发布或无权访问")
+        conversation = self.db.session.get(Conversation, thread_id)
+        end_user: EndUser | None = None
+        if conversation is not None:
+            if (
+                conversation.app_id != app.id
+                or conversation.invoke_from != InvokeFrom.SERVICE_API
+            ):
+                raise ForbiddenException("服务 API 线程不属于当前应用")
+            end_user = self.db.session.get(EndUser, conversation.created_by)
+        elif run_input.end_user_id is not None:
+            end_user = (
+                self.db.session.query(EndUser)
+                .filter(
+                    EndUser.id == run_input.end_user_id,
+                    EndUser.app_id == app.id,
+                    EndUser.tenant_id == account.id,
+                )
+                .one_or_none()
+            )
+            if end_user is None:
+                raise ForbiddenException("终端用户不存在或不属于当前应用")
+        else:
+            end_user = EndUser(tenant_id=account.id, app_id=app.id)
+            self.db.session.add(end_user)
+            self.db.session.flush()
+        if conversation is None:
+            conversation = Conversation(
+                id=thread_id,
+                app_id=app.id,
+                name=run_input.query[:255],
+                invoke_from=InvokeFrom.SERVICE_API,
+                created_by=end_user.id,
+            )
+            self.db.session.add(conversation)
+            self.db.session.flush()
+        elif end_user is None or conversation.created_by != end_user.id:
+            raise ForbiddenException("服务 API 线程终端用户无效")
+        attachments = self._resolve_attachments(run_input, owner_id=account.id)
+        message = Message(
+            app_id=app.id,
+            conversation_id=conversation.id,
+            invoke_from=InvokeFrom.SERVICE_API,
+            created_by=end_user.id,
+            query=run_input.query,
+            image_urls=list(run_input.image_urls),
+            attachments=dump_agent_attachments(attachments),
+            status=MessageStatus.NORMAL,
+        )
+        self.db.session.add(message)
+        self.db.session.flush()
+        request = AgentInvocation(
+            account_id=account.id,
+            app_id=app.id,
+            app_name=app.name,
+            app_description=app.description,
+            app_config=AgentAppConfigReq(),
+            conversation_id=conversation.id,
+            message_id=message.id,
+            created_by=end_user.id,
+            user_id=end_user.id,
+            end_user_id=end_user.id,
+            invoke_from=InvokeFrom.SERVICE_API,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
+            attachments=attachments,
+            input_message_id=run_input.input_message_id,
+        )
+        return WorkbenchRun(
+            run_id=run_id,
+            thread_id=thread_id,
+            spec=request,
+            include_opening_statement=conversation.is_new,
+        )
+
+    def hydrate_config(self, run: WorkbenchRun) -> None:
+        """在后台加载本次 Run 的草稿或发布配置。"""
         try:
-            app = self.db.session.query(App).filter(App.id == app_id).one_or_none()
+            app = self.db.session.get(App, run.spec.app_id)
             if app is None:
                 raise NotFoundException("应用不存在")
-            app_name = app.name
-            app_description = app.description
             config = (
                 self.app_config_service.get_draft_app_config(app)
                 if run.spec.invoke_from == InvokeFrom.DEBUGGER
                 else self.app_config_service.get_app_config(app)
             )
-            app_config = dict(config)
-            run.spec = replace(
-                run.spec,
-                app_config=app_config,
-                app_name=app_name,
-                app_description=app_description,
-                opening_statement=(
-                    app_config.get("opening_statement", "")
-                    if run.include_opening_statement
-                    else ""
-                ),
+            try:
+                app_config = AgentAppConfigReq.model_validate(config)
+            except ValidationError as exc:
+                raise AgentInvocationException(f"应用运行配置无效: {exc}") from exc
+            run.spec = run.spec.model_copy(
+                update={
+                    "app_config": app_config,
+                    "app_name": app.name,
+                    "app_description": app.description,
+                    "opening_statement": (
+                        app_config.opening_statement
+                        if run.include_opening_statement
+                        else ""
+                    ),
+                }
             )
         finally:
-            # 10、配置只在启动阶段读取一次，完成后立即归还数据库连接。
             self.db.session.close()
 
-    @staticmethod
-    def _command_success(
-        command: Mapping[str, Any],
-        run_id: UUID,
-        applied_through_sequence: int | None = None,
-    ) -> dict[str, Any]:
-        response: dict[str, Any] = {
-            "type": "success",
-            "id": command.get("id") if isinstance(command.get("id"), int) else 0,
-            "result": {"run_id": str(run_id)},
-        }
-        if applied_through_sequence is not None:
-            response["meta"] = {"applied_through_seq": applied_through_sequence}
-        return response
-
-    @staticmethod
-    def _command_error(command: Mapping[str, Any], message: str) -> dict[str, Any]:
-        return {
-            "type": "error",
-            "id": command.get("id") if isinstance(command.get("id"), int) else None,
-            "error": "invalid_argument",
-            "message": message,
-        }
-
-    def command(
+    def start_run(
         self,
         *,
-        kind: str,
-        scope: str,
+        invoke_from: InvokeFrom,
+        access_value: str,
         thread_id: UUID,
-        account: Any,
-        command: Mapping[str, Any],
-    ) -> dict[str, Any]:
-        method = command.get("method")
-        if method not in {"run.start", "input.inject"}:
-            raise ValueError("当前工作台仅支持 run.start")
-        _, _, _, input_message_id = self._query_from_command(command)
-        key = (self._scope_key(kind, scope), str(thread_id))
-        reservation = _RunReservation(uuid4(), input_message_id)
+        account: Account,
+        command: WorkbenchCommandReq,
+    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
+        """校验调用入口，并创建一条待执行的工作台 Run。"""
+        self.access_service.authorize_run_start(
+            invoke_from=invoke_from,
+            access_value=access_value,
+            thread_id=thread_id,
+            account=account,
+        )
+        run_input = command.to_run_input()
+        input_message_id = run_input.input_message_id
+
+        def create_run(run_id: UUID) -> WorkbenchRun:
+            if invoke_from is InvokeFrom.DEBUGGER:
+                return self._create_debug_run(
+                    app_id=UUID(access_value),
+                    thread_id=thread_id,
+                    account=account,
+                    run_input=run_input,
+                    run_id=run_id,
+                )
+            if invoke_from is InvokeFrom.WEB_APP:
+                return self._create_web_app_run(
+                    token=access_value,
+                    thread_id=thread_id,
+                    account=account,
+                    run_input=run_input,
+                    run_id=run_id,
+                )
+            if invoke_from is InvokeFrom.ASSISTANT_AGENT:
+                return self._create_assistant_run(
+                    thread_id=thread_id,
+                    account=account,
+                    run_input=run_input,
+                    run_id=run_id,
+                )
+            if invoke_from is InvokeFrom.SERVICE_API:
+                return self._create_service_api_run(
+                    app_id=UUID(access_value),
+                    thread_id=thread_id,
+                    account=account,
+                    run_input=run_input,
+                    run_id=run_id,
+                )
+            raise ValueError("不支持的工作台调用来源")
+
+        return self._enqueue_run(
+            thread_id=thread_id,
+            invoke_from=invoke_from,
+            input_message_id=input_message_id,
+            command_id=command.command_id,
+            create_run=create_run,
+        )
+
+    def start_invocation(
+        self,
+        *,
+        invocation: AgentInvocation,
+        thread_id: UUID,
+        account: Account,
+        command_id: int | None = None,
+    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
+        """把微信等内部调用接入统一的 Agent Protocol Run 流程。"""
+        self.access_service.authorize_thread(
+            invoke_from=invocation.invoke_from,
+            access_value=str(invocation.app_id),
+            thread_id=thread_id,
+            account=account,
+        )
+        return self._enqueue_run(
+            thread_id=thread_id,
+            invoke_from=invocation.invoke_from,
+            input_message_id=invocation.input_message_id,
+            command_id=command_id,
+            create_run=lambda run_id: WorkbenchRun(
+                run_id=run_id,
+                thread_id=thread_id,
+                spec=invocation,
+            ),
+        )
+
+    def _enqueue_run(
+        self,
+        *,
+        thread_id: UUID,
+        invoke_from: InvokeFrom,
+        input_message_id: str | None,
+        command_id: int | None,
+        create_run: Callable[[UUID], WorkbenchRun],
+    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
+        """统一执行 Run 去重、持久化、排队和后台启动。"""
+        key = str(thread_id)
+        reservation = WorkbenchRunStartReservation(uuid4(), input_message_id)
+        previous_run: WorkbenchRun | None = None
+
+        # 1.先检查本进程状态，快速处理重复提交和同线程并发冲突。
         with self._condition:
             active = self._runs.get(key)
             if (
@@ -669,110 +720,188 @@ class AgentWorkbenchService(BaseService):
                 and input_message_id is not None
                 and active.spec.input_message_id == input_message_id
             ):
-                return self._command_success(
-                    command,
-                    active.run_id,
-                    active.initial_sequence,
+                return WorkbenchCommandSuccessResp.create(
+                    command_id=command_id,
+                    run_id=active.run_id,
+                    applied_through_sequence=active.initial_event_sequence,
                 )
             if active is not None and not active.done.is_set():
-                return self._command_error(command, "当前任务已有正在执行的 Agent")
+                # 取消请求是异步收敛的：数据库状态会先变成 cancelling，
+                # 生产线程要到下一个事件边界才会退出。允许下一轮先入队，
+                # 但必须等待前一轮真正结束，避免同一 LangGraph thread 并发写检查点。
+                if (
+                    active.cancel_requested.is_set()
+                    or active.status is WorkbenchRunStatus.CANCELLING
+                ):
+                    previous_run = active
+                else:
+                    return WorkbenchCommandErrorResp(
+                        id=command_id,
+                        message="当前任务已有正在执行的 Agent",
+                    )
             starting = self._starting_runs.get(key)
             if starting is not None:
                 if (
                     input_message_id is not None
                     and starting.input_message_id == input_message_id
                 ):
-                    return self._command_success(command, starting.run_id)
-                return self._command_error(command, "当前任务已有正在启动的 Agent")
+                    return WorkbenchCommandSuccessResp.create(
+                        command_id=command_id,
+                        run_id=starting.run_id,
+                    )
+                return WorkbenchCommandErrorResp(
+                    id=command_id,
+                    message="当前任务已有正在启动的 Agent",
+                )
             self._starting_runs[key] = reservation
 
+        conflict_message: str | None = None
+        duplicate_run: AgentRun | None = None
         try:
+            # 2.在数据库事务中加线程锁，再执行幂等查询和 Run 入库。
             with self.db.auto_commit():
-                run = (
-                    self._creator_run(
-                        UUID(scope), thread_id, account, command, reservation.run_id
+                self.run_service.lock_thread_start(thread_id)
+                duplicate_run = (
+                    self.run_service.get_run_by_input_message_id(
+                        thread_id=thread_id,
+                        input_message_id=input_message_id,
                     )
-                    if kind == "app"
-                    else self._published_run(
-                        scope, thread_id, account, command, reservation.run_id
+                    if input_message_id is not None
+                    else None
+                )
+                persisted_active = self.run_service.get_latest_active_thread_run(
+                    thread_id
+                )
+                if duplicate_run is not None:
+                    applied_through_sequence = int(
+                        duplicate_run.last_event_sequence or 0
                     )
-                )
-                applied_through_sequence = self._thread_sequence_cursor(
-                    kind=kind,
-                    scope=scope,
-                    thread_id=thread_id,
-                    # 7、这里仍处于 command 的原子事务，交给 auto_commit 统一提交。
-                    close_session=False,
-                )
-                run.initial_sequence = applied_through_sequence
-                run.last_sequence = applied_through_sequence
-                self._persist_run(run, kind=kind, scope=scope)
+                elif (
+                    persisted_active is not None
+                    and persisted_active.status != WorkbenchRunStatus.CANCELLING.value
+                ):
+                    conflict_message = "当前任务已有正在执行的 Agent"
+                else:
+                    run = create_run(reservation.run_id)
+                    persisted_sequence = (
+                        self.run_service.get_thread_last_event_sequence(
+                            thread_id=thread_id,
+                            invoke_from=invoke_from,
+                            close_session=False,
+                        )
+                    )
+                    local_sequence = (
+                        int(previous_run.last_event_sequence or 0)
+                        if previous_run is not None
+                        else 0
+                    )
+                    applied_through_sequence = max(
+                        persisted_sequence,
+                        local_sequence,
+                    )
+                    run.initial_event_sequence = applied_through_sequence
+                    run.last_event_sequence = applied_through_sequence
+                    self.run_service.add_run(run)
         except Exception:
-            with self._condition:
-                if self._starting_runs.get(key) is reservation:
-                    self._starting_runs.pop(key, None)
-                self._condition.notify_all()
+            self._clear_start_reservation(key, reservation)
             raise
+
+        if conflict_message is not None:
+            self._clear_start_reservation(key, reservation)
+            return WorkbenchCommandErrorResp(
+                id=command_id,
+                message=conflict_message,
+            )
+
+        if duplicate_run is not None:
+            self._clear_start_reservation(key, reservation)
+            return WorkbenchCommandSuccessResp.create(
+                command_id=command_id,
+                run_id=duplicate_run.id,
+                applied_through_sequence=applied_through_sequence,
+            )
 
         with self._condition:
             if self._starting_runs.get(key) is reservation:
                 self._starting_runs.pop(key, None)
             self._runs[key] = run
             self._condition.notify_all()
-        # 3、通知跨进程 SSE 订阅者有新 run；Redis 故障时仍由本进程条件变量
+        # 3.通知跨进程 SSE 订阅者有新 Run；Redis 故障时仍由本进程条件变量
         # 唤醒，后续再走低频数据库降级检查。
-        replay_store = self._get_replay_store()
-        if replay_store is not None:
-            replay_store.publish_run_started(
-                kind=kind,
-                scope=scope,
-                thread_id=thread_id,
-                run_id=run.run_id,
-            )
+        redis_repository = self.redis_repository
+        redis_repository.publish_run_started(
+            thread_id=thread_id,
+            run_id=run.run_id,
+        )
         try:
-            self._start_background_run(run)
+            self._start_background_run(run, wait_for=previous_run)
         except Exception as exc:
-            run.status = "failed"
-            run.error = str(exc)
-            self._persist_status(run, status="failed", error=str(exc))
+            run.status = WorkbenchRunStatus.FAILED
+            run.error_message = str(exc)
+            self.run_service.set_status(
+                run,
+                WorkbenchRunStatus.FAILED,
+                error_message=str(exc),
+            )
             with self._condition:
                 run.done.set()
+                if self._runs.get(key) is run:
+                    self._runs.pop(key, None)
                 self._condition.notify_all()
             raise
-        return self._command_success(
-            command,
-            run.run_id,
-            applied_through_sequence,
+        return WorkbenchCommandSuccessResp.create(
+            command_id=command_id,
+            run_id=run.run_id,
+            applied_through_sequence=applied_through_sequence,
         )
 
-    @staticmethod
-    def _matches_subscription(event: Mapping[str, Any], body: Mapping[str, Any]) -> bool:
-        channels = body.get("channels")
-        if isinstance(channels, list) and channels and event.get("method") not in channels:
-            return False
-        params = event.get("params") if isinstance(event.get("params"), Mapping) else {}
-        namespace = params.get("namespace", [])
-        namespaces = body.get("namespaces")
-        if isinstance(namespaces, list) and namespaces:
-            if not any(
-                isinstance(prefix, list)
-                and namespace[: len(prefix)] == prefix
-                for prefix in namespaces
-            ):
-                return False
-        depth = body.get("depth")
-        if isinstance(depth, int) and len(namespace) > depth:
-            return False
-        return True
+    def _clear_start_reservation(
+        self,
+        key: str,
+        reservation: WorkbenchRunStartReservation,
+    ) -> None:
+        """清理启动占位并唤醒等待同一线程的提交。"""
+        with self._condition:
+            if self._starting_runs.get(key) is reservation:
+                self._starting_runs.pop(key, None)
+            self._condition.notify_all()
 
-    def _start_background_run(self, run: _PendingRun) -> None:
+    # ---------- 后台 Run 启动 ----------
+
+    def _start_background_run(
+        self,
+        run: WorkbenchRun,
+        *,
+        wait_for: WorkbenchRun | None = None,
+    ) -> None:
         """在 command 所在 worker 启动生产者，SSE 只负责订阅。"""
         flask_app = current_app._get_current_object()
 
         def execute() -> None:
             with flask_app.app_context():
                 try:
+                    if wait_for is not None:
+                        wait_for.done.wait()
+                    # 同一 LangGraph thread 禁止并发写 checkpoint；前置 Run
+                    # 结束后再进入 Agent 执行。
+                    while self.run_service.has_unfinished_predecessor(run.run_id):
+                        time.sleep(self._cancel_signal_poll_interval)
+                    persisted_sequence = (
+                        self.run_service.get_thread_last_event_sequence(
+                            thread_id=run.thread_id,
+                            invoke_from=run.spec.invoke_from,
+                        )
+                    )
+                    run.initial_event_sequence = max(
+                        run.initial_event_sequence,
+                        persisted_sequence,
+                    )
+                    run.last_event_sequence = run.initial_event_sequence
                     self._produce_run(run)
+                except Exception as exc:
+                    # 生产线程尚未进入 _produce_run 时也必须把 Run 收敛为失败，
+                    # 否则前置 Run 查询或序号查询异常会留下永久 queued 状态。
+                    self._fail_background_start(run, exc)
                 finally:
                     self.db.session.remove()
 
@@ -783,255 +912,340 @@ class AgentWorkbenchService(BaseService):
         )
         thread.start()
 
+    def _fail_background_start(self, run: WorkbenchRun, exc: Exception) -> None:
+        """处理后台初始化失败，保证数据库和本地状态都能结束。"""
+        run.status = WorkbenchRunStatus.FAILED
+        run.error_message = str(exc)
+        try:
+            self.run_service.set_status(
+                run,
+                WorkbenchRunStatus.FAILED,
+                error_message=str(exc),
+            )
+        except Exception:
+            current_app.logger.exception("保存 Agent Run 初始化失败状态失败")
+        finally:
+            with self._condition:
+                run.done.set()
+                key = str(run.thread_id)
+                if self._runs.get(key) is run:
+                    self._runs.pop(key, None)
+                self._condition.notify_all()
+        current_app.logger.exception(
+            "Agent 工作台后台初始化失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+    # ---------- Agent 执行和事件发布 ----------
+
     def _publish_event(
         self,
-        run: _PendingRun,
-        event: dict[str, Any],
+        run: WorkbenchRun,
+        raw_event: Mapping[str, Any],
     ) -> None:
-        """持久化事件后通知本进程订阅者。"""
-        if event["method"] == "values" and isinstance(
-            event["params"].get("data"),
-            dict,
-        ):
-            run.values = event["params"]["data"]
-        run.last_sequence = int(event["seq"])
-        self._persist_event(run, event)
+        """安全投影并校验事件，然后持久化并通知本进程订阅者。"""
+        event = AgentProtocolEventProjector.to_public_event(raw_event)
+        if event is None:
+            return
+        if event.method == "values" and isinstance(event.params.data, dict):
+            run.state_snapshot = event.params.data
+        run.last_event_sequence = event.seq
+        redis_repository = self.redis_repository
+        redis_repository.append_event(run.run_id, event)
+        self.run_service.record_event(run, event)
         with self._condition:
             run.events.append(event)
             self._condition.notify_all()
 
-    def _produce_run(self, run: _PendingRun) -> None:
-        """执行 Deep Agents v3 流并写入共享重放存储。"""
+    def _produce_run(self, run: WorkbenchRun) -> None:
+        """在后台装配并执行 Agent，同时投影和持久化运行事件。"""
         started_at = time.monotonic()
         agent = None
-        projector = ProtocolEventProjector(
+        raw_stream = None
+        projector = AgentProtocolEventProjector(
             run.run_id,
-            start_sequence=run.initial_sequence,
+            start_sequence=run.initial_event_sequence,
             root_message_id=f"{run.spec.message_id}:assistant",
         )
-        run.status = "running"
-        self._persist_status(run, status="running")
         try:
-            started = project_safe_workbench_event(
+            # queued Run 可能在等待前置 Run 时被取消。此时直接收敛为终态，
+            # 不应将其标记为 running，也不应初始化 Agent 或写入 LangGraph。
+            if self._is_cancelled(run):
+                self._finish_cancelled_run(run, projector)
+                return
+            run.status = WorkbenchRunStatus.RUNNING
+            self.run_service.set_status(run, WorkbenchRunStatus.RUNNING)
+            self._publish_event(
+                run,
                 projector.generated(
                     "lifecycle",
                     {"event": "started", "status": "running"},
-                )
+                ),
             )
-            if started is not None:
-                self._publish_event(run, started)
-            self._hydrate_run_config(run)
-            agent, llm = self.agent_invocation_service.build_agent(run.spec)
+            # 2.读取本次 Run 对应的草稿/发布配置，并装配独占 Agent 资源。
+            if run.spec.invoke_from is not InvokeFrom.ASSISTANT_AGENT:
+                self.hydrate_config(run)
+            agent, llm = self.agent_assembly_service.build_agent(run.spec)
+            # 3.把用户输入转换为模型消息，消费 DeepAgents v3 原始事件流。
             query = llm.convert_to_human_message(
                 run.spec.query,
                 run.spec.image_urls,
-                [attachment.to_dict() for attachment in run.spec.attachments],
+                dump_agent_attachments(run.spec.attachments),
             )
             if run.spec.input_message_id:
                 query.id = run.spec.input_message_id
-            for raw_event in agent.stream_protocol({"messages": [query]}):
+            raw_stream = agent.stream_events({"messages": [query]})
+            for raw_event in raw_stream:
                 if self._is_cancelled(run):
                     break
                 for event in projector.project_many(raw_event):
-                    visible = project_safe_workbench_event(event)
-                    if visible is not None:
-                        self._publish_event(run, visible)
+                    self._publish_event(run, event)
         except Exception as exc:
-            run.status = "failed"
-            run.error = str(exc)
+            run.status = WorkbenchRunStatus.FAILED
+            run.error_message = str(exc)
             for pending_message in projector.finish_pending_messages():
-                visible = project_safe_workbench_event(pending_message)
-                if visible is not None:
-                    self._publish_event(run, visible)
+                self._publish_event(run, pending_message)
             failure = projector.generated(
                 "lifecycle",
                 {
                     "event": "failed",
                     "status": "failed",
-                    "error": str(exc),
+                    "error": "Agent 运行失败",
                 },
             )
-            visible = project_safe_workbench_event(failure)
-            if visible is not None:
-                self._publish_event(run, visible)
-            self._persist_status(run, status="failed", error=str(exc))
+            self._publish_event(run, failure)
+            self.run_service.set_status(
+                run,
+                WorkbenchRunStatus.FAILED,
+                error_message=str(exc),
+            )
+            message = self.get(Message, run.spec.message_id)
+            if message is not None:
+                with self.db.auto_commit():
+                    message.status = MessageStatus.ERROR
+                    message.error = "Agent 运行失败"
             current_app.logger.exception("Agent 工作台运行失败")
         else:
+            # 4.正常结束时补齐未关闭消息、最终回答、状态快照和 completed 事件。
             if self._is_cancelled(run):
-                run.status = "cancelled"
-                for pending_message in projector.finish_pending_messages():
-                    visible = project_safe_workbench_event(pending_message)
-                    if visible is not None:
-                        self._publish_event(run, visible)
-                cancelled = projector.generated(
-                    "lifecycle",
-                    {"event": "cancelled", "status": "cancelled"},
-                )
-                visible = project_safe_workbench_event(cancelled)
-                if visible is not None:
-                    self._publish_event(run, visible)
-                self._persist_status(run, status="cancelled")
+                self._finish_cancelled_run(run, projector)
                 return
             for pending_message in projector.finish_pending_messages():
-                visible = project_safe_workbench_event(pending_message)
-                if visible is not None:
-                    self._publish_event(run, visible)
+                self._publish_event(run, pending_message)
             self._persist_terminal_message(
                 run,
                 latency=max(0.0, time.monotonic() - started_at),
                 run_usage=agent.last_run_usage if agent is not None else None,
             )
-            terminal_values = dict(run.values or {})
-            terminal_page = self.message_page(thread_id=run.thread_id)
-            terminal_values["messages"] = terminal_page["messages"]
-            terminal_values["message_page"] = terminal_page["page"]
-            terminal_snapshot = project_safe_workbench_event(
-                projector.generated("values", terminal_values)
+            terminal_values = dict(run.state_snapshot or {})
+            terminal_page = self.run_service.get_message_page(thread_id=run.thread_id)
+            terminal_values["messages"] = [
+                message.model_dump(mode="json") for message in terminal_page.messages
+            ]
+            terminal_values["message_page"] = terminal_page.page.model_dump(mode="json")
+            self._publish_event(
+                run,
+                projector.generated("values", terminal_values),
             )
-            if terminal_snapshot is not None:
-                self._publish_event(run, terminal_snapshot)
-            completed = project_safe_workbench_event(
+            self._publish_event(
+                run,
                 projector.generated(
                     "lifecycle",
                     {"event": "completed", "status": "completed"},
-                )
+                ),
             )
-            if completed is not None:
-                self._publish_event(run, completed)
-            run.status = "completed"
-            self._persist_status(run, status="completed")
+            run.status = WorkbenchRunStatus.COMPLETED
+            self.run_service.set_status(run, WorkbenchRunStatus.COMPLETED)
         finally:
+            close = getattr(raw_stream, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    current_app.logger.exception("关闭 Agent v3 事件流失败")
             with self._condition:
                 run.done.set()
+                key = str(run.thread_id)
+                if self._runs.get(key) is run:
+                    self._runs.pop(key, None)
                 self._condition.notify_all()
 
-    def _is_cancelled(self, run: _PendingRun) -> bool:
+    def _finish_cancelled_run(
+        self,
+        run: WorkbenchRun,
+        projector: AgentProtocolEventProjector,
+    ) -> None:
+        """发布取消终态；兼容运行中和排队期间取消两种路径。"""
+        run.status = WorkbenchRunStatus.CANCELLED
+        for pending_message in projector.finish_pending_messages():
+            self._publish_event(run, pending_message)
+        cancelled = projector.generated(
+            "lifecycle",
+            {
+                "event": "interrupted",
+                "status": "cancelled",
+                "reason": "cancel_requested",
+            },
+        )
+        self._publish_event(run, cancelled)
+        self.run_service.set_status(run, WorkbenchRunStatus.CANCELLED)
+        message = self.get(Message, run.spec.message_id)
+        if message is not None:
+            with self.db.auto_commit():
+                message.status = MessageStatus.STOP
+
+    # ---------- 取消和本地运行状态 ----------
+
+    def _is_cancelled(self, run: WorkbenchRun) -> bool:
+        """优先读取快速取消信号，并用数据库状态低频兜底。"""
         if run.cancel_requested.is_set():
             return True
         now = time.monotonic()
-        if now - run.last_cancel_poll < self._db_poll_interval:
+        redis_repository = self.redis_repository
+        if now - run.last_cancel_signal_check >= self._cancel_signal_poll_interval:
+            run.last_cancel_signal_check = now
+            remote_cancelled = redis_repository.is_cancel_requested(run.run_id)
+            if remote_cancelled is True:
+                return True
+        if now - run.last_cancel_status_check < self._cancel_status_poll_interval:
             return False
-        run.last_cancel_poll = now
-        try:
-            row = (
-                self.db.session.query(AgentRun)
-                .populate_existing()
-                .filter(AgentRun.id == run.run_id)
-                .one_or_none()
-            )
-            return row is not None and row.status == "cancelled"
-        finally:
-            # 8、取消检查是短查询，不能让后台 Agent 把连接占到下一次检查。
-            self.db.session.close()
+        run.last_cancel_status_check = now
+        return self.run_service.is_cancel_requested(run.run_id)
 
-    def cancel(
+    def _cancel_run_row(
         self,
+        row: AgentRun,
         *,
         thread_id: UUID,
-        run_id: UUID,
-        account: Any,
-    ) -> None:
-        """取消当前 Run，并由生产者在原生事件边界收敛。"""
-        row = (
-            self.db.session.query(AgentRun)
-            .filter(AgentRun.id == run_id, AgentRun.thread_id == thread_id)
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("运行不存在")
-        self.authorize(
-            kind=row.scope_kind,
-            scope=row.scope_value,
-            thread_id=thread_id,
-            account=account,
-            # 9、鉴权后还要更新 row.status，不能提前分离该实体。
-            release_session=False,
-        )
-        if row.status in {"completed", "failed", "cancelled"}:
-            return
-        self.update(
-            row,
-            status="cancelled",
-            finished_at=datetime.now(UTC).replace(tzinfo=None),
-        )
-        key = (self._scope_key(row.scope_kind, row.scope_value), str(thread_id))
+        account: Account,
+    ) -> bool:
+        """对已定位的运行执行鉴权、持久化和跨进程取消通知。"""
+        self.access_service.authorize_persisted_run(row, account)
+        if row.status in WORKBENCH_TERMINAL_STATUSES:
+            return False
+        self.run_service.request_cancel(row)
+        redis_repository = self.redis_repository
+        redis_repository.request_cancel(row.id)
+        key = str(thread_id)
         with self._condition:
             pending = self._runs.get(key)
-            if pending is not None and pending.run_id == run_id:
+            if pending is not None and pending.run_id == row.id:
                 pending.cancel_requested.set()
+                pending.status = WorkbenchRunStatus.CANCELLING
             self._condition.notify_all()
+        return True
+
+    def cancel_run(
+        self,
+        *,
+        invoke_from: InvokeFrom,
+        access_value: str,
+        thread_id: UUID,
+        run_id: UUID,
+        account: Account,
+    ) -> WorkbenchCancelResp:
+        """按 Agent Protocol 返回的 run_id 取消指定 Run。"""
+        self.access_service.authorize_thread(
+            invoke_from=invoke_from,
+            access_value=access_value,
+            thread_id=thread_id,
+            account=account,
+        )
+        row = self.run_service.get_run(run_id)
+        if (
+            row is None
+            or row.thread_id != thread_id
+            or row.invoke_from != invoke_from.value
+        ):
+            self.db.session.close()
+            raise NotFoundException("Agent Run 不存在或不属于当前线程")
+        cancel_requested = self._cancel_run_row(
+            row,
+            thread_id=thread_id,
+            account=account,
+        )
+        return WorkbenchCancelResp(
+            cancel_requested=cancel_requested,
+            run_id=row.id,
+            status=(
+                WorkbenchRunStatus.CANCELLING.value
+                if cancel_requested
+                else str(row.status)
+            ),
+        )
 
     def _stream_local_run(
         self,
-        run: _PendingRun,
+        run: WorkbenchRun,
         *,
         since: int,
-        body: Mapping[str, Any] | None,
+        subscription: WorkbenchSubscriptionReq,
     ):
         """订阅本 worker 的有界事件缓冲。"""
         cursor = since
         heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
+        # 本地 Run 的事件队列会持续追加事件；生成器直到 Run 完成且队列消费完才结束。
         while True:
             reset_event = None
             heartbeat = False
             with self._condition:
                 while (
-                    not any(event["seq"] > cursor for event in run.events)
+                    not any(event.seq > cursor for event in run.events)
                     and not run.done.is_set()
                 ):
                     remaining = heartbeat_at - time.monotonic()
                     if remaining <= 0:
                         heartbeat = True
-                        heartbeat_at = (
-                            time.monotonic() + self._sse_heartbeat_interval
-                        )
+                        heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
                         break
                     self._condition.wait(timeout=min(1, remaining))
                 if run.events:
-                    oldest_sequence = int(run.events[0]["seq"])
-                    if cursor > 0 and cursor < oldest_sequence - 1:
+                    oldest_event_sequence = run.events[0].seq
+                    if cursor > 0 and cursor < oldest_event_sequence - 1:
                         reset_event = self._cursor_reset_event(
                             run,
                             requested_sequence=cursor,
-                            oldest_sequence=oldest_sequence,
+                            oldest_event_sequence=oldest_event_sequence,
                         )
-                        cursor = oldest_sequence - 1
-                pending = [event for event in run.events if event["seq"] > cursor]
+                        cursor = oldest_event_sequence - 1
+                pending = [event for event in run.events if event.seq > cursor]
                 if pending:
-                    cursor = int(pending[-1]["seq"])
+                    cursor = pending[-1].seq
                 finished = run.done.is_set() and not pending
             if reset_event is not None:
-                yield reset_event
+                yield reset_event.model_dump(mode="json")
             for event in pending:
-                if self._matches_subscription(event, body or {}):
-                    yield event
+                if subscription.matches(event):
+                    yield event.model_dump(mode="json")
             if heartbeat and not pending:
                 yield None
             if finished:
                 return
 
-    def stream(self, *, kind: str, scope: str, thread_id: UUID, body: Mapping[str, Any] | None = None):
-        """订阅工作台事件；跨轮等待使用通知，不再用数据库高频轮询。"""
-        key = (self._scope_key(kind, scope), str(thread_id))
-        raw_since = body.get("since", 0) if isinstance(body, Mapping) else 0
-        try:
-            since = max(0, int(raw_since))
-        except (TypeError, ValueError):
-            since = 0
+    def _subscribe_events(
+        self,
+        *,
+        invoke_from: InvokeFrom,
+        thread_id: UUID,
+        subscription: WorkbenchSubscriptionReq,
+    ):
+        """订阅工作台事件；跨轮等待使用通知，不再用数据库高频轮询。
+
+        该生成器在 Run 之间持续等待，因此这里的无限循环是订阅生命周期，
+        不是无条件重试；客户端断开或生成器关闭时由 ``finally`` 释放资源。
+        """
+        # SSE 生成器可能在请求上下文销毁后才被关闭；保存当前 Session 实例，
+        # finally 直接关闭它，避免再次访问 Flask-SQLAlchemy 的 scopefunc。
+        stream_session = self.db.session()
+        key = str(thread_id)
+        since = subscription.since
         consumed_run_id: str | None = None
         heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
-        replay_store = self._get_replay_store()
-        pubsub = (
-            replay_store.subscribe_thread(
-                kind=kind,
-                scope=scope,
-                thread_id=thread_id,
-            )
-            if replay_store is not None
-            else None
-        )
+        redis_repository = self.redis_repository
+        pubsub = redis_repository.subscribe_thread(thread_id)
         next_db_check_at = 0.0
         try:
+            # 一个线程可以连续提交多个 Run，订阅必须跨 Run 保持连接。
             while True:
                 with self._condition:
                     run = self._runs.get(key)
@@ -1039,32 +1253,31 @@ class AgentWorkbenchService(BaseService):
                     yield from self._stream_local_run(
                         run,
                         since=since,
-                        body=body,
+                        subscription=subscription,
                     )
-                    since = max(since, int(run.last_sequence or 0))
+                    since = max(since, int(run.last_event_sequence or 0))
                     consumed_run_id = str(run.run_id)
                     heartbeat_at = time.monotonic() + self._sse_heartbeat_interval
                     continue
 
-                # 11、连接初始化时读取一次数据库，后续由 Redis 通知发现新 run。
+                # 连接初始化时读取一次数据库，后续由 Redis 通知发现新 Run。
                 now = time.monotonic()
                 should_check_db = pubsub is None and now >= next_db_check_at
                 if consumed_run_id is None and pubsub is not None:
                     should_check_db = True
                 if should_check_db:
-                    db_run = self._load_db_run(
-                        kind=kind,
-                        scope=scope,
+                    db_run = self.run_service.get_latest_run(
                         thread_id=thread_id,
+                        invoke_from=invoke_from,
                     )
                     next_db_check_at = now + self._db_poll_interval
                     if db_run is not None and str(db_run.id) != consumed_run_id:
                         yield from self._stream_db_run(
                             db_run,
                             since=since,
-                            body=body,
+                            subscription=subscription,
                         )
-                        since = max(since, int(db_run.last_sequence or 0))
+                        since = max(since, int(db_run.last_event_sequence or 0))
                         consumed_run_id = str(db_run.id)
                         continue
 
@@ -1075,7 +1288,7 @@ class AgentWorkbenchService(BaseService):
 
                 notified_run_id = None
                 if pubsub is not None:
-                    # 12、Redis PubSub 阻塞等待新 run，不再每 250ms 查询数据库。
+                    # Redis PubSub 阻塞等待新 Run，不再每 250ms 查询数据库。
                     try:
                         message = pubsub.get_message(
                             ignore_subscribe_messages=True,
@@ -1083,64 +1296,70 @@ class AgentWorkbenchService(BaseService):
                         )
                         if isinstance(message, Mapping):
                             raw_run_id = message.get("data")
-                            # 13、redis-py 未开启 decode_responses 时，消息正文是 bytes。
+                            # redis-py 未开启 decode_responses 时，消息正文是 bytes。
                             if isinstance(raw_run_id, bytes):
                                 notified_run_id = raw_run_id.decode("utf-8")
                             else:
                                 notified_run_id = str(raw_run_id or "")
                     except (RedisError, OSError, TypeError, ValueError):
-                        # 14、PubSub 断开后立即切换到本进程条件变量和低频数据库降级。
+                        # PubSub 断开后立即切换到本进程条件变量和低频数据库降级。
                         try:
                             pubsub.close()
-                        except Exception:
+                        except (RedisError, OSError):
                             pass
                         pubsub = None
                         next_db_check_at = 0.0
                 else:
-                    # 15、Redis 故障时保留本进程唤醒，并使用低频数据库降级检查。
+                    # Redis 故障时保留本进程唤醒，并使用低频数据库降级检查。
                     with self._condition:
                         self._condition.wait(timeout=min(1.0, max(0.1, remaining)))
 
                 if not notified_run_id:
                     continue
 
-                # 16、通知只携带 run_id，详细事件仍从本地缓冲或 Redis Stream 读取。
+                # 通知只携带 run_id，详细事件仍从本地缓冲或 Redis Stream 读取。
                 with self._condition:
                     notified_run = self._runs.get(key)
-                if notified_run is not None and str(notified_run.run_id) == notified_run_id:
+                if (
+                    notified_run is not None
+                    and str(notified_run.run_id) == notified_run_id
+                ):
                     continue
-                db_run = self._load_db_run(
-                    kind=kind,
-                    scope=scope,
+                db_run = self.run_service.get_latest_run(
                     thread_id=thread_id,
+                    invoke_from=invoke_from,
                 )
                 if db_run is not None and str(db_run.id) == notified_run_id:
                     yield from self._stream_db_run(
                         db_run,
                         since=since,
-                        body=body,
+                        subscription=subscription,
                     )
-                    since = max(since, int(db_run.last_sequence or 0))
+                    since = max(since, int(db_run.last_event_sequence or 0))
                     consumed_run_id = str(db_run.id)
         finally:
-            # 15、刷新、断开或异常时释放 Redis PubSub 和数据库 Session。
+            # 刷新、断开或异常时释放 Redis PubSub 和数据库 Session。
             if pubsub is not None:
                 try:
                     pubsub.close()
-                except Exception:
+                except (RedisError, OSError):
                     pass
-            self.db.session.remove()
+            stream_session.close()
 
     def _persist_terminal_message(
         self,
-        run: _PendingRun,
+        run: WorkbenchRun,
         *,
         latency: float,
         run_usage: Mapping[str, Any] | None,
     ) -> None:
-        """Persist the final answer without reimplementing thought storage."""
-        values = run.values or {}
-        messages = values.get("messages") if isinstance(values, Mapping) else None
+        """回写最终回答和本轮模型用量，不重复持久化思考轨迹。"""
+        state_snapshot = run.state_snapshot or {}
+        messages = (
+            state_snapshot.get("messages")
+            if isinstance(state_snapshot, Mapping)
+            else None
+        )
         answer = ""
         if isinstance(messages, list):
             for item in reversed(messages):
@@ -1148,7 +1367,7 @@ class AgentWorkbenchService(BaseService):
                     continue
                 if item.get("type") not in {"ai", "assistant"}:
                     continue
-                answer = self._content_to_text(item.get("content"))
+                answer = message_content_to_text(item.get("content"))
                 if answer:
                     break
         if not answer:
@@ -1164,157 +1383,6 @@ class AgentWorkbenchService(BaseService):
                 run_usage
             ).items():
                 setattr(message, field, value)
-
-    @staticmethod
-    def _message_metrics(row: Message) -> dict[str, Any]:
-        return {
-            "latency": float(row.latency or 0),
-            "total_token_count": int(row.total_token_count or 0),
-            "input_token_count": int(row.input_token_count or 0),
-            "output_token_count": int(row.output_token_count or 0),
-            "cached_token_count": int(row.cached_token_count or 0),
-            "reasoning_token_count": int(row.reasoning_token_count or 0),
-        }
-
-    def _project_conversation_messages(
-        self,
-        rows: list[Message],
-    ) -> list[dict[str, Any]]:
-        messages: list[dict[str, Any]] = []
-        for row in rows:
-            messages.append(
-                {
-                    "id": f"{row.id}:human",
-                    "type": "human",
-                    "content": row.query,
-                    "additional_kwargs": {
-                        "image_urls": list(row.image_urls or []),
-                        "attachments": list(row.attachments or []),
-                    },
-                }
-            )
-            if row.answer:
-                messages.append(
-                    {
-                        "id": f"{row.id}:assistant",
-                        "type": "ai",
-                        "content": row.answer,
-                        "additional_kwargs": {
-                            "metrics": self._message_metrics(row),
-                        },
-                    }
-                )
-        return messages
-
-    def message_page(
-        self,
-        *,
-        thread_id: UUID,
-        before: UUID | None = None,
-        page_size: int | None = None,
-    ) -> dict[str, Any]:
-        """按业务消息游标读取一页对话，不影响 LangGraph 完整线程状态。"""
-        limit = min(max(int(page_size or self._message_page_size), 1), 50)
-        query = self.db.session.query(Message).filter(
-            Message.conversation_id == thread_id,
-            Message.is_deleted.is_(False),
-        )
-        if before is not None:
-            cursor = (
-                self.db.session.query(Message)
-                .filter(
-                    Message.id == before,
-                    Message.conversation_id == thread_id,
-                    Message.is_deleted.is_(False),
-                )
-                .one_or_none()
-            )
-            if cursor is None:
-                raise NotFoundException("历史消息游标不存在")
-            query = query.filter(
-                or_(
-                    Message.created_at < cursor.created_at,
-                    and_(
-                        Message.created_at == cursor.created_at,
-                        Message.id < cursor.id,
-                    ),
-                )
-            )
-        descending_rows = (
-            query.order_by(Message.created_at.desc(), Message.id.desc())
-            .limit(limit + 1)
-            .all()
-        )
-        has_more = len(descending_rows) > limit
-        descending_rows = descending_rows[:limit]
-        rows = list(reversed(descending_rows))
-        result = {
-            "messages": self._project_conversation_messages(rows),
-            "page": {
-                "has_more": has_more,
-                "next_before": (
-                    str(descending_rows[-1].id)
-                    if has_more and descending_rows
-                    else None
-                ),
-            },
-        }
-        # 11、历史消息分页只读取已加载字段，返回前立即释放连接。
-        self.db.session.close()
-        return result
-
-    def state(self, *, kind: str, scope: str, thread_id: UUID) -> dict[str, Any]:
-        key = (self._scope_key(kind, scope), str(thread_id))
-        with self._lock:
-            run = self._runs.get(key)
-        db_runs = self._load_db_runs(kind=kind, scope=scope, thread_id=thread_id)
-        db_run = db_runs[-1] if db_runs else None
-        source_values = (
-            run.values if run and run.values is not None
-            else db_run.values if db_run and db_run.values is not None
-            else {}
-        )
-        values = dict(source_values)
-        message_page = self.message_page(thread_id=thread_id)
-        values["messages"] = message_page["messages"]
-        values["message_page"] = message_page["page"]
-        visible_message_ids = {
-            UUID(str(message["id"]).removesuffix(":human"))
-            for message in message_page["messages"]
-            if message.get("type") == "human"
-            and str(message.get("id", "")).endswith(":human")
-        }
-        visible_runs = [
-            persisted_run
-            for persisted_run in db_runs
-            if persisted_run.message_id in visible_message_ids
-        ]
-        historical_events = [
-            event
-            for persisted_run in visible_runs
-            for event in self._load_db_events(persisted_run.id, 0)
-        ]
-        known_event_ids = {
-            str(event.get("event_id")) for event in historical_events
-        }
-        if run is not None:
-            historical_events.extend(
-                event
-                for event in run.events
-                if str(event.get("event_id")) not in known_event_ids
-            )
-        values["workbench_events"] = historical_events
-        status = run.status if run else db_run.status if db_run else "idle"
-        return {
-            "values": values,
-            "next": ["agent"] if status in {"queued", "running"} else [],
-            "tasks": [],
-            "metadata": {
-                "run_id": str(run.run_id if run else db_run.id) if (run or db_run) else None,
-                "status": status,
-                "last_sequence": run.last_sequence if run else db_run.last_sequence if db_run else 0,
-            },
-        }
 
 
 __all__ = ["AgentWorkbenchService"]

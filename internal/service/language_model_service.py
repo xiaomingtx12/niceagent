@@ -20,7 +20,9 @@ from internal.model.provider_api_key import ProviderApiKey
 from internal.exception import NotFoundException, ValidateErrorException
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.embeddings import Embeddings
+from pydantic import ValidationError
 from internal.lib.helper import convert_model_to_dict
+from internal.schema.app_config_schema import AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from ..lib.api_key_helper import get_api_key_for_provider
@@ -32,7 +34,11 @@ AGENT_MODEL_TYPES = {ModelType.CHAT}
 @inject
 @dataclass
 class LanguageModelService(BaseService):
-    """语言模型服务"""
+    """根据租户可用的 Provider 配置加载实际语言模型实例。
+
+    账号凭证、模型启用状态和 Provider 选择属于业务层；Agent Core 只接收
+    已加载的 ``BaseChatModel``，不直接访问这些配置。
+    """
 
     db: SQLAlchemy
     language_model_manager: LanguageModelManager
@@ -165,81 +171,76 @@ class LanguageModelService(BaseService):
 
     def load_language_model(
         self,
-        model_config: dict[str, Any],
+        model_config: AppModelConfigReq | dict[str, Any],
         account_id: UUID = None,
     ) -> BaseLanguageModel:
-        """根据传递的模型配置加载大语言模型，并返回其实例"""
+        """校验租户模型配置并加载可执行的大语言模型实例。"""
         try:
-            # 1.从model_config中提取出provider、model、parameters
-            provider_name = model_config.get("provider", "")
-            model_name = model_config.get("model", "")
-            provider_connection_id = model_config.get("provider_connection_id")
-            parameters = model_config.get("parameters", {}).copy()
-            if not account_id:
-                raise ValidateErrorException("加载模型缺少账号信息")
+            config = AppModelConfigReq.model_validate(model_config)
+        except ValidationError as exc:
+            raise ValidateErrorException(f"模型配置格式错误: {exc}") from exc
+        if not account_id:
+            raise ValidateErrorException("加载模型缺少账号信息")
 
-            provider = self.language_model_manager.get_provider(provider_name)
-            model_entity = self.get_enabled_model_entity(
-                provider_name,
-                model_name,
-                account_id,
-                provider_connection_id=provider_connection_id,
+        provider_name = config.provider
+        model_name = config.model
+        provider_connection_id = (
+            str(config.provider_connection_id)
+            if config.provider_connection_id is not None
+            else None
+        )
+        provider = self.language_model_manager.get_provider(provider_name)
+        model_entity = self.get_enabled_model_entity(
+            provider_name,
+            model_name,
+            account_id,
+            provider_connection_id=provider_connection_id,
+        )
+        if not model_entity:
+            raise ValidateErrorException(
+                f"模型 {provider_name}/{model_name} 未激活，请先在 API 密钥设置中激活该模型"
             )
-            if not model_entity:
-                raise ValidateErrorException(
-                    f"模型 {provider_name}/{model_name} 未激活，请先在 API 密钥设置中激活该模型"
-                )
-            if model_entity.model_type not in AGENT_MODEL_TYPES:
-                raise ValidateErrorException(
-                    f"模型 {provider_name}/{model_name} 不是 Agent 可调用的对话模型"
-                )
-
-            # 2.获取模型所属配置的 API Key，兼容历史模型配置
-            api_key = get_api_key_for_provider(provider_name, account_id)
-            provider_api_key_id = model_entity.attributes.get("provider_api_key_id")
-            if provider_api_key_id:
-                profile = (
-                    self.db.session.query(ProviderApiKey)
-                    .filter(
-                        ProviderApiKey.id == provider_api_key_id,
-                        ProviderApiKey.account_id == account_id,
-                        ProviderApiKey.provider_name == provider_name,
-                        ProviderApiKey.is_active == True,
-                    )
-                    .first()
-                )
-                if profile:
-                    api_key = profile.api_key
-            # 根据不同提供商设置对应的 API Key 参数名
-            api_key_param = self._get_api_key_param_name(provider_name)
-            parameters[api_key_param] = api_key
-
-            # 3.从模型管理器获取提供者、模型实体、模型类
-            model_class = provider.get_model_class(
-                model_entity.model_type,
-                model_entity=model_entity,
+        if model_entity.model_type not in AGENT_MODEL_TYPES:
+            raise ValidateErrorException(
+                f"模型 {provider_name}/{model_name} 不是 Agent 可调用的对话模型"
             )
 
-            # 4.实例化模型后并返回
-            model_attributes = {
-                key: value
-                for key, value in model_entity.attributes.items()
-                if key != "provider_api_key_id"
-            }
-            return model_class(
-                **model_attributes,
-                **parameters,
-                features=model_entity.features,
-                input_modalities=model_entity.input_modalities,
-                output_modalities=model_entity.output_modalities,
-                native_file_input=model_entity.native_file_input,
-                metadata=model_entity.metadata,
+        parameters = dict(config.parameters)
+        api_key = get_api_key_for_provider(provider_name, account_id)
+        provider_api_key_id = model_entity.attributes.get("provider_api_key_id")
+        if provider_api_key_id:
+            profile = (
+                self.db.session.query(ProviderApiKey)
+                .filter(
+                    ProviderApiKey.id == provider_api_key_id,
+                    ProviderApiKey.account_id == account_id,
+                    ProviderApiKey.provider_name == provider_name,
+                    ProviderApiKey.is_active.is_(True),
+                )
+                .first()
             )
-        except Exception as e:
-            # 记录错误日志
-            logger.error(f"加载语言模型失败: {str(e)}")
-            # 重新抛出异常，不再降级
-            raise
+            if profile:
+                api_key = profile.api_key
+        parameters[self._get_api_key_param_name(provider_name)] = api_key
+
+        model_class = provider.get_model_class(
+            model_entity.model_type,
+            model_entity=model_entity,
+        )
+        model_attributes = {
+            key: value
+            for key, value in model_entity.attributes.items()
+            if key != "provider_api_key_id"
+        }
+        return model_class(
+            **model_attributes,
+            **parameters,
+            features=model_entity.features,
+            input_modalities=model_entity.input_modalities,
+            output_modalities=model_entity.output_modalities,
+            native_file_input=model_entity.native_file_input,
+            metadata=model_entity.metadata,
+        )
 
     def get_embedding_model_binding(
         self,
@@ -410,7 +411,7 @@ class LanguageModelService(BaseService):
                     "provider_api_key_id": str(profile.id),
                 }
                 models.append(model)
-            except Exception:
+            except ValidationError:
                 logger.warning(
                     "忽略无法还原的动态模型快照 provider=%s model=%s",
                     provider_name,

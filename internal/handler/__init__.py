@@ -4,7 +4,6 @@ from .analysis_handler import AnalysisHandler
 from .api_key_handler import ApiKeyHandler
 from .api_tool_handler import ApiToolHandler
 from .app_handler import AppHandler
-from .assistant_agent_handler import AssistantAgentHandler
 from .audio_handler import AudioHandler
 from .auth_handler import AuthHandler
 from .builtin_app_handler import BuiltinAppHandler
@@ -16,7 +15,6 @@ from .document_handler import DocumentHandler
 from .language_model_handler import LanguageModelHandler
 from .mcp_handler import MCPHandler
 from .oauth_handler import OAuthHandler
-from .openapi_handler import OpenAPIHandler
 from .platform_handler import PlatformHandler
 from .provider_api_key_handler import ProviderApiKeyHandler
 from .segment_handler import SegmentHandler
@@ -28,6 +26,8 @@ from .workflow_handler import WorkflowHandler
 from .workspace_file_handler import WorkspaceFileHandler
 from .memory_file_handler import MemoryFileHandler
 from .agent_workbench_handler import AgentWorkbenchHandler
+from .assistant_agent_protocol_handler import AssistantAgentProtocolHandler
+from .openapi_agent_protocol_handler import OpenAPIAgentProtocolHandler
 
 __all__ = [
     "AppHandler",
@@ -44,10 +44,7 @@ __all__ = [
     "AuthHandler",
     "AIHandler",
     "ApiKeyHandler",
-    "OpenAPIHandler",
     "WorkflowHandler",
-    "AssistantAgentHandler",
-    "AssistantAgentHandler",
     "LanguageModelHandler",
     "MCPHandler",
     "AnalysisHandler",
@@ -61,4 +58,6 @@ __all__ = [
     "WorkspaceFileHandler",
     "MemoryFileHandler",
     "AgentWorkbenchHandler",
+    "AssistantAgentProtocolHandler",
+    "OpenAPIAgentProtocolHandler",
 ]

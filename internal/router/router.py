@@ -15,12 +15,10 @@ from internal.handler import (
     AuthHandler,
     AIHandler,
     ApiKeyHandler,
-    OpenAPIHandler,
     BuiltinToolHandler,
     BuiltinAppHandler,
     BuiltinWorkflowHandler,
     WorkflowHandler,
-    AssistantAgentHandler,
     LanguageModelHandler,
     MCPHandler,
     AnalysisHandler,
@@ -34,7 +32,17 @@ from internal.handler import (
     WorkspaceFileHandler,
     MemoryFileHandler,
     AgentWorkbenchHandler,
+    AssistantAgentProtocolHandler,
+    OpenAPIAgentProtocolHandler,
 )
+from .agent_workbench_routes import (
+    register_agent_workbench_routes,
+    register_assistant_agent_protocol_routes,
+    register_openapi_agent_protocol_routes,
+)
+from .web_app_routes import register_web_app_routes
+from .app_routes import register_app_routes
+from .deepagents_routes import register_deepagents_routes
 
 
 @inject
@@ -54,11 +62,9 @@ class Router:
     auth_handler: AuthHandler
     ai_handler: AIHandler
     api_key_handler: ApiKeyHandler
-    openapi_handler: OpenAPIHandler
     builtin_app_handler: BuiltinAppHandler
     builtin_workflow_handler: BuiltinWorkflowHandler
     workflow_handler: WorkflowHandler
-    assistant_agent_handler: AssistantAgentHandler
     language_model_handler: LanguageModelHandler
     mcp_handler: MCPHandler
     analysis_handler: AnalysisHandler
@@ -72,100 +78,21 @@ class Router:
     workspace_file_handler: WorkspaceFileHandler
     memory_file_handler: MemoryFileHandler
     agent_workbench_handler: AgentWorkbenchHandler
+    assistant_agent_protocol_handler: AssistantAgentProtocolHandler
+    openapi_agent_protocol_handler: OpenAPIAgentProtocolHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
+        # region 蓝图初始化
         # 1.创建一个蓝图（一组路由的集合/前台路由/后台路由）
         bp = Blueprint("my_dify", __name__, url_prefix="")
         openapi_bp = Blueprint("openapi", __name__, url_prefix="")
 
         # 2.将url与对应的控制器方法做绑定
-        bp.add_url_rule("/ping", methods=["GET"], view_func=self.app_handler.ping)
-        bp.add_url_rule("/apps", view_func=self.app_handler.get_apps_with_page)
-        bp.add_url_rule(
-            "/apps", methods=["POST"], view_func=self.app_handler.create_app
-        )
-        bp.add_url_rule("/apps/<uuid:app_id>", view_func=self.app_handler.get_app)
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>",
-            methods=["POST"],
-            view_func=self.app_handler.update_app,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/delete",
-            methods=["POST"],
-            view_func=self.app_handler.delete_app,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/copy",
-            methods=["POST"],
-            view_func=self.app_handler.copy_app,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/draft-app-config",
-            view_func=self.app_handler.get_draft_app_config,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/draft-app-config",
-            methods=["POST"],
-            view_func=self.app_handler.update_draft_app_config,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/published-subagents",
-            view_func=self.app_handler.get_published_subagent_candidates,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/publish",
-            methods=["POST"],
-            view_func=self.app_handler.publish,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/cancel-publish",
-            methods=["POST"],
-            view_func=self.app_handler.cancel_publish,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/publish-histories",
-            view_func=self.app_handler.get_publish_histories_with_page,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/fallback-history",
-            methods=["POST"],
-            view_func=self.app_handler.fallback_history_to_draft,
-        )
-        # 旧版调试会话接口：仅保留兼容，新的创建者工作台使用 /apps/*/threads/*。
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/conversations/delete-debug-conversation",
-            methods=["POST"],
-            view_func=self.app_handler.delete_debug_conversation,
-        )
-        # 旧版调试流：已由工作台 commands + stream 替代。
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/conversations",
-            methods=["POST"],
-            view_func=self.app_handler.debug_chat,
-        )
-        # 旧版调试停止：已由工作台 Run 取消接口替代。
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/conversations/tasks/<uuid:task_id>/stop",
-            methods=["POST"],
-            view_func=self.app_handler.stop_debug_chat,
-        )
-        # 旧版调试消息分页：已由工作台 messages 接口替代。
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/conversations/messages",
-            view_func=self.app_handler.get_debug_conversation_messages_with_page,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/published-config",
-            view_func=self.app_handler.get_published_config,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/published-config/regenerate-web-app-token",
-            methods=["POST"],
-            view_func=self.app_handler.regenerate_web_app_token,
-        )
+        register_app_routes(bp, self.app_handler)
+        # endregion
 
+        # region 内置插件广场
         # 3.内置插件广场模块
         bp.add_url_rule(
             "/builtin-tools", view_func=self.builtin_tool_handler.get_builtin_tools
@@ -183,6 +110,9 @@ class Router:
             view_func=self.builtin_tool_handler.get_categories,
         )
 
+        # endregion
+
+        # region 自定义 API 插件
         # 4.自定义API插件模块
         bp.add_url_rule(
             "/api-tools",
@@ -258,6 +188,9 @@ class Router:
             methods=["POST"],
             view_func=self.mcp_handler.delete_mcp_server,
         )
+        # endregion
+
+        # region 上传文件
         # 5.上传文件模块
         bp.add_url_rule(
             "/upload-files/file",
@@ -270,6 +203,9 @@ class Router:
             view_func=self.upload_file_handler.upload_image,
         )
 
+        # endregion
+
+        # region 知识库
         # 6.知识库模块
         bp.add_url_rule(
             "/datasets", view_func=self.dataset_handler.get_datasets_with_page
@@ -360,6 +296,9 @@ class Router:
             view_func=self.dataset_handler.hit,
         )
 
+        # endregion
+
+        # region 授权认证
         # 7.授权认证模块
         bp.add_url_rule(
             "/oauth/<string:provider_name>",
@@ -381,6 +320,9 @@ class Router:
             view_func=self.auth_handler.logout,
         )
 
+        # endregion
+
+        # region 账号设置
         # 8.账号设置模块
         bp.add_url_rule("/account", view_func=self.account_handler.get_current_user)
         bp.add_url_rule(
@@ -398,6 +340,9 @@ class Router:
             methods=["POST"],
             view_func=self.account_handler.update_avatar,
         )
+        # endregion
+
+        # region AI 辅助
         # 8.AI辅助模块
         bp.add_url_rule(
             "/ai/optimize-prompt",
@@ -409,6 +354,9 @@ class Router:
             methods=["POST"],
             view_func=self.ai_handler.generate_suggested_questions,
         )
+        # endregion
+
+        # region API 密钥
         # 9.API秘钥模块
         bp.add_url_rule(
             "/openapi/api-keys", view_func=self.api_key_handler.get_api_keys_with_page
@@ -433,7 +381,10 @@ class Router:
             methods=["POST"],
             view_func=self.api_key_handler.delete_api_key,
         )
-        
+
+        # endregion
+
+        # region 提供商 API 密钥
         # 9.1 提供商API密钥模块
         bp.add_url_rule(
             "/provider-api-keys",
@@ -454,26 +405,6 @@ class Router:
             view_func=self.provider_api_key_handler.update_provider_api_key,
         )
         bp.add_url_rule(
-            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/commands",
-            methods=["POST"], view_func=self.agent_workbench_handler.creator_command,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/stream",
-            methods=["POST"], view_func=self.agent_workbench_handler.creator_stream,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/state",
-            methods=["GET"], view_func=self.agent_workbench_handler.creator_state,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/threads/<uuid:thread_id>/messages",
-            methods=["GET"], view_func=self.agent_workbench_handler.creator_messages,
-        )
-        bp.add_url_rule(
-            "/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
-            methods=["POST"], view_func=self.agent_workbench_handler.cancel_run,
-        )
-        bp.add_url_rule(
             "/provider-api-keys/<uuid:provider_api_key_id>/models",
             methods=["POST"],
             view_func=self.provider_api_key_handler.update_provider_api_key_models,
@@ -483,11 +414,13 @@ class Router:
             methods=["POST"],
             view_func=self.provider_api_key_handler.delete_provider_api_key,
         )
-        openapi_bp.add_url_rule(
-            "/openapi/chat",
-            methods=["POST"],
-            view_func=self.openapi_handler.chat,
+        register_openapi_agent_protocol_routes(
+            openapi_bp,
+            self.openapi_agent_protocol_handler,
         )
+        # endregion
+
+        # region 内置应用
         # 10.内置应用模块
         bp.add_url_rule(
             "/builtin-apps/categories",
@@ -502,6 +435,9 @@ class Router:
             view_func=self.builtin_app_handler.add_builtin_app_to_space,
         )
 
+        # endregion
+
+        # region 内置工作流模板
         # 10.5.内置工作流模板模块
         bp.add_url_rule(
             "/builtin-workflows/categories",
@@ -521,6 +457,9 @@ class Router:
             view_func=self.builtin_workflow_handler.create_workflow_from_template,
         )
 
+        # endregion
+
+        # region 工作流
         # 11.工作流模块
         bp.add_url_rule(
             "/workflows", view_func=self.workflow_handler.get_workflows_with_page
@@ -569,6 +508,9 @@ class Router:
             view_func=self.workflow_handler.cancel_publish_workflow,
         )
 
+        # endregion
+
+        # region 语言模型
         # 12.语言模型模块
         bp.add_url_rule(
             "/language-models",
@@ -588,90 +530,32 @@ class Router:
             view_func=self.language_model_handler.get_language_model,
         )
 
-        # 13.辅助Agent模块
-        bp.add_url_rule(
-            "/assistant-agent/chat",
-            methods=["POST"],
-            view_func=self.assistant_agent_handler.assistant_agent_chat,
-        )
-        bp.add_url_rule(
-            "/assistant-agent/chat/<uuid:task_id>/stop",
-            methods=["POST"],
-            view_func=self.assistant_agent_handler.stop_assistant_agent_chat,
-        )
-        bp.add_url_rule(
-            "/assistant-agent/messages",
-            view_func=self.assistant_agent_handler.get_assistant_agent_messages_with_page,
-        )
-        bp.add_url_rule(
-            "/assistant-agent/delete-conversation",
-            methods=["POST"],
-            view_func=self.assistant_agent_handler.delete_assistant_agent_conversation,
-        )
+        # endregion
 
+        # region 应用统计
         # 14.应用统计模块
         bp.add_url_rule(
             "/analysis/<uuid:app_id>",
             view_func=self.analysis_handler.get_app_analysis,
         )
 
-        # 15.WebApp模块
-        bp.add_url_rule(
-            "/web-apps/<string:token>", view_func=self.web_app_handler.get_web_app
-        )
-        # 旧版 WebApp 对话流：已由 /web-apps/*/threads/* 工作台替代。
-        bp.add_url_rule(
-            "/web-apps/<string:token>/chat",
-            methods=["POST"],
-            view_func=self.web_app_handler.web_app_chat,
-        )
-        # 旧版 WebApp 停止接口：已由工作台 Run 取消接口替代。
-        bp.add_url_rule(
-            "/web-apps/<string:token>/chat/<uuid:task_id>/stop",
-            methods=["POST"],
-            view_func=self.web_app_handler.stop_web_app_chat,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations",
-            view_func=self.web_app_handler.get_conversations,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/threads/<uuid:thread_id>/commands",
-            methods=["POST"], view_func=self.agent_workbench_handler.published_command,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/threads/<uuid:thread_id>/stream",
-            methods=["POST"], view_func=self.agent_workbench_handler.published_stream,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/threads/<uuid:thread_id>/state",
-            methods=["GET"], view_func=self.agent_workbench_handler.published_state,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/threads/<uuid:thread_id>/messages",
-            methods=["GET"], view_func=self.agent_workbench_handler.published_messages,
-        )
-        # 旧版 WebApp 消息分页：已由工作台 messages 接口替代。
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/messages",
-            view_func=self.web_app_handler.get_web_app_conversation_messages_with_page,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/delete",
-            methods=["POST"],
-            view_func=self.web_app_handler.delete_web_app_conversation,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/name",
-            methods=["POST"],
-            view_func=self.web_app_handler.update_web_app_conversation_name,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/is-pinned",
-            methods=["POST"],
-            view_func=self.web_app_handler.update_web_app_conversation_is_pinned,
-        )
+        # endregion
 
+        # region WebApp
+        # 15.WebApp模块
+        register_web_app_routes(bp, self.web_app_handler)
+
+        # endregion
+
+        # region Agent 工作台
+        register_agent_workbench_routes(bp, self.agent_workbench_handler)
+        register_assistant_agent_protocol_routes(
+            bp,
+            self.assistant_agent_protocol_handler,
+        )
+        # endregion
+
+        # region 会话
         # 16.会话模块
         bp.add_url_rule(
             "/conversations/<uuid:conversation_id>/messages",
@@ -702,6 +586,9 @@ class Router:
             view_func=self.conversation_handler.update_conversation_is_pinned,
         )
 
+        # endregion
+
+        # region 语音转换
         # 17.语音转换模块
         bp.add_url_rule(
             "/audio/audio-to-text",
@@ -714,6 +601,9 @@ class Router:
             view_func=self.audio_handler.message_to_audio,
         )
 
+        # endregion
+
+        # region 第三方平台配置
         # 18.第三方平台配置模块
         bp.add_url_rule(
             "/platform/<uuid:app_id>/wechat-config",
@@ -730,108 +620,19 @@ class Router:
             view_func=self.wechat_handler.wechat,
         )
 
-        # 19.DeepAgents 平台资源
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/skills",
-            methods=["GET"],
-            view_func=self.skill_handler.list_skills,
-        )
-        bp.add_url_rule(
-            "/skills",
-            methods=["GET"],
-            view_func=self.skill_handler.list_catalog,
-        )
-        bp.add_url_rule(
-            "/skills/<string:skill_name>",
-            methods=["GET"],
-            view_func=self.skill_handler.get_catalog_skill,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/workspace/files",
-            methods=["GET"],
-            view_func=self.workspace_file_handler.list_app_files,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/workspace/files",
-            methods=["POST"],
-            view_func=self.workspace_file_handler.write_app_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/workspace/file",
-            methods=["GET"],
-            view_func=self.workspace_file_handler.read_app_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/workspace/file",
-            methods=["DELETE"],
-            view_func=self.workspace_file_handler.delete_app_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/memory/files",
-            methods=["GET"],
-            view_func=self.memory_file_handler.list_app_memory_files,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/memory/file",
-            methods=["GET"],
-            view_func=self.memory_file_handler.read_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/memory/file",
-            methods=["POST"],
-            view_func=self.memory_file_handler.write_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/memory/file",
-            methods=["DELETE"],
-            view_func=self.memory_file_handler.delete_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/apps/<uuid:app_id>/memory/file/download",
-            methods=["GET"],
-            view_func=self.memory_file_handler.download_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/workspace/files",
-            methods=["GET"],
-            view_func=self.workspace_file_handler.list_all_web_app_files,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/file",
-            methods=["GET"],
-            view_func=self.workspace_file_handler.read_conversation_file,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/conversations/<uuid:conversation_id>/file/download",
-            methods=["GET"],
-            view_func=self.workspace_file_handler.download_conversation_file,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memory/files",
-            methods=["GET"],
-            view_func=self.memory_file_handler.list_web_app_memory_files,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memory/file",
-            methods=["GET"],
-            view_func=self.memory_file_handler.read_web_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memory/file",
-            methods=["POST"],
-            view_func=self.memory_file_handler.write_web_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memory/file",
-            methods=["DELETE"],
-            view_func=self.memory_file_handler.delete_web_app_memory_file,
-        )
-        bp.add_url_rule(
-            "/web-apps/<string:token>/memory/file/download",
-            methods=["GET"],
-            view_func=self.memory_file_handler.download_web_app_memory_file,
-        )
+        # endregion
 
+        # region DeepAgents 平台资源
+        register_deepagents_routes(
+            bp,
+            skill_handler=self.skill_handler,
+            workspace_file_handler=self.workspace_file_handler,
+            memory_file_handler=self.memory_file_handler,
+        )
+        # endregion
+
+        # region 注册蓝图
         # 20.在应用上去注册蓝图
         app.register_blueprint(bp)
         app.register_blueprint(openapi_bp)
+        # endregion

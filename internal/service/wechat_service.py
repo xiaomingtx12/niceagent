@@ -13,10 +13,12 @@ from wechatpy.utils import check_signature
 
 from internal.core.language_model.entities.model_entity import ModelFeature
 from internal.entity.app_entity import AppStatus
+from internal.schema.agent_runtime_schema import AgentInvocation
 from internal.entity.conversation_entity import MessageStatus, InvokeFrom
 from internal.entity.platform_entity import WechatConfigStatus
 from internal.exception import FailException
 from internal.model import (
+    Account,
     App,
     WechatEndUser,
     EndUser,
@@ -26,7 +28,7 @@ from internal.model import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
-from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
+from .agent_workbench_service import AgentWorkbenchService
 from .base_service import BaseService
 from .language_model_service import LanguageModelService
 
@@ -39,7 +41,7 @@ class WechatService(BaseService):
     db: SQLAlchemy
     app_config_service: AppConfigService
     language_model_service: LanguageModelService
-    agent_invocation_service: AgentInvocationService
+    agent_workbench_service: AgentWorkbenchService
 
     def wechat(self, app_id: UUID):
         """微信公众号(订阅号/服务号)校验与消息推送, 运行逻辑参考`Agent对接微信公众号思路.drawio`"""
@@ -218,9 +220,11 @@ class WechatService(BaseService):
             conversation = self.get(Conversation, conversation_id)
 
             message = self.get(Message, message_id)
-            spec = AgentInvocationSpec(
+            invocation = AgentInvocation(
                 account_id=app.account_id,
-                app=app,
+                app_id=app.id,
+                app_name=app.name,
+                app_description=app.description,
                 app_config=app_config,
                 conversation_id=conversation.id,
                 message_id=message_id,
@@ -236,4 +240,9 @@ class WechatService(BaseService):
                 llm=llm,
             )
 
-            self.agent_invocation_service.invoke(spec)
+            account = self.get(Account, app.account_id)
+            self.agent_workbench_service.start_invocation(
+                invocation=invocation,
+                thread_id=conversation.id,
+                account=account,
+            )

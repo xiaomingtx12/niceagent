@@ -5,7 +5,6 @@ from wtforms.validators import Optional, NumberRange, DataRequired, Length
 
 from internal.lib.helper import datetime_to_timestamp
 from internal.model import Message
-from internal.schema.agent_thought_schema import dump_agent_thought
 from pkg.paginator import PaginatorReq
 
 
@@ -38,7 +37,6 @@ class GetConversationMessagesWithPageResp(Schema):
     trace_id = fields.String(allow_none=True, dump_default=None)
     token_usage = fields.Dict(dump_default={})
     latency = fields.Float(dump_default=0)
-    agent_thoughts = fields.List(fields.Dict, dump_default=[])
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
@@ -60,10 +58,6 @@ class GetConversationMessagesWithPageResp(Schema):
             "trace_id": data.trace_id,
             "token_usage": data.token_usage,
             "latency": data.latency,
-            "agent_thoughts": [
-                dump_agent_thought(agent_thought)
-                for agent_thought in data.agent_thoughts
-            ],
             "created_at": datetime_to_timestamp(data.created_at),
         }
 

@@ -1,32 +1,19 @@
-import json
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Generator
+from typing import Any
 from uuid import UUID
 
 from injector import inject
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
-from sqlalchemy import desc
 
-from internal.core.agent_v2.agents import AgentQueueManager
-from internal.entity.conversation_entity import InvokeFrom, MessageStatus
-from internal.model import Account, Message
-from internal.schema.assistant_agent_schema import (
-    GetAssistantAgentMessagesWithPageReq,
-    AssistantAgentChat,
-)
+from internal.model import Account
 from internal.task.app_task import auto_create_app
 from internal.task.workflow_task import (
     auto_generate_workflow,
     auto_generate_app_with_workflow,
 )
-from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
-from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
-from .agent_attachment_service import AgentAttachmentService
-from .conversation_service import ConversationService
 from .embeddings_service import EmbeddingsService
 from .faiss_service import FaissService
 from .language_model_service import LanguageModelService
@@ -35,19 +22,19 @@ from .language_model_service import LanguageModelService
 @inject
 @dataclass
 class AssistantAgentService(BaseService):
-    """辅助智能体服务"""
+    """装配 Creator 辅助 Agent 的专属模型和平台工具。
+
+    创建 App、生成 Workflow 等能力属于 Creator 业务；本服务只提供模型
+    和工具，实际 Run 生命周期及 Agent 执行仍复用工作台和 Agent Core。
+    """
 
     db: SQLAlchemy
     faiss_service: FaissService
     embeddings_service: EmbeddingsService
-    conversation_service: ConversationService
-    agent_invocation_service: AgentInvocationService
     language_model_service: LanguageModelService
-    agent_attachment_service: AgentAttachmentService
 
-    def chat(self, req: AssistantAgentChat, account: Account) -> Generator:
-        """传递query与账号实现与辅助Agent进行会话"""
-        from flask import current_app
+    def prepare_runtime(self, account: Account) -> tuple[Any, list[BaseTool]]:
+        """构造辅助 Agent 专属模型与工具，执行仍交给 Agent Protocol Run。"""
         from internal.exception import FailException
 
         try:
@@ -56,38 +43,13 @@ class AssistantAgentService(BaseService):
         except Exception as exc:
             raise FailException(f"辅助智能体会话依赖初始化失败: {exc}") from exc
 
-        # 1.获取辅助Agent对应的id
-        assistant_agent_id = UUID(
-            str(current_app.config.get("ASSISTANT_AGENT_ID"))
-        )
-
-        # 2.获取当前应用的调试会话信息
-        conversation = account.assistant_agent_conversation
-
-        # 3.新建一条消息记录
-        attachments = self.agent_attachment_service.resolve(
-            req.file_ids.data,
-            owner_id=account.id,
-        )
-        message = self.create(
-            Message,
-            app_id=assistant_agent_id,
-            conversation_id=conversation.id,
-            invoke_from=InvokeFrom.ASSISTANT_AGENT,
-            created_by=account.id,
-            query=req.query.data,
-            image_urls=req.image_urls.data,
-            attachments=[attachment.to_dict() for attachment in attachments],
-            status=MessageStatus.NORMAL,
-        )
-
-        # 4.使用当前账号已激活模型作为辅助Agent的大脑
+        # 使用当前账号已激活模型作为辅助 Agent 的模型。
         llm = self.language_model_service.load_language_model(
             self.language_model_service.get_default_model_config(account.id),
             account.id,
         )
 
-        # 5.将草稿配置中的tools转换成LangChain工具
+        # 辅助 Agent 的平台工具在这里集中装配。
         tools = [
             self.faiss_service.convert_faiss_to_tool(),
             self.convert_create_app_to_tool(account.id),
@@ -95,76 +57,7 @@ class AssistantAgentService(BaseService):
             self.convert_app_with_workflow_generator_to_tool(account),
         ]
 
-        spec = AgentInvocationSpec(
-            account_id=account.id,
-            app=None,
-            app_config={},
-            conversation_id=conversation.id,
-            message_id=message.id,
-            created_by=account.id,
-            user_id=account.id,
-            end_user_id=None,
-            invoke_from=InvokeFrom.ASSISTANT_AGENT,
-            query=req.query.data,
-            image_urls=req.image_urls.data,
-            attachments=attachments,
-            app_id=assistant_agent_id,
-            extra_tools=tools,
-            llm=llm,
-            app_name="应用构建助手",
-            app_description="帮助 Creator 创建应用和工作流。",
-        )
-
-        for agent_thought in self.agent_invocation_service.stream(spec):
-            data = self.agent_invocation_service.serialize_event(
-                agent_thought,
-                conversation_id=conversation.id,
-                message_id=message.id,
-            )
-            yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
-
-    @classmethod
-    def stop_chat(cls, task_id: UUID, account: Account) -> None:
-        """根据传递的任务id+账号停止某次响应会话"""
-        AgentQueueManager.set_stop_flag(task_id, InvokeFrom.ASSISTANT_AGENT, account.id)
-
-    def get_conversation_messages_with_page(
-        self, req: GetAssistantAgentMessagesWithPageReq, account: Account
-    ) -> tuple[list[Message], Paginator]:
-        """根据传递的请求+账号获取与辅助Agent对话的消息分页列表"""
-        # 1.获取应用的调试会话
-        conversation = account.assistant_agent_conversation
-
-        # 2.构建分页器并构建游标条件
-        paginator = Paginator(db=self.db, req=req)
-        filters = []
-        if req.created_at.data:
-            # 3.将时间戳转换成DateTime
-            created_at_datetime = datetime.fromtimestamp(req.created_at.data)
-            filters.append(Message.created_at <= created_at_datetime)
-
-        # 4.执行分页并查询数据
-        messages = paginator.paginate(
-            self.db.session.query(Message)
-            .filter(
-                Message.conversation_id == conversation.id,
-                Message.status.in_([MessageStatus.STOP, MessageStatus.NORMAL]),
-                Message.answer != "",
-                *filters,
-            )
-            .order_by(desc("created_at"))
-        )
-
-        return messages, paginator
-
-    def delete_conversation(self, account: Account) -> None:
-        """根据传递的账号，清空辅助Agent智能体会话消息列表"""
-        if account.assistant_agent_conversation_id:
-            self.conversation_service.delete_conversation(
-                account.assistant_agent_conversation_id,
-                account,
-            )
-        self.update(account, assistant_agent_conversation_id=None)
+        return llm, tools
 
     @classmethod
     def convert_create_app_to_tool(cls, account_id: UUID) -> BaseTool:

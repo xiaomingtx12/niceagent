@@ -1,19 +1,15 @@
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from threading import Thread
 from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
-from flask import Flask, current_app
 from injector import inject
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import desc
-from sqlalchemy.orm import joinedload
 
-from internal.core.agent_v2.agents.models import AgentThought, QueueEvent
 from internal.entity.conversation_entity import (
     CONVERSATION_NAME_TEMPLATE,
     ConversationInfo,
@@ -22,11 +18,15 @@ from internal.entity.conversation_entity import (
 )
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
+from internal.schema.agent_runtime_schema import (
+    AgentConversationCleanupReq,
+    AgentMessageCleanupReq,
+)
 from .base_service import BaseService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .provider_api_key_service import ProviderApiKeyService
 from ..exception import NotFoundException
-from ..model import Conversation, Message, MessageAgentThought, Account
+from ..model import Conversation, Message, Account
 from ..schema.conversation_schema import GetConversationMessagesWithPageReq
 
 
@@ -77,12 +77,8 @@ class ConversationService(BaseService):
             # 4.补充输入、输出、缓存、推理和总 Token 统计。
             updates.update(
                 {
-                    "input_token_count": int(
-                        run_usage.get("input_tokens", 0) or 0
-                    ),
-                    "output_token_count": int(
-                        run_usage.get("output_tokens", 0) or 0
-                    ),
+                    "input_token_count": int(run_usage.get("input_tokens", 0) or 0),
+                    "output_token_count": int(run_usage.get("output_tokens", 0) or 0),
                     "cached_token_count": _usage_detail(
                         input_details,
                         "cached",
@@ -91,12 +87,11 @@ class ConversationService(BaseService):
                         _usage_detail(input_details, "reasoning"),
                         _usage_detail(output_details, "reasoning"),
                     ),
-                    "total_token_count": int(
-                        run_usage.get("total_tokens", 0) or 0
-                    ),
+                    "total_token_count": int(run_usage.get("total_tokens", 0) or 0),
                 }
             )
         return updates
+
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None
 
@@ -242,7 +237,9 @@ class ConversationService(BaseService):
                     if isinstance(parsed, list):
                         questions = [str(q) for q in parsed if isinstance(q, str)]
                 except json_module.JSONDecodeError:
-                    logging.warning(f"建议问题JSON解析失败, raw_output: {raw_output[:200]}")
+                    logging.warning(
+                        f"建议问题JSON解析失败, raw_output: {raw_output[:200]}"
+                    )
 
             # 6.限制建议问题数量。
             if len(questions) > 3:
@@ -256,157 +253,6 @@ class ConversationService(BaseService):
             )
             # 返回空列表，避免影响主流程。
             return []
-
-    def save_agent_thoughts(
-        self,
-        account_id: UUID,
-        app_id: UUID,
-        app_config: dict[str, Any],
-        conversation_id: UUID,
-        message_id: UUID,
-        agent_thoughts: list[AgentThought],
-        run_usage: Mapping[str, Any] | None = None,
-    ) -> None:
-        """持久化 Agent V2 轨迹事件并更新父消息。"""
-        # 1.定义变量存储推理位置及总耗时
-        position = 0
-        latency = 0
-
-        # 2.重新查询会话和消息，确保对象由当前线程的数据库会话管理。
-        conversation = self.get(Conversation, conversation_id)
-        message = self.get(Message, message_id)
-
-        # 3.循环遍历所有的智能体推理过程执行存储操作
-        for agent_thought in agent_thoughts:
-            # 4.存储长期记忆召回、推理、消息、动作、知识库检索等步骤
-            if agent_thought.event in [
-                QueueEvent.AGENT_THOUGHT,
-                QueueEvent.AGENT_MESSAGE,
-                QueueEvent.AGENT_ACTION,
-                QueueEvent.DATASET_RETRIEVAL,
-                QueueEvent.TODO_UPDATE,
-                QueueEvent.SUB_AGENT_DELEGATE,
-                QueueEvent.SUB_AGENT_END,
-                QueueEvent.TIMEOUT,
-                QueueEvent.STOP,
-                QueueEvent.ERROR,
-            ]:
-                # 5.更新位置及总耗时
-                position += 1
-                latency += agent_thought.latency
-
-                # 6.创建智能体消息推理步骤
-                self.create(
-                    MessageAgentThought,
-                    app_id=app_id,
-                    conversation_id=conversation.id,
-                    message_id=message.id,
-                    invoke_from=message.invoke_from,
-                    created_by=account_id,
-                    position=position,
-                    event=agent_thought.event,
-                    thought=agent_thought.thought,
-                    observation=agent_thought.observation,
-                    tool=agent_thought.tool,
-                    tool_input=agent_thought.tool_input,
-                    agent_id=agent_thought.agent_id,
-                    agent_type=agent_thought.agent_type.value,
-                    parent_agent_id=agent_thought.parent_agent_id,
-                    delegation_id=agent_thought.delegation_id,
-                    task_id=agent_thought.task_id,
-                    todos=[todo.model_dump(mode="json") for todo in agent_thought.todos],
-                    # 消息相关数据
-                    message=agent_thought.message,
-                    message_token_count=agent_thought.message_token_count,
-                    message_unit_price=agent_thought.message_unit_price,
-                    message_price_unit=agent_thought.message_price_unit,
-                    # 答案相关字段
-                    answer=agent_thought.answer,
-                    answer_token_count=agent_thought.answer_token_count,
-                    answer_unit_price=agent_thought.answer_unit_price,
-                    answer_price_unit=agent_thought.answer_price_unit,
-                    # Agent推理统计相关
-                    total_token_count=agent_thought.total_token_count,
-                    total_price=agent_thought.total_price,
-                    latency=agent_thought.latency,
-                )
-
-            # 7.判断当前事件是否为 Agent 消息。
-            if agent_thought.event == QueueEvent.AGENT_MESSAGE:
-                # 8.更新消息信息
-                self.update(
-                    message,
-                    # 消息相关字段
-                    message=agent_thought.message,
-                    message_token_count=agent_thought.message_token_count,
-                    message_unit_price=agent_thought.message_unit_price,
-                    message_price_unit=agent_thought.message_price_unit,
-                    # 答案相关字段
-                    answer=agent_thought.answer,
-                    answer_token_count=agent_thought.answer_token_count,
-                    answer_unit_price=agent_thought.answer_unit_price,
-                    answer_price_unit=agent_thought.answer_price_unit,
-                    # Agent推理统计相关
-                    total_token_count=agent_thought.total_token_count,
-                    total_price=agent_thought.total_price,
-                    latency=latency,
-                )
-
-                # 9.生成新会话名称；历史摘要由 DeepAgents 默认的
-                # SummarizationMiddleware 和 Workspace 转存机制接管。
-                if conversation.is_new:
-                    Thread(
-                        target=self._generate_conversation_name_and_update,
-                        kwargs={
-                            "flask_app": current_app._get_current_object(),
-                            "conversation_id": conversation.id,
-                            "query": message.query,
-                            "account_id": account_id,
-                            "model_config": app_config.get("model_config"),
-                        },
-                    ).start()
-
-            # 10.判断是否为停止或者错误，如果是则需要更新消息状态
-            if agent_thought.event in [
-                QueueEvent.TIMEOUT,
-                QueueEvent.STOP,
-                QueueEvent.ERROR,
-            ]:
-                self.update(
-                    message,
-                    status=agent_thought.event,
-                    error=agent_thought.observation,
-                )
-                break
-
-        # Run 级用量只在一次执行结束后写入，避免把流式分片重复累加。
-        usage_updates = self.build_run_usage_updates(run_usage)
-        if usage_updates:
-            self.update(message, **usage_updates)
-
-    def _generate_conversation_name_and_update(
-        self,
-        flask_app: Flask,
-        conversation_id: UUID,
-        query: str,
-        account_id: UUID,
-        model_config: dict = None,
-    ) -> None:
-        """生成会话名称并更新数据库记录。"""
-        with flask_app.app_context():
-            # 1.根据会话 ID 获取会话。
-            conversation = self.get(Conversation, conversation_id)
-
-            # 2.生成新的会话名称。
-            new_conversation_name = self.generate_conversation_name(
-                query, account_id, model_config
-            )
-
-            # 3.更新会话名称。
-            self.update(
-                conversation,
-                name=new_conversation_name,
-            )
 
     def get_conversation(self, conversation_id: UUID, account: Account) -> Conversation:
         """根据会话 ID 和账号获取指定会话。"""
@@ -453,7 +299,6 @@ class ConversationService(BaseService):
         # 4.执行分页查询。
         messages = paginator.paginate(
             self.db.session.query(Message)
-            .options(joinedload(Message.agent_thoughts))
             .filter(
                 Message.conversation_id == conversation.id,
                 Message.status.in_([MessageStatus.STOP, MessageStatus.NORMAL]),
@@ -477,9 +322,11 @@ class ConversationService(BaseService):
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_conversation(
-            account_id=account.id,
-            app_id=conversation.app_id,
-            conversation_id=conversation.id,
+            AgentConversationCleanupReq(
+                account_id=account.id,
+                app_id=conversation.app_id,
+                conversation_id=conversation.id,
+            )
         )
         self.update(conversation, is_deleted=True)
 
@@ -503,10 +350,12 @@ class ConversationService(BaseService):
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_message(
-            account_id=account.id,
-            app_id=conversation.app_id,
-            conversation_id=conversation.id,
-            message_id=message.id,
+            AgentMessageCleanupReq(
+                account_id=account.id,
+                app_id=conversation.app_id,
+                conversation_id=conversation.id,
+                message_id=message.id,
+            )
         )
         self.update(message, is_deleted=True)
 

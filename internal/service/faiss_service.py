@@ -6,7 +6,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 
-from internal.core.agent_v2.agents.models import DATASET_RETRIEVAL_TOOL_NAME
+from internal.core.agent_v2.entity.tool import DATASET_RETRIEVAL_TOOL_NAME
 from internal.lib.helper import combine_documents
 from .embeddings_service import EmbeddingsService
 

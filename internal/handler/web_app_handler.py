@@ -6,24 +6,16 @@ from flask_login import login_required, current_user
 from injector import inject
 
 from internal.middleware.rate_limit_middleware import rate_limit
-from internal.schema.web_app_schema import (
-    WebAppChatReq,
-    GetConversationsReq,
-    GetConversationsResp,
-)
+from internal.schema.web_app_schema import GetConversationsReq, GetConversationsResp
 from internal.schema.conversation_schema import (
-    GetConversationMessagesWithPageReq,
-    GetConversationMessagesWithPageResp,
     UpdateConversationNameReq,
     UpdateConversationIsPinnedReq,
 )
 from internal.service import WebAppService
-from pkg.paginator import PageModel
 from pkg.response import (
     success_json,
     validate_error_json,
     success_message,
-    compact_generate_response,
 )
 
 
@@ -44,30 +36,6 @@ class WebAppHandler:
         # 2.返回成功响应
         return success_json(resp)
 
-    # @deprecated 已由 Agent 工作台 commands + stream 替代，暂保留兼容。
-    @rate_limit(config_key="chat")
-    @rate_limit(config_key="user")
-    @login_required
-    def web_app_chat(self, token: str):
-        """旧版 WebApp 对话流，已由 Agent 工作台替代。"""
-        # 1.提取请求并校验
-        req = WebAppChatReq()
-        if not req.validate():
-            return validate_error_json(req.errors)
-
-        # 2.嗲用服务获取对应响应内容
-        response = self.web_app_service.web_app_chat(token, req, current_user)
-
-        return compact_generate_response(response)
-
-    # @deprecated 已由 Agent 工作台 Run 取消接口替代，暂保留兼容。
-    @rate_limit(config_key="user")
-    @login_required
-    def stop_web_app_chat(self, token: str, task_id: UUID):
-        """旧版 WebApp 停止接口，已由工作台 Run 取消接口替代。"""
-        self.web_app_service.stop_web_app_chat(token, task_id, current_user)
-        return success_message("停止WebApp会话成功")
-
     @rate_limit(config_key="database_intensive")
     @login_required
     def get_conversations(self, token: str):
@@ -86,30 +54,6 @@ class WebAppHandler:
         resp = GetConversationsResp(many=True)
 
         return success_json(resp.dump(conversations))
-
-    # @deprecated 已由 Agent 工作台 messages 分页接口替代，暂保留兼容。
-    @rate_limit(config_key="database_intensive")
-    @login_required
-    def get_web_app_conversation_messages_with_page(
-        self,
-        token: str,
-        conversation_id: UUID,
-    ):
-        """旧版 WebApp 消息接口，已由工作台 messages 分页接口替代。"""
-        req = GetConversationMessagesWithPageReq(request.args)
-        if not req.validate():
-            return validate_error_json(req.errors)
-
-        messages, paginator = (
-            self.web_app_service.get_web_app_conversation_messages_with_page(
-                token,
-                conversation_id,
-                req,
-                current_user,
-            )
-        )
-        resp = GetConversationMessagesWithPageResp(many=True)
-        return success_json(PageModel(list=resp.dump(messages), paginator=paginator))
 
     @rate_limit(config_key="sensitive")
     @login_required

@@ -42,7 +42,7 @@ DEFAULT_APP_CONFIG = {
         "score": 0.5,
     },
     "long_term_memory": {
-        "enable": True,
+        "enable": False,
     },
     "opening_statement": "",
     "opening_questions": [],

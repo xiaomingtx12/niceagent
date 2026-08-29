@@ -1,9 +1,8 @@
 from .account_service import AccountService
 from .ai_service import AIService
-from .agent_runtime_service import AgentRuntimeService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
-from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
-from .agent_attachment_service import AgentAttachment, AgentAttachmentService
+from .agent_assembly_service import AgentAssemblyService
+from .agent_attachment_service import AgentAttachmentService
 from .analysis_service import AnalysisService
 from .api_key_service import ApiKeyService
 from .api_tool_service import ApiToolService
@@ -28,7 +27,6 @@ from .keyword_table_service import KeywordTableService
 from .language_model_service import LanguageModelService
 from .mcp_service import MCPService
 from .oauth_service import OAuthService
-from .openapi_service import OpenAPIService
 from .platform_service import PlatformService
 from .process_rule_service import ProcessRuleService
 from .provider_api_key_service import ProviderApiKeyService
@@ -40,10 +38,12 @@ from .vector_database_service import VectorDatabaseService
 from .web_app_service import WebAppService
 from .wechat_service import WechatService
 from .workspace_file_service import WorkspaceFileService
+from .workspace_file_storage_service import WorkspaceFileStorageService
 from .memory_file_service import MemoryFileService
 from .workflow_service import WorkflowService
 from .agent_workbench_service import AgentWorkbenchService
-from .agent_workbench_replay import AgentWorkbenchReplayStore, ReplayCursorExpired
+from .agent_workbench_access_service import AgentWorkbenchAccessService
+from .agent_workbench_run_service import AgentWorkbenchRunService
 
 __all__ = [
     "BaseService",
@@ -69,19 +69,15 @@ __all__ = [
     "JwtService",
     "AccountService",
     "AIService",
-    "AgentRuntimeService",
     "AgentConversationCleanupService",
-    "AgentInvocationService",
-    "AgentInvocationSpec",
-    "AgentAttachment",
+    "AgentAssemblyService",
     "AgentAttachmentService",
     "ApiKeyService",
     "AppConfigService",
-    "OpenAPIService",
     "WorkflowService",
     "AgentWorkbenchService",
-    "AgentWorkbenchReplayStore",
-    "ReplayCursorExpired",
+    "AgentWorkbenchAccessService",
+    "AgentWorkbenchRunService",
     "BuiltinAppService",
     "AssistantAgentService",
     "FaissService",
@@ -94,5 +90,6 @@ __all__ = [
     "PlatformService",
     "ProviderApiKeyService",
     "WorkspaceFileService",
+    "WorkspaceFileStorageService",
     "MemoryFileService",
 ]

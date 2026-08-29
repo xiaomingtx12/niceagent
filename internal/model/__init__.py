@@ -2,7 +2,7 @@ from .account import Account, AccountOAuth
 from .api_key import ApiKey
 from .api_tool import ApiTool, ApiToolProvider
 from .app import App, AppDatasetJoin, AppConfig, AppConfigVersion
-from .conversation import Message, Conversation, MessageAgentThought
+from .conversation import Message, Conversation
 from .dataset import Dataset, Document, Segment, KeywordTable, DatasetQuery, ProcessRule
 from .end_user import EndUser
 from .mcp_server import MCPServer, MCPTool
@@ -29,7 +29,6 @@ __all__ = [
     "ProcessRule",
     "Conversation",
     "Message",
-    "MessageAgentThought",
     "Account",
     "AccountOAuth",
     "EndUser",

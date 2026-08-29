@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from injector import inject
-from qcloud_cos import CosS3Client, CosConfig
 from werkzeug.datastructures import FileStorage
 
 from internal.entity.upload_file_entity import (
@@ -16,6 +15,7 @@ from internal.entity.upload_file_entity import (
 )
 from internal.exception import FailException
 from internal.model import UploadFile, Account
+from internal.repository import CosObjectStorageRepository, ObjectStorageError
 from .upload_file_service import UploadFileService
 
 
@@ -25,6 +25,7 @@ class CosService:
     """腾讯云cos对象存储服务"""
 
     upload_file_service: UploadFileService
+    object_storage: CosObjectStorageRepository
 
     def upload_file(
         self,
@@ -48,25 +49,25 @@ class CosService:
         elif only_image and extension_lower not in ALLOWED_IMAGE_EXTENSION:
             raise FailException(f"该.{extension}扩展的文件不支持上传，请上传正确的图片")
 
-        # 2.获取客户端+存储桶名字
-        client = self._get_client()
-        bucket = self._get_bucket()
-
-        # 3.生成一个随机的名字
+        # 2.生成一个随机的名字
         random_filename = str(uuid.uuid4()) + "." + extension_lower
         now = datetime.now()
         upload_filename = f"{now.year}/{now.month:02d}/{now.day:02d}/{random_filename}"
 
-        # 4.流式读取上传的数据并将其上传到cos中
+        # 3.流式读取上传的数据并将其上传到cos中
         file_content = file.stream.read()
 
         try:
-            # 5.将数据上传到cos存储桶中
-            client.put_object(bucket, file_content, upload_filename)
-        except Exception as e:
-            raise FailException("上传文件失败，请稍后重试")
+            # 4.通过统一 Repository 将数据上传到 COS。
+            self.object_storage.put_bytes(
+                upload_filename,
+                file_content,
+                content_type=file.mimetype,
+            )
+        except ObjectStorageError as exc:
+            raise FailException("上传文件失败，请稍后重试") from exc
 
-        # 6.创建upload_file记录
+        # 5.创建 upload_file 记录。
         return self.upload_file_service.create_upload_file(
             account_id=account.id,
             name=filename,
@@ -79,23 +80,17 @@ class CosService:
 
     def download_file(self, key: str, target_file_path: str):
         """下载cos云端的文件到本地的指定路径"""
-        client = self._get_client()
-        bucket = self._get_bucket()
-
-        client.download_file(bucket, key, target_file_path)
+        try:
+            self.object_storage.download_to_file(key, target_file_path)
+        except ObjectStorageError as exc:
+            raise FailException("下载文件失败，请稍后重试") from exc
 
     def download_file_bytes(self, key: str) -> bytes:
         """读取 COS 文件原始字节，供 Agent Workspace 投影使用。"""
-        client = self._get_client()
-        response = client.get_object(self._get_bucket(), key)
-        body = response["Body"] if isinstance(response, dict) else response
-        if hasattr(body, "get_raw_stream"):
-            body = body.get_raw_stream()
-        if hasattr(body, "read"):
-            body = body.read()
-        if not isinstance(body, (bytes, bytearray, memoryview)):
-            raise FailException("读取附件失败，COS 返回了无效的文件内容")
-        return bytes(body)
+        try:
+            return self.object_storage.get_bytes(key)
+        except ObjectStorageError as exc:
+            raise FailException("读取附件失败，请稍后重试") from exc
 
     @classmethod
     def get_file_url(cls, key: str) -> str:
@@ -109,20 +104,3 @@ class CosService:
             cos_domain = f"{scheme}://{bucket}.cos.{region}.myqcloud.com"
 
         return f"{cos_domain}/{key}"
-
-    @classmethod
-    def _get_client(cls) -> CosS3Client:
-        """获取腾讯云cos对象存储客户端"""
-        conf = CosConfig(
-            Region=os.getenv("COS_REGION"),
-            SecretId=os.getenv("COS_SECRET_ID"),
-            SecretKey=os.getenv("COS_SECRET_KEY"),
-            Token=None,
-            Scheme=os.getenv("COS_SCHEME", "https"),
-        )
-        return CosS3Client(conf)
-
-    @classmethod
-    def _get_bucket(cls) -> str:
-        """获取存储桶的名字"""
-        return os.getenv("COS_BUCKET")

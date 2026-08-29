@@ -1,40 +1,33 @@
-import json
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Generator, Any
+from typing import Any
 from uuid import UUID
 
 from injector import inject
 from sqlalchemy import desc
-from sqlalchemy.orm import joinedload
 from sqlalchemy.dialects.postgresql import insert
 
-from internal.core.agent_v2.agents import AgentQueueManager
 from internal.entity.app_entity import AppStatus
-from internal.entity.conversation_entity import InvokeFrom, MessageStatus
+from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ForbiddenException
-from internal.model import App, Account, Conversation, EndUser, Message
-from internal.schema.web_app_schema import WebAppChatReq
-from internal.schema.conversation_schema import GetConversationMessagesWithPageReq
-from pkg.paginator import Paginator
+from internal.model import App, Account, Conversation, EndUser
+from internal.schema.agent_runtime_schema import AgentConversationCleanupReq
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
-from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
-from .agent_attachment_service import AgentAttachmentService
 from .base_service import BaseService
 
 
 @inject
 @dataclass
 class WebAppService(BaseService):
-    """WebApp 入口服务，负责用户、会话和 Agent 调用上下文。"""
+    """处理 WebApp Token、终端用户和 Conversation 的业务归属。
+
+    本服务为 Agent Run 准备合法的调用上下文，不负责 Agent 装配或执行。
+    """
 
     db: SQLAlchemy
     app_config_service: AppConfigService
-    agent_invocation_service: AgentInvocationService
     agent_cleanup_service: AgentConversationCleanupService
-    agent_attachment_service: AgentAttachmentService
 
     def resolve_web_app_end_user(
         self,
@@ -118,13 +111,48 @@ class WebAppService(BaseService):
             raise ForbiddenException("会话不存在或不属于当前用户")
         return app, end_user, conversation
 
+    def get_owned_web_conversation_by_app_id(
+        self,
+        *,
+        app_id: UUID,
+        conversation_id: UUID,
+        account: Account,
+    ) -> Conversation:
+        """使用稳定应用归属校验 WebApp 会话，不依赖可能轮换的访问 token。"""
+        end_user = (
+            self.db.session.query(EndUser)
+            .filter(
+                EndUser.app_id == app_id,
+                EndUser.external_user_id == account.id,
+            )
+            .one_or_none()
+        )
+        allowed_creators = {account.id}
+        if end_user is not None:
+            allowed_creators.add(end_user.id)
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app_id,
+                Conversation.invoke_from == InvokeFrom.WEB_APP,
+                Conversation.created_by.in_(allowed_creators),
+                Conversation.is_deleted.is_(False),
+            )
+            .one_or_none()
+        )
+        if conversation is None:
+            raise ForbiddenException("会话不存在或不属于当前用户")
+        return conversation
+
     def get_or_create_owned_web_conversation(
         self,
         *,
         token: str,
         conversation_id: UUID,
         account: Account,
-        ) -> tuple[App, EndUser, Conversation]:
+        conversation_name: str,
+    ) -> tuple[App, EndUser, Conversation]:
         """获取工作台会话；客户端新 thread 在首次 command 时落库。"""
         # 1.校验作用域并解析 WebApp 终端用户。
         app = self.get_web_app(token)
@@ -146,7 +174,7 @@ class WebAppService(BaseService):
             Conversation,
             id=conversation_id,
             app_id=app.id,
-            name="新任务",
+            name=conversation_name[:255],
             invoke_from=InvokeFrom.WEB_APP,
             created_by=end_user.id,
         )
@@ -175,7 +203,7 @@ class WebAppService(BaseService):
 
         # 2.获取应用配置。
         app_config = self.app_config_service.get_app_config(app)
-        
+
         # 3.从模型配置中读取输入模态，不实际加载模型实例。
         model_config = app_config.get("model_config", {})
         input_modalities = model_config.get("input_modalities", ["text"])
@@ -193,111 +221,11 @@ class WebAppService(BaseService):
                 "opening_questions": app_config.get("opening_questions"),
                 "suggested_after_answer": app_config.get("suggested_after_answer"),
                 "input_modalities": input_modalities,
-                "native_file_input": bool(
-                    model_config.get("native_file_input", False)
-                ),
+                "native_file_input": bool(model_config.get("native_file_input", False)),
                 "text_to_speech": app_config.get("text_to_speech"),
                 "speech_to_text": app_config.get("speech_to_text"),
             },
         }
-
-    def web_app_chat(
-        self, token: str, req: WebAppChatReq, account: Account
-    ) -> Generator:
-        """根据传递的token凭证+请求与指定的WebApp进行对话"""
-        # 1.获取WebApp应用并校验应用是否发布
-        app = self.get_web_app(token)
-        end_user = self.resolve_web_app_end_user(app=app, account=account)
-
-        # 2.检测是否传递了会话id，如果传递了需要校验会话的归属信息
-        if req.conversation_id.data:
-            conversation = self.get(Conversation, req.conversation_id.data)
-            if (
-                not conversation
-                or conversation.app_id != app.id
-                or conversation.invoke_from != InvokeFrom.WEB_APP
-                or conversation.created_by not in {end_user.id, account.id}
-                or conversation.is_deleted is True
-            ):
-                raise ForbiddenException(
-                    "该会话不存在，或者不属于当前应用/用户/调用方式"
-                )
-        else:
-            # 3.如果没传递conversation_id表示新会话，这时候需要创建一个会话
-            conversation = self.create(
-                Conversation,
-                **{
-                    "app_id": app.id,
-                    "name": "New Conversation",
-                    "invoke_from": InvokeFrom.WEB_APP,
-                    "created_by": end_user.id,
-                },
-            )
-
-        # 4.获取校验后的运行时配置
-        app_config = self.app_config_service.get_app_config(app)
-        attachments = self.agent_attachment_service.resolve(
-            req.file_ids.data,
-            owner_id=account.id,
-        )
-
-        # 5.新建一条消息记录
-        message = self.create(
-            Message,
-            app_id=app.id,
-            conversation_id=conversation.id,
-            invoke_from=InvokeFrom.WEB_APP,
-            created_by=end_user.id,
-            query=req.query.data,
-            image_urls=req.image_urls.data,
-            attachments=[attachment.to_dict() for attachment in attachments],
-            status=MessageStatus.NORMAL,
-        )
-
-        spec = AgentInvocationSpec(
-            account_id=app.account_id,
-            app=app,
-            app_config=app_config,
-            conversation_id=conversation.id,
-            message_id=message.id,
-            created_by=end_user.id,
-            user_id=end_user.id,
-            end_user_id=end_user.id,
-            invoke_from=InvokeFrom.WEB_APP,
-            query=req.query.data,
-            image_urls=req.image_urls.data,
-            attachments=attachments,
-            opening_statement=(
-                app_config["opening_statement"] if conversation.is_new else ""
-            ),
-        )
-
-        # stream() 会把模型/API Key/工具装配异常转换为统一的 SSE error 事件。
-        agent_stream = self.agent_invocation_service.stream(spec)
-
-        def generate() -> Generator:
-            for agent_thought in agent_stream:
-                data = self.agent_invocation_service.serialize_event(
-                    agent_thought,
-                    conversation_id=conversation.id,
-                    message_id=message.id,
-                )
-                yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
-
-        return generate()
-
-    def stop_web_app_chat(self, token: str, task_id: UUID, account: Account):
-        """根据访问令牌和任务 ID 停止指定 WebApp 对话。"""
-        # 1.获取 WebApp 应用并校验是否已发布。
-        app = self.get_web_app(token)
-        end_user = self.resolve_web_app_end_user(app=app, account=account)
-
-        # 2.调用 Agent 队列管理器停止指定任务。
-        AgentQueueManager.set_stop_flag(
-            task_id,
-            InvokeFrom.WEB_APP,
-            end_user.id,
-        )
 
     def get_conversations(
         self, token: str, is_pinned: bool, account: Account
@@ -323,42 +251,6 @@ class WebAppService(BaseService):
 
         return conversations
 
-    def get_web_app_conversation_messages_with_page(
-        self,
-        token: str,
-        conversation_id: UUID,
-        req: GetConversationMessagesWithPageReq,
-        account: Account,
-    ) -> tuple[list[Message], Paginator]:
-        """获取当前 WebApp 用户在指定会话中的消息。"""
-        _, _, conversation = self.get_owned_web_conversation(
-            token=token,
-            conversation_id=conversation_id,
-            account=account,
-        )
-
-        paginator = Paginator(db=self.db, req=req)
-        filters = []
-        if req.created_at.data:
-            filters.append(
-                Message.created_at <= datetime.fromtimestamp(req.created_at.data)
-            )
-
-        messages = paginator.paginate(
-            self.db.session.query(Message)
-            .options(joinedload(Message.agent_thoughts))
-            .filter(
-                Message.conversation_id == conversation.id,
-                Message.status.in_([MessageStatus.STOP, MessageStatus.NORMAL]),
-                Message.answer != "",
-                ~Message.is_deleted,
-                *filters,
-            )
-            .order_by(desc("created_at"))
-        )
-
-        return messages, paginator
-
     def delete_web_app_conversation(
         self,
         token: str,
@@ -372,9 +264,11 @@ class WebAppService(BaseService):
             account=account,
         )
         self.agent_cleanup_service.cleanup_conversation(
-            account_id=app.account_id,
-            app_id=app.id,
-            conversation_id=conversation.id,
+            AgentConversationCleanupReq(
+                account_id=app.account_id,
+                app_id=app.id,
+                conversation_id=conversation.id,
+            )
         )
         return self.update(conversation, is_deleted=True)
 

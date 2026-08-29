@@ -1,9 +1,8 @@
 import io
-import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Generator
+from typing import Any
 from uuid import UUID
 
 import requests
@@ -13,10 +12,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel
 from redis import Redis
 from sqlalchemy import func, desc
-from sqlalchemy.orm import joinedload
 from werkzeug.datastructures import FileStorage
 
-from internal.core.agent_v2.agents import AgentQueueManager
 from internal.core.tools.builtin_tools.providers.tongyi import qwen_image_generation
 from internal.entity.app_entity import (
     AppStatus,
@@ -24,7 +21,7 @@ from internal.entity.app_entity import (
     DEFAULT_APP_CONFIG,
     GENERATE_ICON_PROMPT_TEMPLATE,
 )
-from internal.entity.conversation_entity import InvokeFrom, MessageStatus
+from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import (
     NotFoundException,
     ForbiddenException,
@@ -35,21 +32,21 @@ from internal.model import (
     App,
     Account,
     Conversation,
-    Message,
 )
 from internal.model.app import AppConfigVersion, AppDatasetJoin, AppConfig
 from internal.schema.app_schema import (
     CreateAppReq,
     GetPublishHistoriesWithPageReq,
     GetAppsWithPageReq,
-    GetDebugConversationMessagesWithPageReq,
-    DebugChatReq,
 )
+from internal.schema.agent_runtime_schema import (
+    AgentAppCleanupReq,
+    AgentConversationCleanupReq,
+)
+from internal.schema.app_config_schema import DraftAppConfigPatchReq
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
-from .agent_invocation_service import AgentInvocationService, AgentInvocationSpec
-from .agent_attachment_service import AgentAttachmentService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .base_service import BaseService
 from .cos_service import CosService
@@ -68,11 +65,9 @@ class AppService(BaseService):
     redis_client: Redis
     cos_service: CosService
     app_config_service: AppConfigService
-    agent_invocation_service: AgentInvocationService
     language_model_manager: LanguageModelManager
     language_model_service: LanguageModelService
     agent_cleanup_service: AgentConversationCleanupService
-    agent_attachment_service: AgentAttachmentService
 
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
@@ -208,8 +203,7 @@ class AppService(BaseService):
         """根据传递的应用id+账号，删除指定的应用信息，目前仅删除应用基础信息即可"""
         app = self.get_app(app_id, account)
         self.agent_cleanup_service.cleanup_app(
-            account_id=account.id,
-            app_id=app.id,
+            AgentAppCleanupReq(account_id=account.id, app_id=app.id)
         )
         self.delete(app)
         return app
@@ -251,8 +245,6 @@ class AppService(BaseService):
         ]
         remove_fields(app_dict, app_remove_fields)
         remove_fields(draft_app_config_dict, draft_app_config_remove_fields)
-        draft_app_config_dict["long_term_memory"] = {"enable": True}
-
         # 4.开启数据库自动提交上下文
         with self.db.auto_commit():
             # 5.创建一个新的应用记录
@@ -345,7 +337,7 @@ class AppService(BaseService):
     def update_draft_app_config(
         self,
         app_id: UUID,
-        draft_app_config: dict[str, Any],
+        draft_app_config: DraftAppConfigPatchReq,
         account: Account,
     ) -> AppConfigVersion:
         """根据传递的应用id+草稿配置修改指定应用的最新草稿"""
@@ -537,7 +529,7 @@ class AppService(BaseService):
         )
         # 4.校验历史版本配置信息
         draft_app_config_dict = self.app_config_service.validate_draft_app_config(
-            draft_app_config_dict,
+            DraftAppConfigPatchReq.from_mapping(draft_app_config_dict),
             account_id=account.id,
             app_id=app.id,
         )
@@ -573,9 +565,11 @@ class AppService(BaseService):
         )
         if conversation is not None and not conversation.is_deleted:
             self.agent_cleanup_service.cleanup_conversation(
-                account_id=account.id,
-                app_id=app.id,
-                conversation_id=conversation.id,
+                AgentConversationCleanupReq(
+                    account_id=account.id,
+                    app_id=app.id,
+                    conversation_id=conversation.id,
+                )
             )
             self.update(conversation, is_deleted=True)
 
@@ -583,101 +577,6 @@ class AppService(BaseService):
         self.update(app, debug_conversation_id=None)
 
         return app
-
-    def debug_chat(
-        self, app_id: UUID, req: DebugChatReq, account: Account
-    ) -> Generator:
-        """根据传递的应用id+提问query向特定的应用发起会话调试"""
-        app = self.get_app(app_id, account)
-        draft_app_config = self.get_draft_app_config(app_id, account)
-        debug_conversation = app.debug_conversation
-        attachments = self.agent_attachment_service.resolve(
-            req.file_ids.data,
-            owner_id=account.id,
-        )
-        message = self.create(
-            Message,
-            app_id=app_id,
-            conversation_id=debug_conversation.id,
-            invoke_from=InvokeFrom.DEBUGGER,
-            created_by=account.id,
-            query=req.query.data,
-            image_urls=req.image_urls.data,
-            attachments=[attachment.to_dict() for attachment in attachments],
-            status=MessageStatus.NORMAL,
-        )
-
-        spec = AgentInvocationSpec(
-            account_id=account.id,
-            app=app,
-            app_config=draft_app_config,
-            conversation_id=debug_conversation.id,
-            message_id=message.id,
-            created_by=account.id,
-            user_id=account.id,
-            end_user_id=None,
-            invoke_from=InvokeFrom.DEBUGGER,
-            query=req.query.data,
-            image_urls=req.image_urls.data,
-            attachments=attachments,
-            opening_statement=(
-                draft_app_config["opening_statement"]
-                if debug_conversation.is_new
-                else ""
-            ),
-        )
-
-        for agent_thought in self.agent_invocation_service.stream(spec):
-            data = self.agent_invocation_service.serialize_event(
-                agent_thought,
-                conversation_id=debug_conversation.id,
-                message_id=message.id,
-            )
-            yield f"event: {agent_thought.event.value}\ndata:{json.dumps(data)}\n\n"
-
-    def stop_debug_chat(self, app_id: UUID, task_id: UUID, account: Account) -> None:
-        """根据传递的应用id+任务id+账号，停止某个应用的调试会话，中断流式事件"""
-        # 1.获取应用信息并校验权限
-        self.get_app(app_id, account)
-
-        # 2.调用智能体队列管理器停止特定任务
-        AgentQueueManager.set_stop_flag(task_id, InvokeFrom.DEBUGGER, account.id)
-
-    def get_debug_conversation_messages_with_page(
-        self,
-        app_id: UUID,
-        req: GetDebugConversationMessagesWithPageReq,
-        account: Account,
-    ) -> tuple[list[Message], Paginator]:
-        """根据传递的应用id+请求数据，获取调试会话消息列表分页数据"""
-        # 1.获取应用信息并校验权限
-        app = self.get_app(app_id, account)
-
-        # 2.获取应用的调试会话
-        debug_conversation = app.debug_conversation
-
-        # 3.构建分页器并构建游标条件
-        paginator = Paginator(db=self.db, req=req)
-        filters = []
-        if req.created_at.data:
-            # 4.将时间戳转换成DateTime
-            created_at_datetime = datetime.fromtimestamp(req.created_at.data)
-            filters.append(Message.created_at <= created_at_datetime)
-
-        # 5.执行分页并查询数据
-        messages = paginator.paginate(
-            self.db.session.query(Message)
-            .options(joinedload(Message.agent_thoughts))
-            .filter(
-                Message.conversation_id == debug_conversation.id,
-                Message.status.in_([MessageStatus.STOP, MessageStatus.NORMAL]),
-                Message.answer != "",
-                *filters,
-            )
-            .order_by(desc("created_at"))
-        )
-
-        return messages, paginator
 
     def get_published_config(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """根据传递的应用id+账号，获取应用的发布配置"""

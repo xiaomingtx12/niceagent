@@ -9,7 +9,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 from sqlalchemy import update
 
-from internal.core.agent_v2.agents.models import DATASET_RETRIEVAL_TOOL_NAME
+from internal.core.agent_v2.entity.tool import DATASET_RETRIEVAL_TOOL_NAME
 from internal.entity.dataset_entity import RetrievalStrategy, RetrievalSource
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.model import Dataset, DatasetQuery, Segment
@@ -23,7 +23,11 @@ from ..lib.helper import combine_documents
 @inject
 @dataclass
 class RetrievalService(BaseService):
-    """检索服务"""
+    """执行知识库检索及其业务侧记录维护。
+
+    Dataset 权限、向量模型一致性、查询记录和命中次数由本服务负责；
+    Agent Core 只通过生成的检索 Tool 使用这些能力。
+    """
 
     db: SQLAlchemy
     jieba_service: JiebaService
@@ -40,7 +44,7 @@ class RetrievalService(BaseService):
         retrival_source: str = RetrievalSource.HIT_TESTING,
         source_app_id: UUID = None,
     ) -> list[LCDocument]:
-        """根据传递的query+知识库列表执行检索，并返回检索的文档+得分数据（如果检索策略为全文检索，则得分为0）"""
+        """校验知识库归属并执行检索，同时更新查询和命中统计。"""
 
         # 1.提取知识库列表并校验权限同时更新知识库id
         datasets = (
@@ -138,7 +142,7 @@ class RetrievalService(BaseService):
         retrival_source: str = RetrievalSource.HIT_TESTING,
         source_app_id: UUID = None,
     ) -> BaseTool:
-        """根据传递的参数构建一个LangChain知识库搜索工具"""
+        """把一次已确定范围的知识库检索能力包装成 LangChain Tool。"""
 
         class DatasetRetrievalInput(BaseModel):
             """知识库检索工具输入结构"""
