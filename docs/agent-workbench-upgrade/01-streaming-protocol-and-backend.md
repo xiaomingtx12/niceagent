@@ -182,7 +182,7 @@ trace 引用。表结构必须沿用现有模型、迁移和软删除/审计约�
 | 各来源 Run 构造 | `internal/service/agent_workbench_service.py` 内部方法 |
 | 创建者/发布态/助手/OpenAPI HTTP 适配 | 对应拆分 handler 和 router 模块 |
 
-`runtime/deep_agent_factory.py`、`runtime/subagent_spec_adapter.py` 和
+`assembly/graph/deep_agent_factory.py`、`assembly/graph/subagent_spec_adapter.py` 和
 `persistence/langgraph_checkpoint_provider.py` 应继续只负责
 原生 runtime 装配，不承载 HTTP、Redis replay 或前端展示逻辑。
 

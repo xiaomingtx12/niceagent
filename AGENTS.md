@@ -16,11 +16,11 @@
 
 - `internal.entity` 只放跨业务模块复用的领域对象、值对象、领域枚举、领域状态和领域规则。
 - `internal.core.agent_v2` 私有的领域对象和值对象统一放在 `internal/core/agent_v2/entity`；只服务 Agent V2
-  内部边界的校验与传输对象统一放在 `internal/core/agent_v2/schema`。不得把这些私有对象散落到 `execution`、`runtime`、
+  内部边界的校验与传输对象统一放在 `internal/core/agent_v2/schema`。不得把这些私有对象散落到 `execution`、`assembly`、
   `backends` 或全局 `internal.entity`、`internal.schema`。
 - Agent V2 的单次图执行和资源生命周期放在 `execution`，Agent Protocol 事件解析、投影和安全裁剪放在 `protocol`。
-- `runtime` 只负责 Deep Agents 图构建、配置和请求级总装配；Workspace、Memory、Skill、Sandbox 上下文构建放在
-  `runtime/context`，遥测与 Token 用量框架适配放在 `runtime/observability`。
+- `assembly` 只负责 Deep Agents 图构建、配置和请求级总装配；Workspace、Memory、Skill、Sandbox 上下文构建放在
+  `assembly/context`，遥测与 Token 用量框架适配放在 `assembly/observability`。
 - Deep Agents Backend 实现放在 `backends`，LangGraph Checkpointer、Store Provider 和 Workspace 文件仓储放在
   `persistence`，模型调用钩子放在 `middleware`。禁止新建含义重叠的 `agents`、`events`、`context` 或 `storage` 平行包。
 - 业务状态常量应与对应领域实体放在 `entity`，例如 `queued`、`running`、`completed`、`failed`、`cancelled`

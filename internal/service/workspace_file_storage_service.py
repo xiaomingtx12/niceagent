@@ -14,7 +14,7 @@ from internal.core.agent_v2.entity.workspace_path import build_workspace_path_di
 from internal.core.agent_v2.persistence.workspace_file_repository import (
     WorkspaceFileRepository,
 )
-from internal.core.agent_v2.runtime.observability.telemetry import (
+from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )

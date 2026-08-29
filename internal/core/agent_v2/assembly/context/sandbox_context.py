@@ -12,8 +12,8 @@ from internal.core.agent_v2.backends.langsmith_sandbox_backend import (
     build_sandbox_backend,
 )
 from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
-from internal.core.agent_v2.runtime.context.skill_context import SkillProjection
-from internal.core.agent_v2.runtime.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.assembly.context.skill_context import SkillProjection
+from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 
 
 @dataclass

@@ -7,7 +7,7 @@ from typing import Protocol
 from internal.core.agent_v2.persistence.workspace_file_repository import (
     WorkspaceFileRepository,
 )
-from internal.core.agent_v2.runtime.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 from internal.model import WorkspaceFile
 
 

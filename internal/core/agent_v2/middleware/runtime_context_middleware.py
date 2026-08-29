@@ -8,7 +8,9 @@ from typing import Any, Callable
 from deepagents.middleware._utils import append_to_system_message
 from langchain.agents.middleware.types import AgentMiddleware, ModelRequest
 
-from internal.core.agent_v2.runtime.agent_system_prompt import build_dynamic_context
+from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
+    build_dynamic_context,
+)
 
 
 class RuntimeContextMiddleware(AgentMiddleware):

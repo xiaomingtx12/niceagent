@@ -14,7 +14,7 @@ from internal.core.agent_v2.backends.workspace_route_backend import (
     AgentWorkspaceRouteBackend,
 )
 from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.runtime.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.persistence.workspace_file_storage_protocol import (
     WorkspaceFileStorageProtocol,
 )

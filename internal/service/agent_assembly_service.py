@@ -29,6 +29,7 @@ from internal.core.agent_v2.entity.subagent_config import (
     SubAgentConfig,
 )
 from internal.core.agent_v2.execution.agent_executor import AgentExecutor
+from internal.core.agent_v2.execution.run_resources import AgentRuntimeResources
 from internal.core.agent_v2.execution.run_resource_manager import close_runtime_backends
 from internal.core.agent_v2.execution.tool_validator import (
     DEEPAGENTS_RESERVED_TOOL_NAMES,
@@ -39,19 +40,18 @@ from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
 from internal.core.agent_v2.persistence.langgraph_store_provider import (
     get_configured_store,
 )
-from internal.core.agent_v2.runtime.agent_runtime_resources import AgentRuntimeResources
-from internal.core.agent_v2.runtime.context.memory_context import MemoryContextAssembler
-from internal.core.agent_v2.runtime.context.sandbox_context import (
+from internal.core.agent_v2.assembly.context.memory_context import MemoryContextAssembler
+from internal.core.agent_v2.assembly.context.sandbox_context import (
     SandboxContextAssembler,
     SandboxProjection,
     build_filesystem_permissions,
 )
-from internal.core.agent_v2.runtime.context.skill_context import SkillContextAssembler
-from internal.core.agent_v2.runtime.context.workspace_context import (
+from internal.core.agent_v2.assembly.context.skill_context import SkillContextAssembler
+from internal.core.agent_v2.assembly.context.workspace_context import (
     WorkspaceContextAssembler,
     WorkspaceProjection,
 )
-from internal.core.agent_v2.runtime.observability.telemetry import (
+from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     LoggingAgentTelemetrySink,
 )

@@ -26,14 +26,14 @@ from internal.core.agent_v2.middleware.runtime_context_middleware import (
 )
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.middleware.trace_middleware import TraceMiddleware
-from internal.core.agent_v2.runtime.deep_agent_harness_profile import (
+from internal.core.agent_v2.assembly.graph.deep_agent_harness_profile import (
     register_platform_harness_profile,
 )
-from internal.core.agent_v2.runtime.subagent_spec_adapter import (
+from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
     build_async_subagent_specs,
     build_subagent_specs,
 )
-from internal.core.agent_v2.runtime.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 
 
 def build_deep_agent(

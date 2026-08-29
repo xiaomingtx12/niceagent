@@ -11,7 +11,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
 from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.runtime.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 
 
 @dataclass(frozen=True, slots=True)

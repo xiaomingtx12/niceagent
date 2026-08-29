@@ -14,11 +14,11 @@ from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core.messages import AIMessage, ToolMessage
 
 from internal.core.agent_v2.protocol.message_parser import response_messages
-from internal.core.agent_v2.runtime.observability.telemetry import (
+from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-from internal.core.agent_v2.runtime.observability.token_usage import normalize_response
+from internal.core.agent_v2.assembly.observability.token_usage import normalize_response
 
 
 _span_stack: ContextVar[tuple[str, ...]] = ContextVar(

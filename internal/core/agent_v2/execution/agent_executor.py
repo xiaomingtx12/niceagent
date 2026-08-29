@@ -19,14 +19,18 @@ from internal.core.agent_v2.execution.run_resource_manager import (
     close_runtime_backends,
 )
 from internal.core.agent_v2.execution.tool_validator import validate_agent_tools
-from internal.core.agent_v2.runtime.deep_agent_factory import build_deep_agent
-from internal.core.agent_v2.runtime.agent_system_prompt import build_app_system_prompt
-from internal.core.agent_v2.runtime.observability.telemetry import (
+from internal.core.agent_v2.assembly.graph.deep_agent_factory import build_deep_agent
+from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
+    build_app_system_prompt,
+)
+from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-from internal.core.agent_v2.runtime.langgraph_thread_config import merge_thread_config
-from internal.core.agent_v2.runtime.observability.token_usage import (
+from internal.core.agent_v2.assembly.configuration.langgraph_thread_config import (
+    merge_thread_config,
+)
+from internal.core.agent_v2.assembly.observability.token_usage import (
     build_framework_run_usage,
 )
 from internal.core.agent_v2.entity.agent_config import AgentConfig

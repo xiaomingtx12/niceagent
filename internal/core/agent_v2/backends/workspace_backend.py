@@ -41,7 +41,7 @@ from internal.exception import (
     WorkspaceQuotaExceeded,
     WorkspaceStorageError,
 )
-from internal.core.agent_v2.runtime.observability.telemetry import (
+from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
