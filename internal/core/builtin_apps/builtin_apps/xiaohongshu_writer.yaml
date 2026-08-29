@@ -34,7 +34,7 @@ speech_to_text:
   enable: false
 text_to_speech:
   enable: false
-  voice: "echo"
+  voice: "xiaoxiao"
   auto_play: false
 suggested_after_answer:
   enable: true
@@ -43,7 +43,7 @@ review_config:
   keywords: [ ]
   inputs_config:
     enable: false
-    preset_response:
+    preset_response: ""
   outputs_config:
     enable: false
 created_at: 1731439009

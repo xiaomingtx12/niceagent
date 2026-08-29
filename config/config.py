@@ -43,15 +43,9 @@ class Config:
         self.AGENT_CHECKPOINT_BACKEND = str(
             _get_env("AGENT_CHECKPOINT_BACKEND")
         ).lower()
-        self.AGENT_MEMORY_BACKEND = str(
-            _get_env("AGENT_MEMORY_BACKEND")
-        ).lower()
-        self.AGENT_SANDBOX_PROVIDER = str(
-            _get_env("AGENT_SANDBOX_PROVIDER")
-        ).lower()
-        self.AGENT_SANDBOX_SNAPSHOT_ID = _get_env(
-            "AGENT_SANDBOX_SNAPSHOT_ID"
-        ) or None
+        self.AGENT_MEMORY_BACKEND = str(_get_env("AGENT_MEMORY_BACKEND")).lower()
+        self.AGENT_SANDBOX_PROVIDER = str(_get_env("AGENT_SANDBOX_PROVIDER")).lower()
+        self.AGENT_SANDBOX_SNAPSHOT_ID = _get_env("AGENT_SANDBOX_SNAPSHOT_ID") or None
         self.AGENT_SANDBOX_IDLE_TTL_SECONDS = int(
             _get_env("AGENT_SANDBOX_IDLE_TTL_SECONDS")
         )
@@ -61,6 +55,12 @@ class Config:
         self.BUILTIN_SKILLS_ROOT = _get_env("BUILTIN_SKILLS_ROOT")
         self.WORKSPACE_MAX_BYTES = _get_workspace_limit("WORKSPACE_MAX_BYTES")
         self.WORKSPACE_MAX_FILES = _get_workspace_limit("WORKSPACE_MAX_FILES")
+        self.WORKSPACE_PREVIEW_MAX_BYTES = _get_workspace_limit(
+            "WORKSPACE_PREVIEW_MAX_BYTES"
+        )
+        self.WORKSPACE_DOWNLOAD_URL_TTL_SECONDS = _get_workspace_limit(
+            "WORKSPACE_DOWNLOAD_URL_TTL_SECONDS"
+        )
         self._validate_agent_settings()
 
         # Redis配置
@@ -75,9 +75,7 @@ class Config:
         self.REDIS_SOCKET_CONNECT_TIMEOUT = float(
             _get_env("REDIS_SOCKET_CONNECT_TIMEOUT")
         )
-        self.REDIS_HEALTH_CHECK_INTERVAL = int(
-            _get_env("REDIS_HEALTH_CHECK_INTERVAL")
-        )
+        self.REDIS_HEALTH_CHECK_INTERVAL = int(_get_env("REDIS_HEALTH_CHECK_INTERVAL"))
         self.AGENT_WORKBENCH_REPLAY_KEY_PREFIX = str(
             _get_env("AGENT_WORKBENCH_REPLAY_KEY_PREFIX")
         )
@@ -136,6 +134,13 @@ class Config:
         self.TENCENT_SCF_NAMESPACE = _get_env("TENCENT_SCF_NAMESPACE")
         self.TENCENT_SCF_FUNCTION_NAME = _get_env("TENCENT_SCF_FUNCTION_NAME")
 
+        # 腾讯云 COS 对象存储
+        self.COS_SECRET_ID = _get_env("COS_SECRET_ID")
+        self.COS_SECRET_KEY = _get_env("COS_SECRET_KEY")
+        self.COS_REGION = _get_env("COS_REGION")
+        self.COS_SCHEME = _get_env("COS_SCHEME")
+        self.COS_BUCKET = _get_env("COS_BUCKET")
+
     def _validate_agent_settings(self) -> None:
         """校验 Agent 持久化和记忆配置。"""
         supported = {"postgres", "memory", "disabled", "false", "off", "none"}
@@ -153,9 +158,7 @@ class Config:
         ):
             raise ValueError("生产环境必须使用 postgres checkpoint")
         if self.AGENT_SANDBOX_PROVIDER not in {"disabled", "langsmith"}:
-            raise ValueError(
-                "AGENT_SANDBOX_PROVIDER 必须是 disabled 或 langsmith"
-            )
+            raise ValueError("AGENT_SANDBOX_PROVIDER 必须是 disabled 或 langsmith")
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"
             and self.AGENT_MEMORY_BACKEND != "postgres"

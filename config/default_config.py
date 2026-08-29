@@ -17,6 +17,8 @@ DEFAULT_CONFIG = {
     "BUILTIN_SKILLS_ROOT": "resources/agent_skills/builtin",
     "WORKSPACE_MAX_BYTES": 104857600,
     "WORKSPACE_MAX_FILES": 1000,
+    "WORKSPACE_PREVIEW_MAX_BYTES": 1048576,
+    "WORKSPACE_DOWNLOAD_URL_TTL_SECONDS": 300,
     # Redis数据库配置
     "REDIS_HOST": "localhost",
     "REDIS_PORT": 6379,
@@ -28,7 +30,7 @@ DEFAULT_CONFIG = {
     "REDIS_SOCKET_TIMEOUT": 5,
     "REDIS_SOCKET_CONNECT_TIMEOUT": 2,
     "REDIS_HEALTH_CHECK_INTERVAL": 30,
-    "AGENT_WORKBENCH_REPLAY_KEY_PREFIX": "my-dify:agent-workbench:events:v1",
+    "AGENT_WORKBENCH_REPLAY_KEY_PREFIX": "my-dify:agent-workbench:events:v2",
     # 1、Redis 只保存工作台事件短期重放数据，默认 10 分钟。
     "AGENT_WORKBENCH_REPLAY_TTL_SECONDS": 600,
     "AGENT_WORKBENCH_REPLAY_MAX_LENGTH": 2000,
@@ -52,4 +54,10 @@ DEFAULT_CONFIG = {
     "TENCENT_SCF_REGION": "ap-shanghai",
     "TENCENT_SCF_NAMESPACE": "default",
     "TENCENT_SCF_FUNCTION_NAME": "code-executor",
+    # 腾讯云 COS 对象存储
+    "COS_SECRET_ID": "",
+    "COS_SECRET_KEY": "",
+    "COS_REGION": "ap-shanghai",
+    "COS_SCHEME": "https",
+    "COS_BUCKET": "",
 }
