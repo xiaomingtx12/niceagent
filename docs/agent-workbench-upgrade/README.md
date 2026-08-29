@@ -39,7 +39,7 @@
 2. LangGraph 继续负责运行、检查点、事件流、线程和中断恢复。
 3. 优先采用 Agent Streaming Protocol 与 `@langchain/vue`，不另造一套浏览器事件模型。
 4. my-dify 当前只负责业务路由、基础鉴权、固定脱敏和原生事件协议投影。
-5. 现有 `QueueEvent` SSE 在迁移期保留，但只作为兼容通道，不继续扩展为新协议。
+5. 旧 Queue/Thread/EventSession、旧 SSE 投影和 `task_id` 取消链均已删除；所有 Agent 入口统一消费 Agent Protocol。
 6. 先支持同步子 Agent 的完整作用域流；异步子 Agent 和原生 HITL 后置。
 
 ## 当前交付范围
@@ -50,7 +50,7 @@
 - `values.todos`、工具和子 Agent 生命周期进入对应轮次的折叠执行过程；
 - 工具开始、完成和失败原位更新，不生成重复事件行；
 - `write_todos`、`task` 由计划和子 Agent 投影展示，不重复显示成普通工具；
-- 旧 `/chat` SSE 只保留兼容，不继续增加事件类型。
+- 调试、WebApp、辅助 Agent、OpenAPI 和微信后台调用统一创建 `AgentRun`，不再使用旧 `/chat` SSE 字段。
 
 ## 文档导航
 
@@ -58,6 +58,11 @@
 - [前端工作台计划](./02-workbench-frontend.md)
 - [路线图与验收](./03-roadmap-and-acceptance.md)
 - [M1 契约 ADR](./04-m1-contract-adr.md)
+- [流式架构升级与运行原理](./05-streaming-implementation-and-lessons.md)
+- [V3 流式实现纠正记录](./06-v3-streaming-corrections.md)
+- [旧流式执行链删除说明](./07-legacy-stream-removal.md)
+- [Workspace 存储与 Sandbox 同步纠正说明](./08-workspace-storage-and-sandbox-corrections.md)
+- [Agent 分层记忆机制纠正说明](./09-layered-memory-corrections.md)
 - [执行规格](../../.codex-tasks/20260822-agent-workbench-upgrade/SPEC.md)
 - [任务清单](../../.codex-tasks/20260822-agent-workbench-upgrade/TODO.csv)
 - [当前进度](../../.codex-tasks/20260822-agent-workbench-upgrade/PROGRESS.md)

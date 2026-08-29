@@ -1,12 +1,15 @@
 # 流式协议与后端实施计划
 
+> 本文记录改造前的能力盘点和实施决策，文中的 `GraphExecutionDriver`、`QueueEvent` 生产链已经
+> 完成迁移并删除。当前实现见 [旧流式执行链删除说明](./07-legacy-stream-removal.md)。
+
 ## 1. 当前能力与缺口
 
 后端已经具备以下基础：
 
 - `GraphExecutionDriver` 驱动 Deep Agents/LangGraph 运行；
 - `QueueEvent.TODO_UPDATE`、`SUB_AGENT_DELEGATE`、`SUB_AGENT_END`；
-- `AgentThought` 和 `MessageAgentThought` 中的 Todo、委派、层级和最终轨迹字段；
+- 旧 `AgentThought` 和 `MessageAgentThought` 曾承载 Todo、委派、层级和最终轨迹字段；
 - 稳定 `thread_id`、LangGraph checkpointer、同步和异步子 Agent 配置；
 - `QueueEvent` 到 SSE 的业务翻译边界。
 
@@ -23,9 +26,9 @@
 | 运行持久化 | 主要在结束后写入 | 运行状态权威记录 + 短期有序事件重放 |
 | 浏览器事件安全 | 通用字段裁剪 | 固定安全投影和主体权限校验 |
 
-`internal/core/agent_v2/agents/execution.py` 当前主要消费 `messages` 和 `updates`。
-实施时需要基于实际安装版本验证 `CompiledStateGraph.stream_events(version="v3")`、
-子图/namespace 与 Deep Agents 中间件事件，不应根据文档示例猜测事件结构。
+`internal/core/agent_v2/execution/agent_executor.py` 直接消费
+`CompiledStateGraph.stream_events(version="v3")` 的原始事件。协议层再根据实际事件中的
+namespace、message 和 tool 元数据完成投影，不根据旧版 `messages/updates` 二元组猜测结构。
 
 ## 2. 原生能力决策表
 
@@ -65,8 +68,7 @@ POST command
   -> 原生事件安全投影
   -> Redis Stream 追加有序事件
   -> SSE 实时发送
-  -> 更新 agent_run 最终状态与摘要
-  -> 兼容投影到 MessageAgentThought
+  -> 更新 agent_run 最终状态、Message 和快照
 ```
 
 ## 4. 协议端点
@@ -102,19 +104,17 @@ POST /apps/:appId/threads/:threadId/stream
 
 服务端应从原生 v3 事件映射到协议 channel，而不是先压成 `QueueEvent` 再反向推断：
 
-| 原生信息 | 工作台投影 | 兼容 QueueEvent |
-| --- | --- | --- |
-| root messages/messages-tuple | 根对话增量 | `AGENT_MESSAGE` |
-| Todo state/update | 计划快照或变更 | `TODO_UPDATE` |
-| subgraph namespace start | 子 Agent running 节点 | `SUB_AGENT_DELEGATE` |
-| scoped message/tool event | 对应 namespace 时间线项 | 调试端旧 UI 可忽略 |
-| subgraph namespace end/error | completed/failed 节点 | `SUB_AGENT_END` |
-| file/backend artifact | artifact upsert | workspace file 兼容事件 |
-| interrupt | approval_required | 旧端提示需升级或只读 |
-| run terminal state | completed/failed/cancelled | 结束/错误事件 |
+| 原生信息 | Agent Protocol 投影 |
+| --- | --- |
+| root messages/messages-tuple | `messages` 根对话增量 |
+| Todo state/update | `values.todos` 计划快照或变更 |
+| subgraph namespace start/end | 带 namespace 的 `lifecycle` 子 Agent 状态 |
+| scoped message/tool event | 对应 namespace 的 `messages/tools` 事件 |
+| file/backend artifact | `values.files` 工作区快照 |
+| interrupt | `lifecycle` 中断状态 |
+| run terminal state | `lifecycle` completed/failed/cancelled |
 
-兼容层保留现有旧 API 行为；新字段只做向后兼容添加。新工作台不得依赖
-`SUB_AGENT_DELEGATE/END` 拼装完整子 Agent 轨迹。
+旧 QueueEvent 兼容层已经删除，客户端不得再根据 `SUB_AGENT_DELEGATE/END` 等旧事件拼装轨迹。
 
 ### 4.2 顺序、幂等和重连
 
@@ -136,7 +136,9 @@ Redis Stream key 必须包含环境和租户隔离维度，TTL 与最大长度�
 | LangGraph checkpoint | thread state、interrupt、恢复位置 | 随线程策略 |
 | PostgreSQL `agent_run` | run 状态、主体、时间、错误摘要、usage、最终游标 | 业务审计周期 |
 | Redis Stream | 已裁剪的有序实时事件和断线重放 | 短期 TTL/长度限制 |
-| `MessageAgentThought` | 旧页面兼容、最终可查询轨迹投影 | 沿用现有消息策略 |
+
+旧 `MessageAgentThought` 投影不属于 LangGraph 状态，也不属于 Agent Protocol。测试阶段不保留旧
+历史兼容，因此模型与响应字段均已删除；运行详情通过协议事件、当前 state 和持久化 Run 事件读取。
 
 建议新增 `agent_run` 最小字段：
 
@@ -167,21 +169,21 @@ trace 引用。表结构必须沿用现有模型、迁移和软删除/审计约�
 
 ## 7. 建议代码归属
 
-以下为实施候选路径，Milestone 1 后可按仓库既有命名微调：
+当前实现归属如下：
 
 | 责任 | 现有/建议位置 |
 | --- | --- |
-| 原生 graph 事件读取 | 修改 `internal/core/agent_v2/agents/execution.py` |
-| v3 事件到协议 channel 投影 | 新增 `internal/core/agent_v2/events/stream_projection.py` |
-| 固定安全投影 | 新增 `internal/core/agent_v2/events/visibility.py` |
-| Redis replay session | 扩展 `internal/core/agent_v2/events/session.py`，必要时拆分 replay store |
-| 序列化与扩展字段 | 扩展 `internal/core/agent_v2/events/serialization.py` |
-| run 业务编排 | 新增 `internal/service/agent_run_service.py` |
-| 创建者命令/流路由 | 归入现有 app API blueprint/controller |
-| Web App 命令/流路由 | 归入现有 web-app API blueprint/controller |
-| 最终兼容投影 | 扩展 `internal/core/agent_v2/events/translator.py` |
+| 原生 graph 事件读取 | `internal/core/agent_v2/execution/agent_executor.py` |
+| v3 事件到协议 channel 投影 | `internal/core/agent_v2/protocol/event_projector.py` |
+| 固定安全投影 | `internal/core/agent_v2/protocol/event_sanitizer.py` |
+| Redis 短期重放与通知 | `internal/repository/agent_workbench_redis_repository.py` |
+| Run 业务编排 | `internal/service/agent_workbench_service.py` |
+| Run 持久化 | `internal/service/agent_workbench_run_service.py` |
+| 各来源 Run 构造 | `internal/service/agent_workbench_service.py` 内部方法 |
+| 创建者/发布态/助手/OpenAPI HTTP 适配 | 对应拆分 handler 和 router 模块 |
 
-`runtime/factory.py`、`runtime/subagents.py` 和 `persistence/checkpoint.py` 应继续只负责
+`runtime/deep_agent_factory.py`、`runtime/subagent_spec_adapter.py` 和
+`persistence/langgraph_checkpoint_provider.py` 应继续只负责
 原生 runtime 装配，不承载 HTTP、Redis replay 或前端展示逻辑。
 
 ## 8. 后端测试范围
@@ -191,7 +193,7 @@ trace 引用。表结构必须沿用现有模型、迁移和软删除/审计约�
 - 顺序与幂等：重复订阅、断线、重连、过期 cursor、慢消费者；
 - 权限：跨租户、跨 app、伪造 thread/run、文件越权；
 - 持久化：queued/running/terminal 状态、异常恢复、服务重启；
-- 兼容：旧 `/chat` SSE 和 `MessageAgentThought` 回归；
+- 清理：运行代码不得再引用旧 `/chat` SSE、QueueEvent 或 `task_id` 取消链；
 - 负载：并发连接、事件速率、Redis 内存、首事件/首 token 延迟。
 
 具体执行门禁见 [路线图与验收](./03-roadmap-and-acceptance.md)。

@@ -71,9 +71,9 @@ LangGraph 标准服务或极薄自定义 adapter，并记录原生方案为何�
 - `agent_run` 模型、迁移、repository/service；
 - 创建者和发布态 command/stream 端点；
 - `thread_id/run_id/event_id/sequence` 全链路；
-- 从 GraphExecutionDriver 读取 v3 原生事件并完成最小协议投影；
+- 从 `AgentExecutor.stream_events()` 读取 v3 原生事件并完成最小协议投影；
 - terminal status、错误码和最终摘要；
-- 保持旧 `/chat` SSE 可用。
+- 调试、WebApp、辅助 Agent 和 OpenAPI 全部迁移到 Agent Protocol，并删除旧 `/chat` SSE。
 
 **验收**
 
