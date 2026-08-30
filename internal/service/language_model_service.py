@@ -52,14 +52,31 @@ class LanguageModelService(BaseService):
         # 1.调用语言模型管理器获取提供商列表
         providers = self.language_model_manager.get_providers()
 
+        # 一次性读取账号下的模型连接，避免按提供商重复查询数据库。
+        profiles_by_provider: dict[str, list[ProviderApiKey]] = {}
+        if account_id:
+            profiles = (
+                self.db.session.query(ProviderApiKey)
+                .filter(
+                    ProviderApiKey.account_id == account_id,
+                    ProviderApiKey.is_active == True,
+                )
+                .order_by(ProviderApiKey.created_at.desc())
+                .all()
+            )
+            for profile in profiles:
+                profiles_by_provider.setdefault(profile.provider_name, []).append(
+                    profile
+                )
+
         # 2.构建连接级模型列表。同一适配器下的不同 API Key/中转地址不能合并。
         language_models = []
         for provider in providers:
             # 3.获取提供商实体和模型实体列表
             provider_entity = provider.provider_entity
-            model_entities = self.get_enabled_model_entities(
-                provider_entity.name,
-                account_id,
+            provider_profiles = profiles_by_provider.get(provider_entity.name, [])
+            model_entities = self._build_enabled_model_entities(
+                provider_entity.name, provider_profiles
             )
             if model_types is not None:
                 model_entities = [
@@ -72,8 +89,7 @@ class LanguageModelService(BaseService):
                 )
                 grouped_models.setdefault(connection_id, []).append(model)
 
-            profiles = self._get_provider_profiles(provider_entity.name, account_id)
-            profile_by_id = {str(profile.id): profile for profile in profiles}
+            profile_by_id = {str(profile.id): profile for profile in provider_profiles}
             for connection_id, connection_models in grouped_models.items():
                 profile = profile_by_id.get(connection_id)
                 connection_name = self._get_connection_name(
@@ -85,7 +101,9 @@ class LanguageModelService(BaseService):
                         "name": provider_entity.name,
                         "provider_name": provider_entity.name,
                         "provider_label": provider_entity.label,
-                        "connection_id": "" if connection_id == "legacy" else connection_id,
+                        "connection_id": (
+                            "" if connection_id == "legacy" else connection_id
+                        ),
                         "connection_name": connection_name,
                         "position": provider.position,
                         "label": connection_name,
@@ -368,6 +386,17 @@ class LanguageModelService(BaseService):
             account_id,
             provider_api_key_id=provider_api_key_id,
         )
+        if not profiles:
+            return []
+
+        return self._build_enabled_model_entities(provider_name, profiles)
+
+    def _build_enabled_model_entities(
+        self,
+        provider_name: str,
+        profiles: list[ProviderApiKey],
+    ) -> list[ModelEntity]:
+        """从已读取的连接快照还原启用模型，不再发起数据库查询。"""
         if not profiles:
             return []
 
