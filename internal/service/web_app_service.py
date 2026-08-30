@@ -209,6 +209,15 @@ class WebAppService(BaseService):
         input_modalities = model_config.get("input_modalities", ["text"])
         if not isinstance(input_modalities, list):
             input_modalities = ["text"]
+        skills = [
+            {
+                "name": item.get("name", ""),
+                "version": item.get("version", ""),
+                "enabled": True,
+            }
+            for item in app_config.get("skills", [])
+            if isinstance(item, dict) and item.get("enabled", True) and item.get("name")
+        ]
 
         # 4.提取接口需要的信息并返回。
         return {
@@ -224,6 +233,7 @@ class WebAppService(BaseService):
                 "native_file_input": bool(model_config.get("native_file_input", False)),
                 "text_to_speech": app_config.get("text_to_speech"),
                 "speech_to_text": app_config.get("speech_to_text"),
+                "skills": skills,
             },
         }
 

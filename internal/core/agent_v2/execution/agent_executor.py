@@ -128,6 +128,7 @@ class AgentExecutor(Serializable):
                 app_description=self.agent_config.app_description,
                 preset_prompt=self.agent_config.preset_prompt,
                 memory_enabled=self.agent_config.memory_enabled,
+                selected_skills=self.agent_config.selected_skills,
             ),
             review_config=self.agent_config.review_config,
             max_model_calls=self.agent_config.max_model_calls,

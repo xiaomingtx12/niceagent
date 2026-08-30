@@ -154,6 +154,7 @@ class AgentWorkbenchRunFactory(BaseService):
             query=run_input.query,
             image_urls=run_input.image_urls,
             attachments=attachments,
+            selected_skills=run_input.selected_skills,
             input_message_id=run_input.input_message_id,
         )
         return WorkbenchRun(
@@ -225,6 +226,7 @@ class AgentWorkbenchRunFactory(BaseService):
             query=run_input.query,
             image_urls=run_input.image_urls,
             attachments=attachments,
+            selected_skills=run_input.selected_skills,
             input_message_id=run_input.input_message_id,
         )
         return WorkbenchRun(
@@ -278,6 +280,7 @@ class AgentWorkbenchRunFactory(BaseService):
             query=run_input.query,
             image_urls=run_input.image_urls,
             attachments=attachments,
+            selected_skills=run_input.selected_skills,
             extra_tools=tools,
             llm=llm,
             input_message_id=run_input.input_message_id,
@@ -362,6 +365,7 @@ class AgentWorkbenchRunFactory(BaseService):
             query=run_input.query,
             image_urls=run_input.image_urls,
             attachments=attachments,
+            selected_skills=run_input.selected_skills,
             input_message_id=run_input.input_message_id,
         )
         return WorkbenchRun(

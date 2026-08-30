@@ -41,6 +41,7 @@ class AgentInvocation(BaseModel):
     query: str
     image_urls: tuple[str, ...] = Field(default_factory=tuple)
     attachments: tuple[AgentAttachment, ...] = Field(default_factory=tuple)
+    selected_skills: tuple[str, ...] = Field(default_factory=tuple, max_length=20)
     opening_statement: str = ""
     extra_tools: tuple[BaseTool, ...] = Field(default_factory=tuple)
     llm: BaseChatModel | None = None
@@ -59,6 +60,7 @@ class AgentRuntimePrepareReq(BaseModel):
     principal_id: UUID
     memory_enabled: bool = Field(default=False, strict=True)
     skill_bindings: tuple[SkillBindingReq, ...] = Field(default_factory=tuple)
+    selected_skills: tuple[str, ...] = Field(default_factory=tuple, max_length=20)
     subagents: tuple[SubAgentConfig, ...] = Field(default_factory=tuple)
 
 

@@ -58,6 +58,7 @@ class WorkbenchRunInput(BaseModel):
     query: StrictStr = Field(min_length=1)
     image_urls: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=10)
     file_ids: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=5)
+    selected_skills: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=20)
     input_message_id: StrictStr | None = None
     end_user_id: UUID | None = None
 

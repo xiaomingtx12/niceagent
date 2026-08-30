@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -55,15 +55,29 @@ class WorkbenchCommandInputReq(BaseModel):
     query: StrictStr | None = None
     image_urls: list[StrictStr] = Field(default_factory=list, max_length=10)
     file_ids: list[StrictStr] = Field(default_factory=list, max_length=5)
+    selected_skills: list[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = (
+        Field(default_factory=list, max_length=20)
+    )
     end_user_id: UUID | None = None
 
-    @field_validator("image_urls", "file_ids", mode="before")
+    @field_validator("image_urls", "file_ids", "selected_skills", mode="before")
     def normalize_list(value: Any) -> list[Any]:
         if value is None:
             return []
         if not isinstance(value, list):
             raise ValueError("必须是数组")
         return value
+
+    @field_validator("selected_skills")
+    @classmethod
+    def validate_selected_skills(cls, value: list[str]) -> list[str]:
+        """规范化并拒绝重复的本轮 Skill 选择。"""
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("所选 Skill 名称不能为空")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("所选 Skill 不能重复")
+        return normalized
 
 
 class WorkbenchCommandReq(BaseModel):
@@ -109,6 +123,7 @@ class WorkbenchCommandReq(BaseModel):
             query=query,
             image_urls=tuple(value.image_urls),
             file_ids=tuple(value.file_ids),
+            selected_skills=tuple(value.selected_skills),
             input_message_id=message.id if message else None,
             end_user_id=value.end_user_id,
         )

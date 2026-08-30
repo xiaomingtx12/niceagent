@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -29,14 +30,21 @@ class SkillContextAssembler:
         *,
         skills: list[Any],
         subagents: list[dict[str, Any]] | None,
+        selected_skill_names: Sequence[str] = (),
     ) -> SkillProjection:
         """装配主 Agent 和 SubAgent 的只读 Skill 路由。"""
         projection = SkillProjection()
         enabled_skills = [skill for skill in skills if getattr(skill, "enabled", True)]
-        if enabled_skills:
-            projection.routes["/skills/"] = SkillCatalogBackend(enabled_skills)
+        selected_names = set(selected_skill_names)
+        main_skills = (
+            [skill for skill in enabled_skills if skill.name in selected_names]
+            if selected_names
+            else enabled_skills
+        )
+        if main_skills:
+            projection.routes["/skills/"] = SkillCatalogBackend(main_skills)
             projection.sources = ["/skills/"]
-            for skill in enabled_skills:
+            for skill in main_skills:
                 projection.files.extend(
                     _package_files(root=f"/skills/{skill.name}", skill=skill)
                 )

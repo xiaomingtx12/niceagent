@@ -37,6 +37,7 @@ class AgentConfig(BaseModel):
     max_model_calls: int = Field(default=10, ge=1, strict=True)
     max_tool_calls: int = Field(default=40, ge=1, strict=True)
     memory_enabled: bool = Field(default=False, strict=True)
+    selected_skills: tuple[str, ...] = Field(default_factory=tuple, max_length=20)
     subagents: list[SubAgentConfig] = Field(default_factory=list)
 
     @field_validator("review_config", mode="before")

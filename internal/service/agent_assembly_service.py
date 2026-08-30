@@ -102,6 +102,10 @@ class AgentAssemblyService(BaseService):
         """
         build_started_at = time.monotonic()
         phase_started_at = build_started_at
+        selected_skills = self._validate_selected_skills(
+            req.app_config,
+            req.selected_skills,
+        )
         # 1.加载本次调用使用的主模型。
         llm = req.llm
         if llm is None:
@@ -142,6 +146,7 @@ class AgentAssemblyService(BaseService):
                 principal_id=(req.end_user_id or req.user_id or req.created_by),
                 memory_enabled=req.app_config.long_term_memory.enable,
                 skill_bindings=req.app_config.skills,
+                selected_skills=selected_skills,
                 subagents=runtime_subagents,
             )
         )
@@ -183,11 +188,30 @@ class AgentAssemblyService(BaseService):
                 subagents=runtime_subagents,
                 tools=tools,
                 opening_statement=req.opening_statement,
+                selected_skills=selected_skills,
             ),
         )
         self._log_build_timing(req, "graph", phase_started_at)
         self._log_build_timing(req, "total", build_started_at)
         return agent, llm
+
+    @staticmethod
+    def _validate_selected_skills(
+        app_config: AgentAppConfigReq,
+        selected_skills: Sequence[str],
+    ) -> tuple[str, ...]:
+        """确认客户端选择的 Skill 已在当前运行配置中挂载并启用。"""
+        if not selected_skills:
+            return ()
+        enabled_names = {
+            binding.name for binding in app_config.skills if binding.enabled
+        }
+        missing = sorted(set(selected_skills) - enabled_names)
+        if missing:
+            raise ValidateErrorException(
+                f"所选 Skill 未挂载或未启用: {', '.join(missing)}"
+            )
+        return tuple(selected_skills)
 
     @staticmethod
     def _log_build_timing(
@@ -271,6 +295,7 @@ class AgentAssemblyService(BaseService):
             )
             skill_projection = SkillContextAssembler().build(
                 skills=skills,
+                selected_skill_names=req.selected_skills,
                 subagents=[
                     item.model_dump(mode="json", exclude_none=True)
                     for item in req.subagents
@@ -345,6 +370,7 @@ class AgentAssemblyService(BaseService):
         subagents: Sequence[SubAgentConfig],
         tools: list[BaseTool],
         opening_statement: str = "",
+        selected_skills: Sequence[str] = (),
     ) -> AgentConfig:
         """把已处理的 AppConfig 转成 Agent 核心配置。"""
         return AgentConfig(
@@ -360,6 +386,7 @@ class AgentAssemblyService(BaseService):
             max_model_calls=app_config.max_model_calls,
             max_tool_calls=app_config.max_tool_calls,
             memory_enabled=app_config.long_term_memory.enable,
+            selected_skills=tuple(selected_skills),
         )
 
     def _build_configured_tools(
