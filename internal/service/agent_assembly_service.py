@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 import logging
+import time
 from uuid import UUID
 
 from flask import current_app
@@ -12,7 +13,6 @@ from deepagents.backends.protocol import BackendProtocol
 from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
-from pydantic import ValidationError
 from sqlalchemy.orm import Session, sessionmaker
 
 from config.config import Config
@@ -58,7 +58,7 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
-from internal.exception import AgentInvocationException
+from internal.exception import AgentInvocationException, ValidateErrorException
 from internal.model import App
 from internal.schema.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from internal.schema.agent_runtime_schema import AgentInvocation, AgentRuntimePrepareReq
@@ -100,6 +100,8 @@ class AgentAssemblyService(BaseService):
 
         返回的执行器只对应当前 Run，不能作为数据库中的可复用实例保存。
         """
+        build_started_at = time.monotonic()
+        phase_started_at = build_started_at
         # 1.加载本次调用使用的主模型。
         llm = req.llm
         if llm is None:
@@ -109,6 +111,8 @@ class AgentAssemblyService(BaseService):
                 req.app_config.model_config_data,
                 account_id=req.account_id,
             )
+        self._log_build_timing(req, "model", phase_started_at)
+        phase_started_at = time.monotonic()
         # 2.把额外工具和应用配置中的工具转换成 LangChain 工具实例。
         tools = list(req.extra_tools)
         tools.extend(
@@ -118,12 +122,16 @@ class AgentAssemblyService(BaseService):
                 app_id=req.app_id,
             )
         )
+        self._log_build_timing(req, "tools", phase_started_at)
+        phase_started_at = time.monotonic()
 
         # 3.解析 SubAgent 的模型、工具和发布应用引用。
         runtime_subagents, subagent_tools, subagent_models = self._prepare_subagents(
             req.app_config.subagents,
             account_id=req.account_id,
         )
+        self._log_build_timing(req, "subagents", phase_started_at)
+        phase_started_at = time.monotonic()
         # 4.按会话作用域装配 Workspace、Skill、Memory、Sandbox 等资源。
         runtime = self._prepare_runtime(
             AgentRuntimePrepareReq(
@@ -137,6 +145,8 @@ class AgentAssemblyService(BaseService):
                 subagents=runtime_subagents,
             )
         )
+        self._log_build_timing(req, "runtime", phase_started_at)
+        phase_started_at = time.monotonic()
         try:
             # 5.先把附件投影到 Workspace；此时资源仍由装配服务持有。
             self.agent_attachment_service.materialize(
@@ -147,6 +157,8 @@ class AgentAssemblyService(BaseService):
             # 附件投影失败时执行器尚未接管资源；关闭操作不得覆盖原异常。
             self._close_unowned_runtime(runtime.backend)
             raise
+        self._log_build_timing(req, "attachments", phase_started_at)
+        phase_started_at = time.monotonic()
 
         # AgentExecutor 构造失败时会自行关闭 Backend，避免这里重复释放。
         agent = AgentExecutor(
@@ -173,7 +185,24 @@ class AgentAssemblyService(BaseService):
                 opening_statement=req.opening_statement,
             ),
         )
+        self._log_build_timing(req, "graph", phase_started_at)
+        self._log_build_timing(req, "total", build_started_at)
         return agent, llm
+
+    @staticmethod
+    def _log_build_timing(
+        req: AgentInvocation,
+        stage: str,
+        started_at: float,
+    ) -> None:
+        """记录 Agent 装配子阶段耗时。"""
+        _logger.info(
+            "agent_assembly_timing app_id=%s conversation_id=%s stage=%s duration_ms=%.2f",
+            req.app_id,
+            req.conversation_id,
+            stage,
+            (time.monotonic() - started_at) * 1000,
+        )
 
     @staticmethod
     def _close_unowned_runtime(backend: BackendProtocol | None) -> None:
@@ -412,10 +441,10 @@ class AgentAssemblyService(BaseService):
 
             # 4.加载发布应用的工具、知识库和工作流能力。
             try:
-                target_config = AgentAppConfigReq.model_validate(
-                    self.app_config_service.get_app_config(target_app)
+                target_config = self.app_config_service.get_agent_runtime_config(
+                    target_app
                 )
-            except ValidationError as exc:
+            except ValidateErrorException as exc:
                 raise AgentInvocationException(
                     f"发布 Agent {target_app.name!r} 的运行配置无效: {exc}"
                 ) from exc

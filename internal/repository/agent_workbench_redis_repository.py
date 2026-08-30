@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, TypeAlias
 from uuid import UUID
 
@@ -103,29 +103,47 @@ class AgentWorkbenchRedisRepository:
             return None
 
     def append_event(self, run_id: UUID | str, event: WorkbenchEvent) -> bool:
-        """追加投影事件；Redis 故障时返回 False。"""
-        sequence = event.seq
-        if sequence < 1:
+        """用一次 Pipeline 往返追加事件并刷新 TTL；Redis 故障时返回 False。"""
+        return self.append_events(run_id, [event])
+
+    def append_events(
+        self,
+        run_id: UUID | str,
+        events: Sequence[WorkbenchEvent],
+    ) -> bool:
+        """批量追加有序事件并只刷新一次 TTL。"""
+        if not events:
+            return True
+        if any(event.seq < 1 for event in events):
             raise ValueError("工作台事件 seq 必须大于 0")
+        sequences = [event.seq for event in events]
+        if sequences != sorted(set(sequences)):
+            raise ValueError("工作台批量事件 seq 必须严格递增")
 
         try:
             stream_key = self._event_stream_key(run_id)
-            self.redis_client.xadd(
-                stream_key,
-                {
-                    "event": json.dumps(
-                        event.model_dump(mode="json"),
-                        ensure_ascii=True,
-                        separators=(",", ":"),
-                    ),
-                    "seq": str(sequence),
-                },
-                id=f"{sequence}-0",
-                maxlen=self.max_length,
-                approximate=True,
-            )
-            self.redis_client.expire(stream_key, self.ttl_seconds)
-            return True
+            # Redis 位于远端时，逐条写入会让每个流式片段承担一次网络往返；
+            # 非事务 Pipeline 保留事件顺序，并把一批 XADD 和 TTL 刷新合并提交。
+            with self.redis_client.pipeline(transaction=False) as pipeline:
+                for event in events:
+                    sequence = event.seq
+                    pipeline.xadd(
+                        stream_key,
+                        {
+                            "event": json.dumps(
+                                event.model_dump(mode="json"),
+                                ensure_ascii=True,
+                                separators=(",", ":"),
+                            ),
+                            "seq": str(sequence),
+                        },
+                        id=f"{sequence}-0",
+                        maxlen=self.max_length,
+                        approximate=True,
+                    )
+                pipeline.expire(stream_key, self.ttl_seconds)
+                results = pipeline.execute()
+            return len(results) == len(events) + 1 and all(results[:-1])
         except (RedisError, OSError):
             return False
 
@@ -140,26 +158,6 @@ class AgentWorkbenchRedisRepository:
         cursor = max(0, int(after_sequence))
         stream_key = self._event_stream_key(run_id)
         try:
-            oldest_entries = self.redis_client.xrange(
-                stream_key,
-                min="-",
-                max="+",
-                count=1,
-            )
-            oldest_event_sequence = 0
-            if oldest_entries:
-                oldest_fields = oldest_entries[0][1]
-                oldest_value = oldest_fields.get("seq") or oldest_fields.get(b"seq")
-                try:
-                    oldest_event_sequence = int(oldest_value or 0)
-                except (TypeError, ValueError):
-                    oldest_event_sequence = 0
-                if (
-                    oldest_event_sequence
-                    and cursor > 0
-                    and cursor < oldest_event_sequence - 1
-                ):
-                    raise WorkbenchReplayCursorExpired(oldest_event_sequence)
             streams = self.redis_client.xread(
                 {stream_key: f"{cursor}-0"},
                 count=self.max_length,
@@ -177,12 +175,16 @@ class AgentWorkbenchRedisRepository:
             if (decoded := self._decode_event(entry)) is not None
         ]
         decoded_events.sort(key=lambda item: item[0])
+        oldest_event_sequence = decoded_events[0][0] if decoded_events else None
+        if (
+            oldest_event_sequence is not None
+            and cursor > 0
+            and cursor < oldest_event_sequence - 1
+        ):
+            raise WorkbenchReplayCursorExpired(oldest_event_sequence)
         return WorkbenchReplayBatchResp(
             events=[event for sequence, event in decoded_events if sequence > cursor],
-            oldest_event_sequence=(
-                oldest_event_sequence
-                or (decoded_events[0][0] if decoded_events else None)
-            ),
+            oldest_event_sequence=oldest_event_sequence,
         )
 
     def _decode_event(

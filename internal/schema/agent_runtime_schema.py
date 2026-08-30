@@ -29,6 +29,9 @@ class AgentInvocation(BaseModel):
     app_name: str
     app_description: str
     app_config: AgentAppConfigReq
+    # 仅可信的内部调用可声明配置已经由 AppConfigService 水合。
+    # 普通工作台 Run 默认在后台执行前重新读取最新配置。
+    app_config_hydrated: bool = Field(default=False, strict=True)
     conversation_id: UUID
     message_id: UUID
     created_by: UUID

@@ -139,14 +139,26 @@ class WorkbenchEvent(BaseModel):
 
 
 class WorkbenchSubscriptionReq(BaseModel):
-    """SSE 订阅过滤条件。"""
+    """SSE 订阅过滤条件。
+
+    ``input`` 和 ``checkpoints`` 是 LangGraph SDK 根订阅的控制 channel。
+    工作台当前不发布这两类事件，但必须接受它们，才能兼容官方
+    ``useStream`` 的默认订阅集合。
+    """
 
     model_config = ConfigDict(extra="ignore")
 
     since: StrictInt = Field(default=0, ge=0)
-    channels: list[Literal["messages", "values", "tools", "lifecycle"]] = Field(
-        default_factory=list
-    )
+    channels: list[
+        Literal[
+            "messages",
+            "values",
+            "tools",
+            "lifecycle",
+            "input",
+            "checkpoints",
+        ]
+    ] = Field(default_factory=list)
     namespaces: list[list[StrictStr]] = Field(default_factory=list)
     depth: StrictInt | None = Field(default=None, ge=0)
 

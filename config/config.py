@@ -43,6 +43,18 @@ class Config:
         self.AGENT_CHECKPOINT_BACKEND = str(
             _get_env("AGENT_CHECKPOINT_BACKEND")
         ).lower()
+        self.AGENT_CHECKPOINT_POOL_MIN_SIZE = int(
+            _get_env("AGENT_CHECKPOINT_POOL_MIN_SIZE")
+        )
+        self.AGENT_CHECKPOINT_POOL_MAX_SIZE = int(
+            _get_env("AGENT_CHECKPOINT_POOL_MAX_SIZE")
+        )
+        self.AGENT_CHECKPOINT_POOL_TIMEOUT_SECONDS = float(
+            _get_env("AGENT_CHECKPOINT_POOL_TIMEOUT_SECONDS")
+        )
+        self.AGENT_CHECKPOINT_POOL_MAX_WAITING = int(
+            _get_env("AGENT_CHECKPOINT_POOL_MAX_WAITING")
+        )
         self.AGENT_MEMORY_BACKEND = str(_get_env("AGENT_MEMORY_BACKEND")).lower()
         self.AGENT_SANDBOX_PROVIDER = str(_get_env("AGENT_SANDBOX_PROVIDER")).lower()
         self.AGENT_SANDBOX_SNAPSHOT_ID = _get_env("AGENT_SANDBOX_SNAPSHOT_ID") or None
@@ -148,6 +160,17 @@ class Config:
             raise ValueError(
                 "AGENT_CHECKPOINT_BACKEND 必须是 postgres、memory 或 disabled"
             )
+        if self.AGENT_CHECKPOINT_POOL_MIN_SIZE < 0:
+            raise ValueError("AGENT_CHECKPOINT_POOL_MIN_SIZE 不能小于 0")
+        if (
+            self.AGENT_CHECKPOINT_POOL_MAX_SIZE <= 0
+            or self.AGENT_CHECKPOINT_POOL_MAX_SIZE < self.AGENT_CHECKPOINT_POOL_MIN_SIZE
+        ):
+            raise ValueError("AGENT_CHECKPOINT_POOL_MAX_SIZE 必须大于等于 MIN_SIZE")
+        if self.AGENT_CHECKPOINT_POOL_TIMEOUT_SECONDS <= 0:
+            raise ValueError("AGENT_CHECKPOINT_POOL_TIMEOUT_SECONDS 必须大于 0")
+        if self.AGENT_CHECKPOINT_POOL_MAX_WAITING < 0:
+            raise ValueError("AGENT_CHECKPOINT_POOL_MAX_WAITING 不能小于 0")
         if self.AGENT_MEMORY_BACKEND not in {"postgres", "memory"}:
             raise ValueError(
                 "AGENT_MEMORY_BACKEND 不允许关闭，必须是 postgres 或 memory"

@@ -10,6 +10,7 @@ from uuid import UUID
 
 from injector import inject
 from sqlalchemy import and_, func, or_, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from internal.entity import (
     WORKBENCH_ACTIVE_STATUSES,
@@ -123,18 +124,60 @@ class AgentWorkbenchRunService(BaseService):
             if status.value in WORKBENCH_TERMINAL_STATUSES:
                 row.finished_at = now
 
+    def finalize_run(
+        self,
+        run: WorkbenchRun,
+        status: WorkbenchRunStatus,
+        *,
+        error_message: str = "",
+        message_updates: Mapping[str, Any] | None = None,
+    ) -> None:
+        """在一个事务中收敛 Run 状态和对应业务消息。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        with self.db.auto_commit():
+            row = self.db.session.get(AgentRun, run.run_id)
+            if row is not None:
+                row.status = status.value
+                row.error_message = error_message
+                row.finished_at = now
+            if message_updates:
+                message = self.db.session.get(Message, run.spec.message_id)
+                if message is not None:
+                    for field, value in message_updates.items():
+                        setattr(message, field, value)
+
     def record_event(
         self,
         run: WorkbenchRun,
         event: WorkbenchEvent,
     ) -> None:
-        """更新 Run 快照，只追加需要历史恢复的增量事件。"""
-        sequence = event.seq
-        method = event.method
+        """兼容单事件调用，并复用批量持久化实现。"""
+        self.record_events(run, [event])
 
-        # 消息增量只进入 Redis；values 只覆盖 AgentRun 的最新快照。
-        if method == "messages":
+    def record_events(
+        self,
+        run: WorkbenchRun,
+        events: list[WorkbenchEvent],
+    ) -> None:
+        """一次事务更新 Run 快照并追加一批需要历史恢复的事件。"""
+        durable_events = [event for event in events if event.method != "messages"]
+        if not durable_events:
             return
+
+        latest_sequence = max(event.seq for event in durable_events)
+        latest_snapshot = next(
+            (
+                event.params.data
+                for event in reversed(durable_events)
+                if event.method == "values" and isinstance(event.params.data, dict)
+            ),
+            None,
+        )
+        persisted_payloads = {
+            event.seq: event.model_dump(mode="json")
+            for event in durable_events
+            if event.method in _PERSISTED_EVENT_METHODS
+        }
 
         with self.db.auto_commit():
             row = self.db.session.get(AgentRun, run.run_id)
@@ -142,24 +185,25 @@ class AgentWorkbenchRunService(BaseService):
                 return
             row.last_event_sequence = max(
                 int(row.last_event_sequence or 0),
-                sequence,
+                latest_sequence,
             )
-            snapshot = event.params.data if method == "values" else None
-            if isinstance(snapshot, dict):
-                run.state_snapshot = snapshot
-                row.state_snapshot = snapshot
-            if method not in _PERSISTED_EVENT_METHODS:
-                return
-            existing = self.db.session.get(
-                AgentRunEvent,
-                {"run_id": run.run_id, "sequence": sequence},
-            )
-            if existing is None:
-                self.db.session.add(
-                    AgentRunEvent(
-                        run_id=run.run_id,
-                        sequence=sequence,
-                        payload=event.model_dump(mode="json"),
+            if latest_snapshot is not None:
+                run.state_snapshot = latest_snapshot
+                row.state_snapshot = latest_snapshot
+            if persisted_payloads:
+                statement = pg_insert(AgentRunEvent).values(
+                    [
+                        {
+                            "run_id": run.run_id,
+                            "sequence": sequence,
+                            "payload": payload,
+                        }
+                        for sequence, payload in persisted_payloads.items()
+                    ]
+                )
+                self.db.session.execute(
+                    statement.on_conflict_do_nothing(
+                        index_elements=["run_id", "sequence"]
                     )
                 )
 
@@ -167,21 +211,39 @@ class AgentWorkbenchRunService(BaseService):
         """按主键读取 Run。"""
         return self.db.session.get(AgentRun, run_id)
 
-    def get_run_by_input_message_id(
+    def get_start_candidates(
         self,
         *,
         thread_id: UUID,
-        input_message_id: str,
-    ) -> AgentRun | None:
-        """按线程和协议消息 ID 读取已接受的 Run。"""
-        return (
+        input_message_id: str | None,
+    ) -> tuple[AgentRun | None, AgentRun | None]:
+        """一次查询取得幂等 Run 和当前活动 Run。"""
+        candidate_filters = [AgentRun.status.in_(WORKBENCH_ACTIVE_STATUSES)]
+        if input_message_id is not None:
+            candidate_filters.append(AgentRun.input_message_id == input_message_id)
+        rows = (
             self.db.session.query(AgentRun)
             .filter(
                 AgentRun.thread_id == thread_id,
-                AgentRun.input_message_id == input_message_id,
+                or_(*candidate_filters),
             )
-            .one_or_none()
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .all()
         )
+        duplicate_run = next(
+            (
+                row
+                for row in rows
+                if input_message_id is not None
+                and row.input_message_id == input_message_id
+            ),
+            None,
+        )
+        active_run = next(
+            (row for row in rows if row.status in WORKBENCH_ACTIVE_STATUSES),
+            None,
+        )
+        return duplicate_run, active_run
 
     def get_latest_run(
         self,
@@ -263,7 +325,9 @@ class AgentWorkbenchRunService(BaseService):
                 .filter(
                     AgentRunEvent.run_id == run_id,
                     AgentRunEvent.sequence > after_sequence,
-                    AgentRunEvent.payload["method"].astext.in_(_PERSISTED_EVENT_METHODS),
+                    AgentRunEvent.payload["method"].astext.in_(
+                        _PERSISTED_EVENT_METHODS
+                    ),
                 )
                 .order_by(AgentRunEvent.sequence.asc())
                 .all()
@@ -275,6 +339,8 @@ class AgentWorkbenchRunService(BaseService):
     def list_events_by_run(
         self,
         run_ids: list[UUID],
+        *,
+        close_session: bool = True,
     ) -> dict[UUID, list[WorkbenchEvent]]:
         """批量读取多个 Run 的持久化事件。"""
         if not run_ids:
@@ -284,7 +350,9 @@ class AgentWorkbenchRunService(BaseService):
                 self.db.session.query(AgentRunEvent)
                 .filter(
                     AgentRunEvent.run_id.in_(run_ids),
-                    AgentRunEvent.payload["method"].astext.in_(_PERSISTED_EVENT_METHODS),
+                    AgentRunEvent.payload["method"].astext.in_(
+                        _PERSISTED_EVENT_METHODS
+                    ),
                 )
                 .order_by(
                     AgentRunEvent.run_id.asc(),
@@ -301,7 +369,8 @@ class AgentWorkbenchRunService(BaseService):
                 )
             return events
         finally:
-            self.db.session.close()
+            if close_session:
+                self.db.session.close()
 
     def is_cancel_requested(self, run_id: UUID) -> bool:
         """读取持久化取消请求，并立即释放 Session。"""
@@ -318,18 +387,6 @@ class AgentWorkbenchRunService(BaseService):
             }
         finally:
             self.db.session.close()
-
-    def get_latest_active_thread_run(self, thread_id: UUID) -> AgentRun | None:
-        """读取线程最新未终止 Run；调用方负责释放 Session。"""
-        return (
-            self.db.session.query(AgentRun)
-            .filter(
-                AgentRun.thread_id == thread_id,
-                AgentRun.status.in_(WORKBENCH_ACTIVE_STATUSES),
-            )
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-            .first()
-        )
 
     def has_unfinished_predecessor(self, run_id: UUID) -> bool:
         """判断当前 Run 之前是否还有未终止 Run。"""
@@ -424,86 +481,146 @@ class AgentWorkbenchRunService(BaseService):
         active_run: WorkbenchRun | None,
     ) -> WorkbenchStateResp:
         """水合首屏消息、历史事件和最新状态快照。"""
-        message_page = self.get_message_page(thread_id=thread_id)
-        visible_message_ids = {
-            UUID(message.id.removesuffix(":human"))
-            for message in message_page.messages
-            if message.type == "human" and message.id.endswith(":human")
-        }
-        persisted_runs = self.list_runs_for_messages(
-            thread_id=thread_id,
-            invoke_from=invoke_from,
-            message_ids=visible_message_ids,
-        )
-        latest_run = persisted_runs[-1] if persisted_runs else None
-        source_snapshot = (
-            active_run.state_snapshot
-            if active_run is not None and active_run.state_snapshot is not None
-            else latest_run.state_snapshot
-            if latest_run is not None and latest_run.state_snapshot is not None
-            else {}
-        )
-        values = dict(source_snapshot)
-        values["messages"] = [
-            message.model_dump(mode="json") for message in message_page.messages
-        ]
-        values["message_page"] = message_page.page.model_dump(mode="json")
-
-        events_by_run = self.list_events_by_run([run.id for run in persisted_runs])
-        historical_events: list[WorkbenchEvent] = []
-        for run in persisted_runs:
-            historical_events.extend(events_by_run.get(run.id, []))
-            snapshot = (
+        try:
+            message_page, persisted_runs = self._get_state_message_page_and_runs(
+                thread_id=thread_id,
+                invoke_from=invoke_from,
+            )
+            latest_run = persisted_runs[-1] if persisted_runs else None
+            source_snapshot = (
                 active_run.state_snapshot
-                if active_run is not None and active_run.run_id == run.id
-                else run.state_snapshot
+                if active_run is not None and active_run.state_snapshot is not None
+                else (
+                    latest_run.state_snapshot
+                    if latest_run is not None and latest_run.state_snapshot is not None
+                    else {}
+                )
             )
-            snapshot_event = _state_snapshot_event(
-                run.id,
-                int(run.last_event_sequence or 0),
-                snapshot,
+            values = {
+                key: source_snapshot[key]
+                for key in ("todos", "files")
+                if key in source_snapshot
+            }
+            values["messages"] = [
+                message.model_dump(mode="json") for message in message_page.messages
+            ]
+            values["message_page"] = message_page.page.model_dump(mode="json")
+
+            events_by_run = self.list_events_by_run(
+                [run.id for run in persisted_runs],
+                close_session=False,
             )
-            if snapshot_event is not None:
-                historical_events.append(snapshot_event)
-        known_event_ids = {event.event_id for event in historical_events}
-        if active_run is not None:
-            historical_events.extend(
-                event
-                for event in active_run.events
-                if event.method in {"tools", "lifecycle"}
-                and event.event_id not in known_event_ids
-            )
-            if all(run.id != active_run.run_id for run in persisted_runs):
+            historical_events: list[WorkbenchEvent] = []
+            for run in persisted_runs:
+                historical_events.extend(events_by_run.get(run.id, []))
+                snapshot = (
+                    active_run.state_snapshot
+                    if active_run is not None and active_run.run_id == run.id
+                    else run.state_snapshot
+                )
                 snapshot_event = _state_snapshot_event(
-                    active_run.run_id,
-                    active_run.last_event_sequence,
-                    active_run.state_snapshot,
+                    run.id,
+                    int(run.last_event_sequence or 0),
+                    snapshot,
                 )
                 if snapshot_event is not None:
                     historical_events.append(snapshot_event)
-        values["workbench_events"] = [
-            event.model_dump(mode="json")
-            for event in sorted(historical_events, key=lambda item: item.seq)
-        ]
+            known_event_ids = {event.event_id for event in historical_events}
+            if active_run is not None:
+                historical_events.extend(
+                    event
+                    for event in active_run.events
+                    if event.method in {"tools", "lifecycle"}
+                    and event.event_id not in known_event_ids
+                )
+                if all(run.id != active_run.run_id for run in persisted_runs):
+                    snapshot_event = _state_snapshot_event(
+                        active_run.run_id,
+                        active_run.last_event_sequence,
+                        active_run.state_snapshot,
+                    )
+                    if snapshot_event is not None:
+                        historical_events.append(snapshot_event)
+            values["workbench_events"] = [
+                event.model_dump(mode="json")
+                for event in sorted(historical_events, key=lambda item: item.seq)
+            ]
 
-        run_id = active_run.run_id if active_run is not None else latest_run.id if latest_run else None
-        status = active_run.status.value if active_run is not None else str(latest_run.status) if latest_run else "idle"
-        last_event_sequence = (
-            active_run.last_event_sequence
-            if active_run is not None
-            else int(latest_run.last_event_sequence or 0)
-            if latest_run is not None
-            else 0
+            run_id = (
+                active_run.run_id
+                if active_run is not None
+                else latest_run.id if latest_run else None
+            )
+            status = (
+                active_run.status.value
+                if active_run is not None
+                else str(latest_run.status) if latest_run else "idle"
+            )
+            last_event_sequence = (
+                active_run.last_event_sequence
+                if active_run is not None
+                else (
+                    int(latest_run.last_event_sequence or 0)
+                    if latest_run is not None
+                    else 0
+                )
+            )
+            return WorkbenchStateResp(
+                values=values,
+                next=["agent"] if status in {"queued", "running", "cancelling"} else [],
+                tasks=[],
+                metadata=WorkbenchRunMetadataResp(
+                    run_id=run_id,
+                    status=status,
+                    last_event_sequence=last_event_sequence,
+                ),
+            )
+        finally:
+            self.db.session.close()
+
+    def _get_state_message_page_and_runs(
+        self,
+        *,
+        thread_id: UUID,
+        invoke_from: InvokeFrom,
+        page_size: int = 20,
+    ) -> tuple[WorkbenchMessagePageResp, list[AgentRun]]:
+        """用一次查询取得首屏消息及其关联 Run。"""
+        limit = min(max(page_size, 1), 50)
+        descending_rows = (
+            self.db.session.query(Message, AgentRun)
+            .outerjoin(
+                AgentRun,
+                and_(
+                    AgentRun.message_id == Message.id,
+                    AgentRun.thread_id == thread_id,
+                    AgentRun.invoke_from == invoke_from.value,
+                ),
+            )
+            .filter(
+                Message.conversation_id == thread_id,
+                Message.is_deleted.is_(False),
+            )
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(limit + 1)
+            .all()
         )
-        return WorkbenchStateResp(
-            values=values,
-            next=["agent"] if status in {"queued", "running"} else [],
-            tasks=[],
-            metadata=WorkbenchRunMetadataResp(
-                run_id=run_id,
-                status=status,
-                last_event_sequence=last_event_sequence,
+        has_more = len(descending_rows) > limit
+        page_rows = descending_rows[:limit]
+        ascending_rows = list(reversed(page_rows))
+        messages = self._project_messages([message for message, _ in ascending_rows])
+        runs = [run for _, run in ascending_rows if run is not None]
+        return (
+            WorkbenchMessagePageResp(
+                messages=messages,
+                page=WorkbenchMessagePageInfoResp(
+                    has_more=has_more,
+                    next_before=(
+                        page_rows[-1][0].id if has_more and page_rows else None
+                    ),
+                ),
             ),
+            runs,
         )
 
     @staticmethod
@@ -535,7 +652,9 @@ class AgentWorkbenchRunService(BaseService):
                                 "input_token_count": int(row.input_token_count or 0),
                                 "output_token_count": int(row.output_token_count or 0),
                                 "cached_token_count": int(row.cached_token_count or 0),
-                                "reasoning_token_count": int(row.reasoning_token_count or 0),
+                                "reasoning_token_count": int(
+                                    row.reasoning_token_count or 0
+                                ),
                             }
                         },
                     )

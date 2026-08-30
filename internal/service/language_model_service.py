@@ -206,7 +206,7 @@ class LanguageModelService(BaseService):
             )
 
         parameters = dict(config.parameters)
-        api_key = get_api_key_for_provider(provider_name, account_id)
+        api_key = None
         provider_api_key_id = model_entity.attributes.get("provider_api_key_id")
         if provider_api_key_id:
             profile = (
@@ -221,6 +221,8 @@ class LanguageModelService(BaseService):
             )
             if profile:
                 api_key = profile.api_key
+        if not api_key:
+            api_key = get_api_key_for_provider(provider_name, account_id)
         parameters[self._get_api_key_param_name(provider_name)] = api_key
 
         model_class = provider.get_model_class(
@@ -430,7 +432,11 @@ class LanguageModelService(BaseService):
         return next(
             (
                 model
-                for model in self.get_enabled_model_entities(provider_name, account_id)
+                for model in self.get_enabled_model_entities(
+                    provider_name,
+                    account_id,
+                    provider_api_key_id=provider_connection_id,
+                )
                 if model.model_name == model_name
                 and (
                     not provider_connection_id

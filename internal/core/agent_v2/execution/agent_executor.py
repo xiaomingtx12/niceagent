@@ -12,6 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.runtime import RunControl
 from pydantic import ConfigDict, PrivateAttr
 
 from internal.core.agent_v2.execution.run_resource_manager import (
@@ -62,6 +63,7 @@ class AgentExecutor(Serializable):
     _run_lock: Lock = PrivateAttr(default_factory=Lock)
     _run_started: bool = PrivateAttr(False)
     _run_active: bool = PrivateAttr(False)
+    _run_control: RunControl | None = PrivateAttr(None)
     _resources_closed: bool = PrivateAttr(False)
     _last_run_usage: dict[str, Any] | None = PrivateAttr(default=None)
 
@@ -196,7 +198,18 @@ class AgentExecutor(Serializable):
                 return
             self._resources_closed = True
             self._run_active = False
+            self._run_control = None
         close_runtime_backends(self._backend)
+
+    def request_drain(self, reason: str = "cancel_requested") -> bool:
+        """请求当前图在下一个 superstep 边界协作式停止。"""
+        with self._run_lock:
+            control = self._run_control
+            active = self._run_active
+        if control is None or not active:
+            return False
+        control.request_drain(reason)
+        return True
 
     def stream_events(
         self,
@@ -212,6 +225,10 @@ class AgentExecutor(Serializable):
             self.close()
             raise FailException("智能体输入消息不能为空")
         self._begin_run()
+        run_control = RunControl()
+        with self._run_lock:
+            self._run_control = run_control
+        stream_kwargs = {**kwargs, "control": run_control}
         effective_config = self._merge_thread_config(config)
         usage_callback = UsageMetadataCallbackHandler()
         effective_config = append_usage_callback(effective_config, usage_callback)
@@ -223,7 +240,7 @@ class AgentExecutor(Serializable):
                 config=effective_config,
                 context=self._runtime_context,
                 version="v3",
-                **kwargs,
+                **stream_kwargs,
             )
         finally:
             try:

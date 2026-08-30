@@ -32,7 +32,8 @@ def create_postgres_saver(
     saver_factory: Callable[..., Any] = PostgresSaver,
 ) -> tuple[Any, Any]:
     """创建并初始化一个长期存活的 PostgresSaver 和连接池。"""
-    connection_string = _pg_uri_for_langgraph(config_factory().SQLALCHEMY_DATABASE_URI)
+    config = config_factory()
+    connection_string = _pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
     pool = connection_pool_factory(
         conninfo=connection_string,
         kwargs={
@@ -40,8 +41,10 @@ def create_postgres_saver(
             "prepare_threshold": 0,
             "row_factory": dict_row,
         },
-        min_size=1,
-        max_size=10,
+        min_size=config.AGENT_CHECKPOINT_POOL_MIN_SIZE,
+        max_size=config.AGENT_CHECKPOINT_POOL_MAX_SIZE,
+        timeout=config.AGENT_CHECKPOINT_POOL_TIMEOUT_SECONDS,
+        max_waiting=config.AGENT_CHECKPOINT_POOL_MAX_WAITING,
         check=ConnectionPool.check_connection,
         open=True,
     )
@@ -111,6 +114,17 @@ class CheckpointProvider:
             self._pool = None
             close_connection_pool(pool)
 
+    def get_pool_stats(self) -> dict[str, int]:
+        """返回当前进程 checkpoint pool 指标；尚未初始化时返回空字典。"""
+        with self._lock:
+            pool = self._pool
+            if pool is None:
+                return {}
+            get_stats = getattr(pool, "get_stats", None)
+            if not callable(get_stats):
+                return {}
+            return dict(get_stats())
+
 
 _provider = CheckpointProvider()
 
@@ -130,6 +144,11 @@ def get_configured_checkpointer(
 def close_postgres_saver() -> None:
     """关闭默认 Provider 的 PostgresSaver。"""
     _provider.close_postgres_saver()
+
+
+def get_postgres_pool_stats() -> dict[str, int]:
+    """读取默认 Provider 的连接池指标。"""
+    return _provider.get_pool_stats()
 
 
 def build_thread_id(
@@ -154,5 +173,6 @@ __all__ = [
     "close_postgres_saver",
     "create_postgres_saver",
     "get_configured_checkpointer",
+    "get_postgres_pool_stats",
     "get_postgres_saver",
 ]

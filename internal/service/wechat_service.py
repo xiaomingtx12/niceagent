@@ -226,6 +226,7 @@ class WechatService(BaseService):
                 app_name=app.name,
                 app_description=app.description,
                 app_config=app_config,
+                app_config_hydrated=True,
                 conversation_id=conversation.id,
                 message_id=message_id,
                 created_by=message.created_by,

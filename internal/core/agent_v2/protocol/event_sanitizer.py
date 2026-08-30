@@ -1,7 +1,7 @@
 """工作台协议事件的固定安全投影。
 
 这个模块只负责工作台的出站安全边界，不负责决定 Agent 如何执行。
-Todo、工具和子 Agent 事件分别通过 ``values``、``tools`` 和
+Todo、工具、Skill 和子 Agent 事件分别通过 ``values``、``tools`` 和
 ``lifecycle`` 通道保留；这里只删除不应进入浏览器的内部内容。
 """
 

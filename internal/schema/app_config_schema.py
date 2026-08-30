@@ -132,7 +132,13 @@ class TextToSpeechConfigReq(ToggleConfigReq):
 class ReviewInputConfigReq(ToggleConfigReq):
     """输入审核策略。"""
 
-    preset_response: StrictStr
+    preset_response: StrictStr = ""
+
+    @field_validator("preset_response", mode="before")
+    @classmethod
+    def normalize_null_preset_response(cls, value: Any) -> Any:
+        """兼容旧配置和前端传入的 null；启用审核时再由组合校验拦截空值。"""
+        return "" if value is None else value
 
 
 class ReviewConfigReq(BaseModel):

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from pathlib import PurePosixPath
+from typing import Any, NamedTuple
 from uuid import UUID, uuid4
 
 from langchain_core.language_models._compat_bridge import message_to_events
@@ -12,17 +13,26 @@ from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 from internal.schema.agent_workbench_schema import WorkbenchEvent
 from .event_sanitizer import sanitize_workbench_event
 
-_SENSITIVE_KEYS = {
-    "api_key",
-    "authorization",
-    "cookie",
-    "password",
-    "secret",
-    "token",
-}
 _TERMINAL_LIFECYCLE_EVENTS = frozenset(
     {"completed", "failed", "interrupted", "drained", "cancelled"}
 )
+_SKILL_TOOL_NAME = "read_file"
+_SKILL_FILE_NAME = "SKILL.md"
+_SKILL_CONTENT_REDACTED = "[SKILL_CONTENT_REDACTED]"
+
+
+class _SkillRef(NamedTuple):
+    """一次文件工具调用对应的 Skill 路径。"""
+
+    name: str
+    path: str
+
+
+class _ActiveSkillCall(NamedTuple):
+    """正在读取 Skill 文件的工具调用。"""
+
+    ref: _SkillRef
+    report: bool
 
 
 def _json_value(value: Any) -> Any:
@@ -37,14 +47,7 @@ def _json_value(value: Any) -> Any:
                 "id": value.id,
             }
     if isinstance(value, Mapping):
-        return {
-            str(key): (
-                "[REDACTED]"
-                if str(key).lower() in _SENSITIVE_KEYS
-                else _json_value(item)
-            )
-            for key, item in value.items()
-        }
+        return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
         return [_json_value(item) for item in value]
     if isinstance(value, UUID):
@@ -92,6 +95,12 @@ class AgentProtocolEventProjector:
         self._last_raw_sequence = 0
         self._root_message_id = root_message_id
         self._text_streams: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
+        # Skill 是通过原生 read_file 工具按需加载的；按路径去重，避免模型
+        # 重试或分页重复读取时让工作台重复展示同一个 Skill。
+        self._used_skill_paths: set[tuple[tuple[str, ...], str]] = set()
+        self._active_skill_calls: dict[
+            tuple[tuple[str, ...], str], _ActiveSkillCall
+        ] = {}
 
     @staticmethod
     def to_public_event(
@@ -164,6 +173,38 @@ class AgentProtocolEventProjector:
         """在运行结束边界关闭未携带 provider finish 标记的文本流。"""
         return self._finish_text_streams(timestamp=None, source="workbench")
 
+    def finish_pending_skill_events(
+        self,
+        *,
+        status: str,
+        reason: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """在 Run 终态补齐仍未结束的 Skill 读取事件。"""
+        events: list[dict[str, Any]] = []
+        for call_key, active in list(self._active_skill_calls.items()):
+            self._active_skill_calls.pop(call_key, None)
+            if not active.report:
+                continue
+            data: dict[str, Any] = {
+                "event": "skill_finished",
+                "skill_name": active.ref.name,
+                "skill_path": active.ref.path,
+                "status": status,
+                "tool_call_id": call_key[1],
+            }
+            if reason:
+                data["reason"] = reason
+            events.append(
+                self._event(
+                    method="lifecycle",
+                    namespace=list(call_key[0]),
+                    timestamp=None,
+                    data=data,
+                    source="workbench",
+                )
+            )
+        return events
+
     def project_many(self, raw_event: Mapping[str, Any]) -> list[dict[str, Any]]:
         """把一个原始 v3 事件展开为一个或多个浏览器协议事件。"""
         if raw_event.get("type") != "event":
@@ -208,13 +249,23 @@ class AgentProtocolEventProjector:
                         namespace=namespace,
                         source_sequence=raw_sequence,
                     )
+            projected_event_data = data
+            skill_events: list[dict[str, Any]] = []
+            if method == "tools" and isinstance(data, Mapping):
+                projected_event_data, skill_events = self._project_skill_tool_event(
+                    data,
+                    namespace=namespace,
+                    timestamp=timestamp,
+                    source_sequence=raw_sequence,
+                )
             return [
                 *flushed,
+                *skill_events,
                 self._event(
                     method=method,
                     namespace=namespace,
                     timestamp=timestamp,
-                    data=data,
+                    data=projected_event_data,
                     source_sequence=raw_sequence,
                 ),
             ]
@@ -254,6 +305,86 @@ class AgentProtocolEventProjector:
             )
             for message_event in message_events
         ]
+
+    def _project_skill_tool_event(
+        self,
+        data: Mapping[str, Any],
+        *,
+        namespace: tuple[str, ...],
+        timestamp: Any,
+        source_sequence: int,
+    ) -> tuple[Mapping[str, Any], list[dict[str, Any]]]:
+        """从原生文件工具事件派生 Skill 生命周期，不参与 Agent 执行。"""
+        event_type = data.get("event")
+        call_id_value = data.get("tool_call_id")
+        call_id = str(call_id_value) if call_id_value is not None else ""
+        call_key = (namespace, call_id)
+        active = self._active_skill_calls.get(call_key)
+        ref = (
+            _skill_ref_from_tool_event(data)
+            if event_type == "tool-started"
+            else active.ref if active is not None else None
+        )
+
+        # Skill 正文只供模型上下文使用，不应通过 tools 通道回传给浏览器。
+        projected_data: Mapping[str, Any] = data
+        if active is not None or ref is not None:
+            projected_data = _redact_skill_tool_payload(data)
+
+        derived: list[dict[str, Any]] = []
+        if event_type == "tool-started" and ref is not None and call_id:
+            path_key = (namespace, ref.path)
+            report = path_key not in self._used_skill_paths and not any(
+                item.ref.path == ref.path and item.ref.name == ref.name
+                for item in self._active_skill_calls.values()
+            )
+            self._active_skill_calls[call_key] = _ActiveSkillCall(ref, report)
+            if report:
+                derived.append(
+                    self._event(
+                        method="lifecycle",
+                        namespace=namespace,
+                        timestamp=timestamp,
+                        data={
+                            "event": "skill_started",
+                            "skill_name": ref.name,
+                            "skill_path": ref.path,
+                            "status": "running",
+                            "tool_call_id": call_id,
+                        },
+                        source_sequence=source_sequence,
+                        source="workbench",
+                    )
+                )
+        elif event_type in {"tool-finished", "tool-error"} and active is not None:
+            self._active_skill_calls.pop(call_key, None)
+            if event_type == "tool-finished":
+                self._used_skill_paths.add((namespace, active.ref.path))
+            if active.report:
+                if event_type == "tool-finished":
+                    status = "completed"
+                    event_name = "skill_finished"
+                else:
+                    status = "failed"
+                    event_name = "skill_error"
+                derived.append(
+                    self._event(
+                        method="lifecycle",
+                        namespace=namespace,
+                        timestamp=timestamp,
+                        data={
+                            "event": event_name,
+                            "skill_name": active.ref.name,
+                            "skill_path": active.ref.path,
+                            "status": status,
+                            "tool_call_id": call_id,
+                        },
+                        source_sequence=source_sequence,
+                        source="workbench",
+                    )
+                )
+
+        return projected_data, derived
 
     def _project_text_chunk(
         self,
@@ -406,5 +537,54 @@ class AgentProtocolEventProjector:
                 )
             )
         return events
+
+
+def _skill_ref_from_tool_event(data: Mapping[str, Any]) -> _SkillRef | None:
+    """从 read_file 参数识别主 Agent 或 SubAgent 的 Skill 包路径。"""
+    tool_name = data.get("tool_name")
+    if tool_name != _SKILL_TOOL_NAME:
+        return None
+    inputs = data.get("input")
+    if not isinstance(inputs, Mapping):
+        return None
+    raw_path = inputs.get("file_path")
+    if not isinstance(raw_path, str) or not raw_path.startswith("/"):
+        return None
+    # Backend 路径是 POSIX 虚拟路径；拒绝反斜杠、相对段和非规范路径，
+    # 防止把用户可控的任意文件路径误判成 Skill。
+    try:
+        normalized_path = str(PurePosixPath(raw_path))
+    except (TypeError, ValueError):
+        return None
+    if raw_path != normalized_path or "\\" in raw_path:
+        return None
+    parts = PurePosixPath(raw_path).parts
+    if len(parts) == 4 and parts[0] == "/" and parts[1] == "skills":
+        skill_name = parts[2]
+        if skill_name and parts[-1] == _SKILL_FILE_NAME:
+            return _SkillRef(skill_name, raw_path)
+    if (
+        len(parts) == 5
+        and parts[0] == "/"
+        and parts[1] == "subagent_skills"
+        and parts[-1] == _SKILL_FILE_NAME
+    ):
+        skill_name = parts[-2]
+        if skill_name:
+            return _SkillRef(skill_name, raw_path)
+    return None
+
+
+def _redact_skill_tool_payload(data: Mapping[str, Any]) -> Mapping[str, Any]:
+    """隐藏 Skill 文件正文，同时保留工具调用的可观测生命周期。"""
+    event_type = data.get("event")
+    if event_type not in {"tool-output-delta", "tool-finished"}:
+        return data
+    key = "delta" if event_type == "tool-output-delta" else "output"
+    if key not in data or data[key] is None:
+        return data
+    projected = dict(data)
+    projected[key] = _SKILL_CONTENT_REDACTED
+    return projected
 
 __all__ = ["AgentProtocolEventProjector"]

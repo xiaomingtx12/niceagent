@@ -36,8 +36,10 @@ from internal.model import (
     Workflow,
 )
 from internal.schema.app_config_schema import (
+    AgentAppConfigReq,
     AppModelConfigReq,
     AppToolBindingReq,
+    AppToolBindingListReq,
     DraftAppConfigPatchReq,
     LongTermMemoryConfigReq,
 )
@@ -549,6 +551,75 @@ class AppConfigService(BaseService):
             app_config,
         )
 
+    def get_agent_runtime_config(self, app: App) -> AgentAppConfigReq:
+        """只读加载已发布配置，跳过面向管理页面的重复清理和展示转换。"""
+        if app.app_config_id is None:
+            raise ValidateErrorException("应用缺少已发布运行配置")
+
+        # AppConfig 与知识库引用一次取回，避免高延迟数据库上的连续往返。
+        rows = (
+            self.db.session.query(AppConfig, AppDatasetJoin.dataset_id)
+            .outerjoin(
+                AppDatasetJoin,
+                AppDatasetJoin.app_id == AppConfig.app_id,
+            )
+            .filter(
+                AppConfig.id == app.app_config_id,
+                AppConfig.app_id == app.id,
+            )
+            .all()
+        )
+        if not rows:
+            raise ValidateErrorException("应用的已发布运行配置不存在")
+
+        app_config = rows[0][0]
+        dataset_ids = [dataset_id for _, dataset_id in rows if dataset_id is not None]
+        try:
+            tool_bindings = AppToolBindingListReq.model_validate(
+                app_config.tools or []
+            ).root
+            return AgentAppConfigReq.model_validate(
+                {
+                    "id": app_config.id,
+                    "model_config": app_config.model_config,
+                    "dialog_round": app_config.dialog_round,
+                    "preset_prompt": app_config.preset_prompt,
+                    "skills": app_config.skills or [],
+                    "subagents": app_config.subagents or [],
+                    "tools": [
+                        {
+                            "type": binding.type,
+                            "provider": {"id": binding.provider_id},
+                            "tool": {
+                                "id": binding.tool_id,
+                                "name": binding.tool_id,
+                                "params": dict(binding.params),
+                            },
+                        }
+                        for binding in tool_bindings
+                    ],
+                    "workflows": [
+                        {"id": workflow_id}
+                        for workflow_id in (app_config.workflows or [])
+                    ],
+                    "datasets": [{"id": dataset_id} for dataset_id in dataset_ids],
+                    "retrieval_config": app_config.retrieval_config,
+                    "long_term_memory": app_config.long_term_memory,
+                    "opening_statement": app_config.opening_statement,
+                    "opening_questions": app_config.opening_questions,
+                    "speech_to_text": app_config.speech_to_text,
+                    "text_to_speech": app_config.text_to_speech,
+                    "suggested_after_answer": app_config.suggested_after_answer,
+                    "review_config": app_config.review_config,
+                    "updated_at": datetime_to_timestamp(app_config.updated_at),
+                    "created_at": datetime_to_timestamp(app_config.created_at),
+                }
+            )
+        except ValidationError as exc:
+            raise ValidateErrorException(
+                f"已发布应用运行配置格式错误: {exc}"
+            ) from exc
+
     def get_langchain_tools_by_tools_config(
         self,
         tools_config: list[dict],
@@ -592,7 +663,8 @@ class AppConfigService(BaseService):
                 api_tool = (
                     self.db.session.query(ApiTool)
                     .filter(
-                        ApiTool.id == tool["tool"]["id"],
+                        ApiTool.provider_id == tool["provider"]["id"],
+                        ApiTool.name == tool["tool"]["name"],
                         ApiTool.account_id == account_id,
                     )
                     .one_or_none()
