@@ -12,12 +12,12 @@ from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionRes
 from injector import inject
 from werkzeug.datastructures import FileStorage
 
-from internal.exception import NotFoundException, FailException
+from internal.exception import ForbiddenException, NotFoundException, FailException
 from internal.lib.api_key_helper import get_api_key_for_provider
 from internal.model import Account, Message, App, AppConfig, AppConfigVersion
 from pkg.sqlalchemy import SQLAlchemy
-from .app_service import AppService
 from .base_service import BaseService
+from .web_app_service import WebAppService
 from ..entity.app_entity import AppStatus
 from ..entity.audio_entity import EDGE_TTS_VOICE_MAP
 from ..entity.conversation_entity import InvokeFrom
@@ -57,7 +57,7 @@ class AudioService(BaseService):
     """语音服务，涵盖语音转文本（DashScope Paraformer）、消息流式输出语音（Edge-TTS）"""
 
     db: SQLAlchemy
-    app_service: AppService
+    web_app_service: WebAppService
 
     def audio_to_text(self, audio: FileStorage, account: Account) -> str:
         """使用DashScope Paraformer将语音转换成文本"""
@@ -107,58 +107,77 @@ class AudioService(BaseService):
 
     def message_to_audio(self, message_id: UUID, account: Account) -> Generator:
         """使用Edge-TTS将消息转换成流式输出语音"""
-        # 1.根据传递的消息id获取消息并校验权限
+        # 1.根据传递的消息id获取有效消息
         message = self.get(Message, message_id)
         if (
             not message
             or message.is_deleted
             or message.answer.strip() == ""
-            or message.created_by != account.id
         ):
             raise NotFoundException("该消息不存在，请核实后重试")
 
-        # 2.校验消息归属的会话状态是否正常
+        # 2.校验消息归属的会话状态是否正常。不同入口的 created_by
+        # 含义不同：调试页保存 Account.id，WebApp 保存 EndUser.id，
+        # 因此不能在这里统一与当前 Account.id 比较。
         conversation = message.conversation
-        if (
-            conversation is None
-            or conversation.is_deleted
-            or conversation.created_by != account.id
-        ):
+        if conversation is None or conversation.is_deleted:
             raise NotFoundException("该消息会话不存在，请核实后重试")
 
         # 3.定义文本转语音启动配置、音色，默认为开启+xiaoxiao音色
         enable = True
         voice = "xiaobei"
 
-        # 4.根据会话信息获取会话归属的应用
+        # 4.根据调用入口校验消息权限并获取文字转语音配置
         if message.invoke_from in [InvokeFrom.WEB_APP, InvokeFrom.DEBUGGER]:
             app = self.get(App, conversation.app_id)
-            if app:
-                # 4.1 应用存在，校验权限
+            if app is None or message.app_id != app.id:
+                raise NotFoundException(
+                    "该消息会话归属的应用不存在或校验失败，请核实后重试"
+                )
+
+            if message.invoke_from == InvokeFrom.DEBUGGER:
                 if (
-                    message.invoke_from == InvokeFrom.DEBUGGER
-                    and app.account_id != account.id
+                    app.account_id != account.id
+                    or message.created_by != account.id
+                    or conversation.created_by != account.id
                 ):
                     raise NotFoundException(
                         "该消息会话归属的应用不存在或校验失败，请核实后重试"
                     )
-                if (
-                    message.invoke_from == InvokeFrom.WEB_APP
-                    and app.status != AppStatus.PUBLISHED
-                ):
+            else:
+                if app.status != AppStatus.PUBLISHED:
                     raise NotFoundException("该消息会话归属的应用未发布，请核实后重试")
+                try:
+                    # WebApp 消息和会话保存的是 EndUser.id；复用 WebApp
+                    # 的账号映射鉴权，兼容旧数据中直接保存 Account.id 的情况。
+                    self.web_app_service.get_owned_web_conversation_by_app_id(
+                        app_id=app.id,
+                        conversation_id=conversation.id,
+                        account=account,
+                    )
+                except (ForbiddenException, NotFoundException) as error:
+                    raise NotFoundException(
+                        "该消息会话不存在，请核实后重试"
+                    ) from error
 
-                app_config: Union[AppConfig, AppConfigVersion] = (
-                    app.draft_app_config
-                    if message.invoke_from == InvokeFrom.DEBUGGER
-                    else app.app_config
-                )
-                text_to_speech = app_config.text_to_speech
-                enable = text_to_speech.get("enable", False)
-                voice = text_to_speech.get("voice", "xiaoxiao")
-            # 4.2 应用不存在（如辅助Agent），使用默认配置直接播放
+            app_config: Union[AppConfig, AppConfigVersion] = (
+                app.draft_app_config
+                if message.invoke_from == InvokeFrom.DEBUGGER
+                else app.app_config
+            )
+            text_to_speech = app_config.text_to_speech
+            enable = text_to_speech.get("enable", False)
+            voice = text_to_speech.get("voice", "xiaoxiao")
+        elif message.invoke_from == InvokeFrom.ASSISTANT_AGENT:
+            if (
+                message.created_by != account.id
+                or conversation.created_by != account.id
+            ):
+                raise NotFoundException("该消息不存在，请核实后重试")
         elif message.invoke_from == InvokeFrom.SERVICE_API:
             raise NotFoundException("开放API消息不支持文本转语音服务")
+        else:
+            raise NotFoundException("该消息不存在，请核实后重试")
 
         # 5.根据状态判断是否开启文字转语音
         if enable is False:
