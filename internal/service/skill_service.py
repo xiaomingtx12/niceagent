@@ -28,6 +28,16 @@ _SKILL_NAME = re.compile(r"^[a-z][a-z0-9-]{0,63}$")
 _MAX_PACKAGE_FILES = 256
 _MAX_PACKAGE_BYTES = 20 * 1024 * 1024
 
+# 每个 Skill 只声明一个最终分类；该表仅提供展示名称，不存在父子分类或归并关系。
+SKILL_CATEGORY_LABELS = {
+    "office": "办公效率",
+    "content": "内容创作",
+    "knowledge": "知识管理",
+    "data": "数据分析",
+    "education": "教育学习",
+    "agent": "Agent 能力",
+}
+
 
 @dataclass(frozen=True)
 class BuiltinSkill:
@@ -40,7 +50,7 @@ class BuiltinSkill:
     skill_md: str
     package_root: Path
     package_files: Mapping[str, str]
-    category: str = "general"
+    category: str = "agent"
     execution_mode: str = "inline"
     requires: tuple[str, ...] = ()
     allowed_tools: tuple[str, ...] = ()
@@ -54,6 +64,7 @@ class BuiltinSkill:
             "version": self.version,
             "digest": self.digest,
             "category": self.category,
+            "category_name": SKILL_CATEGORY_LABELS[self.category],
             "execution_mode": self.execution_mode,
             "requires": list(self.requires),
             "allowed_tools": list(self.allowed_tools),
@@ -190,7 +201,8 @@ class SkillService(BaseService):
                 skill_md=skill_md,
                 package_root=child.resolve(),
                 package_files=MappingProxyType(_read_text_package(child)),
-                category=metadata.category,
+                # 分类直接来自 manifest，前端通过同一层标签表显示中文名。
+                category=metadata.category.strip().lower(),
                 execution_mode=metadata.execution_mode,
                 requires=requires,
                 allowed_tools=allowed_tools,

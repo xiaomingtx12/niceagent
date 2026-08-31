@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -43,8 +43,10 @@ class BuiltinSkillManifestMetadataReq(BaseModel):
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
     version: StrictStr = Field(default="1.0.0", min_length=1, max_length=64)
-    category: StrictStr = Field(default="general", min_length=1, max_length=64)
-    execution_mode: StrictStr = Field(default="inline", min_length=1, max_length=64)
+    category: Literal[
+        "office", "content", "knowledge", "data", "education", "agent"
+    ] = "agent"
+    execution_mode: Literal["inline", "sandbox"] = "inline"
     requires: StrictStr | list[StrictStr] = Field(default_factory=list)
 
 
