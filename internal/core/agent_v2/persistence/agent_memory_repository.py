@@ -19,7 +19,6 @@ from internal.core.agent_v2.entity.agent_memory import (
     memory_virtual_path_to_store_key,
 )
 from internal.core.agent_v2.persistence.langgraph_store_provider import (
-    close_postgres_store,
     get_configured_store,
 )
 
@@ -39,7 +38,7 @@ class AgentMemoryStorageError(RuntimeError):
 
 @dataclass
 class AgentMemoryRepository:
-    """统一转换虚拟路径、Store key 并管理 Store 连接重试。"""
+    """统一转换虚拟路径、Store key 并映射 Store 连接错误。"""
 
     store_provider: Callable[[], BaseStore] = get_configured_store
 
@@ -144,16 +143,13 @@ class AgentMemoryRepository:
         self._execute(operation)
 
     def _execute(self, operation: Callable[[BaseStore], T]) -> T:
-        """连接失效时重建默认 Store 并重试一次。"""
+        """把 Store 连接错误转换为稳定的领域异常。"""
         try:
             return operation(self.store_provider())
-        except _STORE_CONNECTION_ERRORS:
-            if self.store_provider is get_configured_store:
-                close_postgres_store()
-            try:
-                return operation(self.store_provider())
-            except _STORE_CONNECTION_ERRORS as exc:
-                raise AgentMemoryStorageError("长期记忆存储暂时不可用") from exc
+        except _STORE_CONNECTION_ERRORS as exc:
+            # 默认 PostgreSQL Store 已在单次 batch 内完成新连接重试；这里不关闭
+            # 进程共享连接池，避免一个请求的断连级联打断其他并发请求。
+            raise AgentMemoryStorageError("长期记忆存储暂时不可用") from exc
 
     @staticmethod
     def _search_all(

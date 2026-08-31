@@ -6,50 +6,163 @@
 from __future__ import annotations
 
 import atexit
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+import logging
 from threading import Lock
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 from config.config import Config
-from langgraph.checkpoint.base import BaseCheckpointSaver
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import (
+    BaseCheckpointSaver,
+    ChannelVersions,
+    Checkpoint,
+    CheckpointMetadata,
+    CheckpointTuple,
+)
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
-from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
+
+from internal.core.agent_v2.persistence.postgres_connection import (
+    build_langgraph_pool_config,
+    execute_with_postgres_retry,
+    pg_uri_for_langgraph,
+)
+
+
+_logger = logging.getLogger(__name__)
 
 
 def _pg_uri_for_langgraph(sqlalchemy_uri: str) -> str:
-    """把 SQLAlchemy driver URI 转成 psycopg 可直接连接的 URI。"""
-    if sqlalchemy_uri.startswith("postgresql+"):
-        return "postgresql://" + sqlalchemy_uri.split("://", 1)[1]
-    return sqlalchemy_uri
+    """兼容原有导入路径的 PostgreSQL URI 转换入口。"""
+    return pg_uri_for_langgraph(sqlalchemy_uri)
+
+
+class ResilientPostgresSaver(PostgresSaver):
+    """为幂等 Checkpoint 数据库操作补充一次瞬时断连重试。"""
+
+    def _execute(self, operation_name: str, operation: Callable[[], Any]) -> Any:
+        """通过连接池新连接重试单个 Checkpoint 操作。"""
+        return execute_with_postgres_retry(
+            operation,
+            logger=_logger,
+            resource="Agent checkpoint",
+            operation_name=operation_name,
+        )
+
+    def setup(self) -> None:
+        """幂等初始化 LangGraph 托管表。"""
+        parent = super()
+        self._execute("setup", parent.setup)
+
+    def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
+        """读取线程 Checkpoint，瞬时断连时重试一次。"""
+        parent = super()
+        return self._execute("get_tuple", lambda: parent.get_tuple(config))
+
+    def list(
+        self,
+        config: RunnableConfig | None,
+        *,
+        filter: dict[str, Any] | None = None,
+        before: RunnableConfig | None = None,
+        limit: int | None = None,
+    ) -> Iterator[CheckpointTuple]:
+        """完整读取 Checkpoint 列表后返回稳定迭代器。"""
+        parent = super()
+        items = self._execute(
+            "list",
+            lambda: list(
+                parent.list(
+                    config,
+                    filter=filter,
+                    before=before,
+                    limit=limit,
+                )
+            ),
+        )
+        return iter(items)
+
+    def put(
+        self,
+        config: RunnableConfig,
+        checkpoint: Checkpoint,
+        metadata: CheckpointMetadata,
+        new_versions: ChannelVersions,
+    ) -> RunnableConfig:
+        """保存一个具备稳定 ID 的 Checkpoint。"""
+        parent = super()
+        return self._execute(
+            "put",
+            lambda: parent.put(config, checkpoint, metadata, new_versions),
+        )
+
+    def put_writes(
+        self,
+        config: RunnableConfig,
+        writes: Sequence[tuple[str, Any]],
+        task_id: str,
+        task_path: str = "",
+    ) -> None:
+        """保存具备唯一约束的中间写入。"""
+        parent = super()
+        self._execute(
+            "put_writes",
+            lambda: parent.put_writes(config, writes, task_id, task_path),
+        )
+
+    def get_delta_channel_history(
+        self,
+        *,
+        config: RunnableConfig,
+        channels: Sequence[str],
+    ) -> Mapping[str, Any]:
+        """读取增量 channel 历史。"""
+        parent = super()
+        return self._execute(
+            "get_delta_channel_history",
+            lambda: parent.get_delta_channel_history(
+                config=config,
+                channels=channels,
+            ),
+        )
+
+    def delete_thread(self, thread_id: str) -> None:
+        """幂等删除线程的全部 Checkpoint 数据。"""
+        parent = super()
+        self._execute("delete_thread", lambda: parent.delete_thread(thread_id))
 
 
 def create_postgres_saver(
     *,
     config_factory: Callable[[], Any] = Config,
     connection_pool_factory: Callable[..., Any] = ConnectionPool,
-    saver_factory: Callable[..., Any] = PostgresSaver,
+    saver_factory: Callable[..., Any] = ResilientPostgresSaver,
 ) -> tuple[Any, Any]:
     """创建并初始化一个长期存活的 PostgresSaver 和连接池。"""
     config = config_factory()
     connection_string = _pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
-    pool = connection_pool_factory(
-        conninfo=connection_string,
-        kwargs={
-            "autocommit": True,
-            "prepare_threshold": 0,
-            "row_factory": dict_row,
-        },
+    pool_config = build_langgraph_pool_config(
+        config,
         min_size=config.AGENT_CHECKPOINT_POOL_MIN_SIZE,
         max_size=config.AGENT_CHECKPOINT_POOL_MAX_SIZE,
         timeout=config.AGENT_CHECKPOINT_POOL_TIMEOUT_SECONDS,
         max_waiting=config.AGENT_CHECKPOINT_POOL_MAX_WAITING,
-        check=ConnectionPool.check_connection,
+        name="agent-checkpoint",
+    )
+    pool = connection_pool_factory(
+        conninfo=connection_string,
+        **pool_config,
         open=True,
     )
     saver = saver_factory(pool)
-    saver.setup()
+    try:
+        saver.setup()
+    except Exception:
+        close_connection_pool(pool)
+        raise
     return saver, pool
 
 
@@ -65,7 +178,7 @@ class CheckpointProvider:
 
     config_factory: Callable[[], Any] = Config
     connection_pool_factory: Callable[..., Any] = ConnectionPool
-    saver_factory: Callable[..., Any] = PostgresSaver
+    saver_factory: Callable[..., Any] = ResilientPostgresSaver
     register_exit: Callable[[Callable[[], None]], Any] = atexit.register
     _saver: Optional[Any] = field(default=None, init=False, repr=False)
     _pool: Optional[Any] = field(default=None, init=False, repr=False)
@@ -167,6 +280,7 @@ __all__ = [
     "CheckpointProvider",
     "InMemorySaver",
     "PostgresSaver",
+    "ResilientPostgresSaver",
     "_pg_uri_for_langgraph",
     "build_thread_id",
     "close_connection_pool",

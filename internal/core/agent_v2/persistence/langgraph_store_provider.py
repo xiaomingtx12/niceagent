@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import atexit
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+import logging
 from threading import Lock
 from typing import Any, Callable, Optional
 
@@ -11,30 +13,66 @@ from config.config import Config
 from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 from langgraph.store.postgres import PostgresStore
-from psycopg_pool import ConnectionPool
+
+from internal.core.agent_v2.persistence.postgres_connection import (
+    build_langgraph_pool_config,
+    execute_with_postgres_retry,
+    pg_uri_for_langgraph,
+)
+
+
+_logger = logging.getLogger(__name__)
 
 
 def _pg_uri_for_langgraph(sqlalchemy_uri: str) -> str:
-    """把 SQLAlchemy driver URI 转成 psycopg 可连接的 URI。"""
-    if sqlalchemy_uri.startswith("postgresql+"):
-        return "postgresql://" + sqlalchemy_uri.split("://", 1)[1]
-    return sqlalchemy_uri
+    """兼容原有导入路径的 PostgreSQL URI 转换入口。"""
+    return pg_uri_for_langgraph(sqlalchemy_uri)
+
+
+class ResilientPostgresStore(PostgresStore):
+    """为 Store 批处理补充一次瞬时断连重试。"""
+
+    def setup(self) -> None:
+        """幂等初始化 LangGraph Store 托管表。"""
+        parent = super()
+        execute_with_postgres_retry(
+            parent.setup,
+            logger=_logger,
+            resource="Agent memory store",
+            operation_name="setup",
+        )
+
+    def batch(self, ops: Iterable[Any]) -> list[Any]:
+        """固定批处理输入，使连接恢复后可以安全重放。"""
+        operations = tuple(ops)
+        parent = super()
+        return execute_with_postgres_retry(
+            lambda: parent.batch(operations),
+            logger=_logger,
+            resource="Agent memory store",
+            operation_name="batch",
+        )
 
 
 def create_postgres_store(
     *,
     config_factory: Callable[[], Any] = Config,
-    store_factory: Any = PostgresStore,
+    store_factory: Any = ResilientPostgresStore,
 ) -> tuple[PostgresStore, Any]:
     """创建并初始化一个长期存活的 PostgresStore。"""
-    connection_string = _pg_uri_for_langgraph(config_factory().SQLALCHEMY_DATABASE_URI)
+    config = config_factory()
+    connection_string = _pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
+    pool_config = build_langgraph_pool_config(
+        config,
+        min_size=config.AGENT_MEMORY_POOL_MIN_SIZE,
+        max_size=config.AGENT_MEMORY_POOL_MAX_SIZE,
+        timeout=config.AGENT_MEMORY_POOL_TIMEOUT_SECONDS,
+        max_waiting=config.AGENT_MEMORY_POOL_MAX_WAITING,
+        name="agent-memory",
+    )
     context = store_factory.from_conn_string(
         connection_string,
-        pool_config={
-            "min_size": 1,
-            "max_size": 10,
-            "check": ConnectionPool.check_connection,
-        },
+        pool_config=pool_config,
     )
     store = context.__enter__()
     try:
@@ -50,7 +88,7 @@ class StoreProvider:
     """管理进程级长期文件 Store。"""
 
     config_factory: Callable[[], Any] = Config
-    store_factory: Any = PostgresStore
+    store_factory: Any = ResilientPostgresStore
     register_exit: Callable[[Callable[[], None]], Any] = atexit.register
     _store: Optional[BaseStore] = field(default=None, init=False, repr=False)
     _context: Any = field(default=None, init=False, repr=False)
@@ -121,6 +159,7 @@ def close_postgres_store() -> None:
 
 __all__ = [
     "PostgresStore",
+    "ResilientPostgresStore",
     "StoreProvider",
     "close_postgres_store",
     "create_postgres_store",

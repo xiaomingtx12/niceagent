@@ -21,6 +21,9 @@ from internal.core.agent_v2.protocol.message_parser import message_content_to_te
 from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
     get_postgres_pool_stats,
 )
+from internal.core.agent_v2.persistence.postgres_connection import (
+    POSTGRES_CONNECTION_ERRORS,
+)
 from internal.entity import WorkbenchRun, WorkbenchRunStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.exception import (
@@ -41,6 +44,9 @@ from .agent_workbench_run_service import AgentWorkbenchRunService
 from .app_config_service import AppConfigService
 from .base_service import BaseService
 from .conversation_service import ConversationService
+
+
+_AGENT_PERSISTENCE_ERRORS = (*POSTGRES_CONNECTION_ERRORS, PoolTimeout)
 
 
 @inject
@@ -176,13 +182,17 @@ class AgentWorkbenchRunExecutionService(BaseService):
         self,
         run: WorkbenchRun,
     ) -> tuple[Any, BaseChatModel]:
-        """水合配置并创建当前 Run 独占的 AgentExecutor。"""
-        if (
-            run.spec.invoke_from is not InvokeFrom.ASSISTANT_AGENT
-            and not run.spec.app_config_hydrated
-        ):
-            self.hydrate_config(run)
-        return self.agent_assembly_service.build_agent(run.spec)
+        """创建 Run 独占执行器，并在模型运行前归还 ORM 连接。"""
+        try:
+            if (
+                run.spec.invoke_from is not InvokeFrom.ASSISTANT_AGENT
+                and not run.spec.app_config_hydrated
+            ):
+                self.hydrate_config(run)
+            return self.agent_assembly_service.build_agent(run.spec)
+        finally:
+            # Agent 流可能持续数分钟；装配阶段的只读事务不能跟随整个 Run。
+            self.db.session.close()
 
     def _consume_agent_events(
         self,
@@ -434,9 +444,10 @@ class AgentWorkbenchRunExecutionService(BaseService):
                 },
             ),
         )
-        if isinstance(exc, PoolTimeout):
+        if isinstance(exc, _AGENT_PERSISTENCE_ERRORS):
             current_app.logger.error(
-                "Agent checkpoint 连接池等待超时 pool_stats=%s",
+                "Agent PostgreSQL 持久化失败 error_type=%s checkpoint_pool_stats=%s",
+                type(exc).__name__,
                 get_postgres_pool_stats(),
             )
         current_app.logger.exception("Agent 工作台运行失败")

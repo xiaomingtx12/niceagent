@@ -33,12 +33,60 @@ class Config:
         self.WTF_CSRF_ENABLED = _get_bool_env("WTF_CSRF_ENABLED")
 
         # 配置数据库配置
-        self.SQLALCHEMY_DATABASE_URI = _get_env("SQLALCHEMY_DATABASE_URI")
+        self.SQLALCHEMY_DATABASE_URI = str(
+            _get_env("SQLALCHEMY_DATABASE_URI") or ""
+        )
+        self.SQLALCHEMY_POOL_SIZE = int(_get_env("SQLALCHEMY_POOL_SIZE"))
+        self.SQLALCHEMY_MAX_OVERFLOW = int(_get_env("SQLALCHEMY_MAX_OVERFLOW"))
+        self.SQLALCHEMY_POOL_TIMEOUT_SECONDS = float(
+            _get_env("SQLALCHEMY_POOL_TIMEOUT_SECONDS")
+        )
+        self.SQLALCHEMY_POOL_RECYCLE = int(_get_env("SQLALCHEMY_POOL_RECYCLE"))
+        self.POSTGRES_CONNECT_TIMEOUT_SECONDS = int(
+            _get_env("POSTGRES_CONNECT_TIMEOUT_SECONDS")
+        )
+        self.POSTGRES_KEEPALIVES_IDLE_SECONDS = int(
+            _get_env("POSTGRES_KEEPALIVES_IDLE_SECONDS")
+        )
+        self.POSTGRES_KEEPALIVES_INTERVAL_SECONDS = int(
+            _get_env("POSTGRES_KEEPALIVES_INTERVAL_SECONDS")
+        )
+        self.POSTGRES_KEEPALIVES_COUNT = int(
+            _get_env("POSTGRES_KEEPALIVES_COUNT")
+        )
+        self.POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS = int(
+            _get_env("POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS")
+        )
+        self.POSTGRES_POOL_MAX_LIFETIME_SECONDS = float(
+            _get_env("POSTGRES_POOL_MAX_LIFETIME_SECONDS")
+        )
+        self.POSTGRES_POOL_MAX_IDLE_SECONDS = float(
+            _get_env("POSTGRES_POOL_MAX_IDLE_SECONDS")
+        )
+        self.POSTGRES_POOL_RECONNECT_TIMEOUT_SECONDS = float(
+            _get_env("POSTGRES_POOL_RECONNECT_TIMEOUT_SECONDS")
+        )
         self.SQLALCHEMY_ENGINE_OPTIONS = {
-            "pool_size": int(_get_env("SQLALCHEMY_POOL_SIZE")),
-            "pool_recycle": int(_get_env("SQLALCHEMY_POOL_RECYCLE")),
+            "pool_size": self.SQLALCHEMY_POOL_SIZE,
+            "max_overflow": self.SQLALCHEMY_MAX_OVERFLOW,
+            "pool_timeout": self.SQLALCHEMY_POOL_TIMEOUT_SECONDS,
+            "pool_recycle": self.SQLALCHEMY_POOL_RECYCLE,
             "pool_pre_ping": True,
+            "pool_use_lifo": True,
         }
+        if self.SQLALCHEMY_DATABASE_URI.startswith("postgresql"):
+            self.SQLALCHEMY_ENGINE_OPTIONS["connect_args"] = {
+                "application_name": "my-dify-orm",
+                "connect_timeout": self.POSTGRES_CONNECT_TIMEOUT_SECONDS,
+                "keepalives": 1,
+                "keepalives_idle": self.POSTGRES_KEEPALIVES_IDLE_SECONDS,
+                "keepalives_interval": self.POSTGRES_KEEPALIVES_INTERVAL_SECONDS,
+                "keepalives_count": self.POSTGRES_KEEPALIVES_COUNT,
+                "options": (
+                    "-c idle_in_transaction_session_timeout="
+                    f"{self.POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS * 1000}"
+                ),
+            }
         self.SQLALCHEMY_ECHO = _get_bool_env("SQLALCHEMY_ECHO")
         self.AGENT_CHECKPOINT_BACKEND = str(
             _get_env("AGENT_CHECKPOINT_BACKEND")
@@ -56,6 +104,18 @@ class Config:
             _get_env("AGENT_CHECKPOINT_POOL_MAX_WAITING")
         )
         self.AGENT_MEMORY_BACKEND = str(_get_env("AGENT_MEMORY_BACKEND")).lower()
+        self.AGENT_MEMORY_POOL_MIN_SIZE = int(
+            _get_env("AGENT_MEMORY_POOL_MIN_SIZE")
+        )
+        self.AGENT_MEMORY_POOL_MAX_SIZE = int(
+            _get_env("AGENT_MEMORY_POOL_MAX_SIZE")
+        )
+        self.AGENT_MEMORY_POOL_TIMEOUT_SECONDS = float(
+            _get_env("AGENT_MEMORY_POOL_TIMEOUT_SECONDS")
+        )
+        self.AGENT_MEMORY_POOL_MAX_WAITING = int(
+            _get_env("AGENT_MEMORY_POOL_MAX_WAITING")
+        )
         self.AGENT_SANDBOX_PROVIDER = str(_get_env("AGENT_SANDBOX_PROVIDER")).lower()
         self.AGENT_SANDBOX_SNAPSHOT_ID = _get_env("AGENT_SANDBOX_SNAPSHOT_ID") or None
         self.AGENT_SANDBOX_IDLE_TTL_SECONDS = int(
@@ -73,6 +133,7 @@ class Config:
         self.WORKSPACE_DOWNLOAD_URL_TTL_SECONDS = _get_workspace_limit(
             "WORKSPACE_DOWNLOAD_URL_TTL_SECONDS"
         )
+        self._validate_database_settings()
         self._validate_agent_settings()
 
         # Redis配置
@@ -153,6 +214,33 @@ class Config:
         self.COS_SCHEME = _get_env("COS_SCHEME")
         self.COS_BUCKET = _get_env("COS_BUCKET")
 
+    def _validate_database_settings(self) -> None:
+        """校验 ORM 和 PostgreSQL 连接池参数。"""
+        if self.SQLALCHEMY_POOL_SIZE <= 0:
+            raise ValueError("SQLALCHEMY_POOL_SIZE 必须大于 0")
+        if self.SQLALCHEMY_MAX_OVERFLOW < 0:
+            raise ValueError("SQLALCHEMY_MAX_OVERFLOW 不能小于 0")
+        if self.SQLALCHEMY_POOL_TIMEOUT_SECONDS <= 0:
+            raise ValueError("SQLALCHEMY_POOL_TIMEOUT_SECONDS 必须大于 0")
+        if self.SQLALCHEMY_POOL_RECYCLE <= 0:
+            raise ValueError("SQLALCHEMY_POOL_RECYCLE 必须大于 0")
+        positive_settings = (
+            "POSTGRES_CONNECT_TIMEOUT_SECONDS",
+            "POSTGRES_KEEPALIVES_IDLE_SECONDS",
+            "POSTGRES_KEEPALIVES_INTERVAL_SECONDS",
+            "POSTGRES_KEEPALIVES_COUNT",
+            "POSTGRES_POOL_MAX_LIFETIME_SECONDS",
+            "POSTGRES_POOL_MAX_IDLE_SECONDS",
+            "POSTGRES_POOL_RECONNECT_TIMEOUT_SECONDS",
+        )
+        for name in positive_settings:
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} 必须大于 0")
+        if self.POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS <= 0:
+            raise ValueError(
+                "POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS 必须大于 0"
+            )
+
     def _validate_agent_settings(self) -> None:
         """校验 Agent 持久化和记忆配置。"""
         supported = {"postgres", "memory", "disabled", "false", "off", "none"}
@@ -175,6 +263,17 @@ class Config:
             raise ValueError(
                 "AGENT_MEMORY_BACKEND 不允许关闭，必须是 postgres 或 memory"
             )
+        if self.AGENT_MEMORY_POOL_MIN_SIZE < 0:
+            raise ValueError("AGENT_MEMORY_POOL_MIN_SIZE 不能小于 0")
+        if (
+            self.AGENT_MEMORY_POOL_MAX_SIZE <= 0
+            or self.AGENT_MEMORY_POOL_MAX_SIZE < self.AGENT_MEMORY_POOL_MIN_SIZE
+        ):
+            raise ValueError("AGENT_MEMORY_POOL_MAX_SIZE 必须大于等于 MIN_SIZE")
+        if self.AGENT_MEMORY_POOL_TIMEOUT_SECONDS <= 0:
+            raise ValueError("AGENT_MEMORY_POOL_TIMEOUT_SECONDS 必须大于 0")
+        if self.AGENT_MEMORY_POOL_MAX_WAITING < 0:
+            raise ValueError("AGENT_MEMORY_POOL_MAX_WAITING 不能小于 0")
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"
             and self.AGENT_CHECKPOINT_BACKEND != "postgres"
