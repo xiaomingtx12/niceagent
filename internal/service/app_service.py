@@ -278,6 +278,8 @@ class AppService(BaseService):
         filters = [App.account_id == account.id]
         if req.search_word.data:
             filters.append(App.name.ilike(f"%{req.search_word.data}%"))
+        if req.status.data:
+            filters.append(App.status == req.status.data)
 
         # 3.执行分页操作
         apps = paginator.paginate(

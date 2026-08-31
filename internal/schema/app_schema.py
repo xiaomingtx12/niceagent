@@ -5,6 +5,7 @@ from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
 from wtforms import StringField, IntegerField
 from wtforms.validators import (
+    AnyOf,
     DataRequired,
     Length,
     URL,
@@ -72,6 +73,17 @@ class GetAppsWithPageReq(PaginatorReq):
     """获取应用分页列表数据请求"""
 
     search_word = StringField("search_word", default="", validators=[Optional()])
+    status = StringField(
+        "status",
+        default="",
+        validators=[
+            Optional(),
+            AnyOf(
+                values=[AppStatus.DRAFT, AppStatus.PUBLISHED],
+                message="应用状态仅支持 draft 或 published",
+            ),
+        ],
+    )
 
 
 class GetAppsWithPageResp(Schema):
