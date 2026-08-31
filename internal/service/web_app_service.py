@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 from sqlalchemy.dialects.postgresql import insert
 
 from internal.entity.app_entity import AppStatus
@@ -101,8 +101,14 @@ class WebAppService(BaseService):
             .filter(
                 Conversation.id == conversation_id,
                 Conversation.app_id == app.id,
-                Conversation.invoke_from == InvokeFrom.WEB_APP,
-                Conversation.created_by.in_([end_user.id, account.id]),
+                Conversation.invoke_from.in_([
+                    InvokeFrom.WEB_APP,
+                    InvokeFrom.CREATOR_TASK,
+                ]),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    Conversation.created_by.in_([end_user.id, account.id]),
+                ),
                 Conversation.is_deleted.is_(False),
             )
             .one_or_none()
@@ -135,8 +141,14 @@ class WebAppService(BaseService):
             .filter(
                 Conversation.id == conversation_id,
                 Conversation.app_id == app_id,
-                Conversation.invoke_from == InvokeFrom.WEB_APP,
-                Conversation.created_by.in_(allowed_creators),
+                Conversation.invoke_from.in_([
+                    InvokeFrom.WEB_APP,
+                    InvokeFrom.CREATOR_TASK,
+                ]),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    Conversation.created_by.in_(allowed_creators),
+                ),
                 Conversation.is_deleted.is_(False),
             )
             .one_or_none()
@@ -162,11 +174,16 @@ class WebAppService(BaseService):
         if existing is not None:
             if (
                 existing.app_id != app.id
-                or existing.invoke_from != InvokeFrom.WEB_APP
+                or existing.invoke_from
+                not in {InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK}
                 or existing.created_by not in {end_user.id, account.id}
                 or existing.is_deleted is True
             ):
                 raise ForbiddenException("会话不存在或不属于当前用户")
+            # 登录账号是跨 WebApp 与 Creator 任务中心共享历史的稳定归属。
+            if existing.owner_account_id is None:
+                existing.owner_account_id = account.id
+                self.db.session.commit()
             return app, end_user, existing
 
         # 3.首次 command 时创建对应的业务会话记录。
@@ -177,6 +194,7 @@ class WebAppService(BaseService):
             name=conversation_name[:255],
             invoke_from=InvokeFrom.WEB_APP,
             created_by=end_user.id,
+            owner_account_id=account.id,
         )
         return app, end_user, conversation
 
@@ -250,8 +268,14 @@ class WebAppService(BaseService):
             self.db.session.query(Conversation)
             .filter(
                 Conversation.app_id == app.id,
-                Conversation.created_by.in_([end_user.id, account.id]),
-                Conversation.invoke_from == InvokeFrom.WEB_APP,
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    Conversation.created_by.in_([end_user.id, account.id]),
+                ),
+                Conversation.invoke_from.in_([
+                    InvokeFrom.WEB_APP,
+                    InvokeFrom.CREATOR_TASK,
+                ]),
                 Conversation.is_pinned == is_pinned,
                 ~Conversation.is_deleted,
             )

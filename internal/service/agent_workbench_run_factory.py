@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from injector import inject
@@ -57,6 +58,15 @@ class AgentWorkbenchRunFactory(BaseService):
             )
         if invoke_from is InvokeFrom.WEB_APP:
             return self._create_web_app_run(
+                thread_id=thread_id,
+                account=account,
+                run_input=run_input,
+                run_id=run_id,
+                authorized=authorized,
+            )
+        if invoke_from is InvokeFrom.CREATOR_TASK:
+            return self._create_creator_task_run(
+                app_id=UUID(access_value),
                 thread_id=thread_id,
                 account=account,
                 run_input=run_input,
@@ -126,6 +136,7 @@ class AgentWorkbenchRunFactory(BaseService):
         if app is None or conversation is None:
             raise ForbiddenException("工作台授权上下文不完整")
         include_opening_statement = self._is_first_message(conversation.id)
+        conversation.updated_at = datetime.now()
         attachments = self._resolve_attachments(run_input, owner_id=account.id)
         message = Message(
             id=uuid4(),
@@ -188,16 +199,21 @@ class AgentWorkbenchRunFactory(BaseService):
                     name=run_input.query[:255],
                     invoke_from=InvokeFrom.WEB_APP,
                     created_by=end_user.id,
+                    owner_account_id=account.id,
                 )
                 self.db.session.add(conversation)
             elif (
                 conversation.app_id != app.id
-                or conversation.invoke_from != InvokeFrom.WEB_APP
+                or conversation.invoke_from
+                not in {InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK}
                 or conversation.created_by not in {end_user.id, account.id}
                 or conversation.is_deleted is True
             ):
                 raise ForbiddenException("会话不存在或不属于当前用户")
+            elif conversation.owner_account_id is None:
+                conversation.owner_account_id = account.id
         include_opening_statement = self._is_first_message(conversation.id)
+        conversation.updated_at = datetime.now()
         attachments = self._resolve_attachments(run_input, owner_id=account.id)
         message = Message(
             id=uuid4(),
@@ -223,6 +239,80 @@ class AgentWorkbenchRunFactory(BaseService):
             user_id=end_user.id,
             end_user_id=end_user.id,
             invoke_from=InvokeFrom.WEB_APP,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
+            attachments=attachments,
+            selected_skills=run_input.selected_skills,
+            input_message_id=run_input.input_message_id,
+        )
+        return WorkbenchRun(
+            run_id=run_id,
+            thread_id=thread_id,
+            spec=request,
+            include_opening_statement=include_opening_statement,
+        )
+
+    def _create_creator_task_run(
+        self,
+        *,
+        app_id: UUID,
+        thread_id: UUID,
+        account: Account,
+        run_input: WorkbenchRunInput,
+        run_id: UUID,
+        authorized: AuthorizedWorkbenchContext,
+    ) -> WorkbenchRun:
+        """创建任务中心入口的消息和 WorkbenchRun。
+
+        Creator 直接使用已发布配置，但会话归属写入账号维度，因而可以
+        与同账号通过 WebApp 产生的历史会话互相展示。
+        """
+        app = authorized.app
+        conversation = authorized.conversation
+        if app is None:
+            raise ForbiddenException("Creator 任务授权上下文不完整")
+        if conversation is None:
+            conversation = Conversation(
+                id=thread_id,
+                app_id=app.id,
+                name=run_input.query[:255],
+                invoke_from=InvokeFrom.CREATOR_TASK,
+                created_by=account.id,
+                owner_account_id=account.id,
+            )
+            self.db.session.add(conversation)
+        elif conversation.is_deleted:
+            raise ForbiddenException("会话不存在或已删除")
+        elif conversation.owner_account_id is None:
+            conversation.owner_account_id = account.id
+
+        include_opening_statement = self._is_first_message(conversation.id)
+        conversation.updated_at = datetime.now()
+        attachments = self._resolve_attachments(run_input, owner_id=account.id)
+        message = Message(
+            id=uuid4(),
+            app_id=app.id,
+            conversation_id=conversation.id,
+            invoke_from=InvokeFrom.CREATOR_TASK,
+            created_by=account.id,
+            query=run_input.query,
+            image_urls=list(run_input.image_urls),
+            attachments=dump_agent_attachments(attachments),
+            status=MessageStatus.NORMAL,
+        )
+        self.db.session.add(message)
+        request = AgentInvocation(
+            account_id=account.id,
+            app_id=app.id,
+            app_name=app.name,
+            app_description=app.description,
+            app_config=AgentAppConfigReq(),
+            conversation_id=conversation.id,
+            message_id=message.id,
+            created_by=account.id,
+            user_id=account.id,
+            end_user_id=None,
+            invoke_from=InvokeFrom.CREATOR_TASK,
             query=run_input.query,
             image_urls=run_input.image_urls,
             attachments=attachments,

@@ -73,8 +73,12 @@ class AgentWorkbenchAccessService(BaseService):
                 conversation = self.db.session.get(Conversation, thread_id)
                 if conversation is not None and (
                     conversation.app_id != app.id
-                    or conversation.invoke_from != InvokeFrom.WEB_APP
-                    or conversation.created_by not in {end_user.id, account.id}
+                    or conversation.invoke_from
+                    not in {InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK}
+                    or not (
+                        conversation.owner_account_id == account.id
+                        or conversation.created_by in {end_user.id, account.id}
+                    )
                     or conversation.is_deleted is True
                 ):
                     raise ForbiddenException("会话不存在或不属于当前用户")
@@ -83,6 +87,44 @@ class AgentWorkbenchAccessService(BaseService):
                     conversation=conversation,
                     end_user=end_user,
                 )
+            if invoke_from is InvokeFrom.CREATOR_TASK:
+                app = (
+                    self.db.session.query(App)
+                    .filter(
+                        App.id == UUID(access_value),
+                        App.account_id == account.id,
+                        App.status == AppStatus.PUBLISHED,
+                    )
+                    .one_or_none()
+                )
+                if app is None:
+                    raise ForbiddenException("应用不存在、未发布或无权访问")
+                conversation = self.db.session.get(Conversation, thread_id)
+                if conversation is not None:
+                    end_user = (
+                        self.db.session.query(EndUser)
+                        .filter(
+                            EndUser.app_id == app.id,
+                            EndUser.external_user_id == account.id,
+                        )
+                        .one_or_none()
+                    )
+                    owner_matches = conversation.owner_account_id == account.id
+                    legacy_creator = conversation.created_by == account.id
+                    legacy_web_user = bool(
+                        end_user is not None
+                        and conversation.invoke_from == InvokeFrom.WEB_APP
+                        and conversation.created_by == end_user.id
+                    )
+                    if (
+                        conversation.app_id != app.id
+                        or conversation.invoke_from
+                        not in {InvokeFrom.CREATOR_TASK, InvokeFrom.WEB_APP}
+                        or not (owner_matches or legacy_creator or legacy_web_user)
+                        or conversation.is_deleted is True
+                    ):
+                        raise ForbiddenException("会话不存在或不属于当前账号")
+                return AuthorizedWorkbenchContext(app=app, conversation=conversation)
             if invoke_from is InvokeFrom.ASSISTANT_AGENT:
                 conversation = account.assistant_agent_conversation
                 if (
@@ -162,6 +204,53 @@ class AgentWorkbenchAccessService(BaseService):
             finally:
                 self.db.session.close()
             return
+        if invoke_from is InvokeFrom.CREATOR_TASK:
+            app = (
+                self.db.session.query(App)
+                .filter(
+                    App.id == UUID(access_value),
+                    App.account_id == account.id,
+                    App.status == AppStatus.PUBLISHED,
+                )
+                .one_or_none()
+            )
+            conversation = self.db.session.get(Conversation, thread_id)
+            if app is None:
+                self.db.session.close()
+                raise ForbiddenException("应用不存在、未发布或无权访问")
+            if conversation is None:
+                if allow_missing:
+                    self.db.session.close()
+                    return
+                raise ForbiddenException("会话不存在或不属于当前账号")
+            end_user = (
+                self.db.session.query(EndUser)
+                .filter(
+                    EndUser.app_id == app.id,
+                    EndUser.external_user_id == account.id,
+                )
+                .one_or_none()
+            )
+            if (
+                app is None
+                or conversation is None
+                or conversation.app_id != app.id
+                or conversation.invoke_from
+                not in {InvokeFrom.CREATOR_TASK, InvokeFrom.WEB_APP}
+                or conversation.is_deleted is True
+                or not (
+                    conversation.owner_account_id == account.id
+                    or conversation.created_by == account.id
+                    or (
+                        end_user is not None
+                        and conversation.invoke_from == InvokeFrom.WEB_APP
+                        and conversation.created_by == end_user.id
+                    )
+                )
+            ):
+                raise ForbiddenException("会话不存在或不属于当前账号")
+            self.db.session.close()
+            return
         if invoke_from is InvokeFrom.ASSISTANT_AGENT:
             conversation = self.db.session.get(Conversation, thread_id)
             configured_app_id = UUID(str(account.assistant_agent_conversation.app_id))
@@ -231,6 +320,29 @@ class AgentWorkbenchAccessService(BaseService):
                 conversation_id=run.thread_id,
                 account=account,
             )
+            return
+        if run.invoke_from == InvokeFrom.CREATOR_TASK.value:
+            app = (
+                self.db.session.query(App)
+                .filter(
+                    App.id == run.app_id,
+                    App.account_id == account.id,
+                    App.status == AppStatus.PUBLISHED,
+                )
+                .one_or_none()
+            )
+            conversation = self.db.session.get(Conversation, run.thread_id)
+            if (
+                app is None
+                or conversation is None
+                or conversation.app_id != run.app_id
+                or conversation.is_deleted
+                or not (
+                    conversation.owner_account_id == account.id
+                    or conversation.created_by == account.id
+                )
+            ):
+                raise ForbiddenException("Creator 任务 Run 不存在或无权访问")
             return
         if run.invoke_from == InvokeFrom.ASSISTANT_AGENT.value:
             conversation = self.db.session.get(Conversation, run.thread_id)

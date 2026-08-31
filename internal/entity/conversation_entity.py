@@ -88,6 +88,7 @@ class InvokeFrom(str, Enum):
     WEB_APP = "web_app"  # web应用
     DEBUGGER = "debugger"  # 调试页面
     ASSISTANT_AGENT = "assistant_agent"  # 辅助Agent调用
+    CREATOR_TASK = "creator_task"  # Agent 创建者任务中心
 
 
 class MessageStatus(str, Enum):

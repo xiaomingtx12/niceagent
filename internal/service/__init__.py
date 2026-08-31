@@ -44,6 +44,7 @@ from .workflow_service import WorkflowService
 from .agent_workbench_service import AgentWorkbenchService
 from .agent_workbench_access_service import AgentWorkbenchAccessService
 from .agent_workbench_run_service import AgentWorkbenchRunService
+from .creator_task_service import CreatorTaskService
 
 __all__ = [
     "BaseService",
@@ -92,4 +93,5 @@ __all__ = [
     "WorkspaceFileService",
     "WorkspaceFileStorageService",
     "MemoryFileService",
+    "CreatorTaskService",
 ]

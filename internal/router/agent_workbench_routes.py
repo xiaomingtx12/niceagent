@@ -64,6 +64,31 @@ def register_agent_workbench_routes(
         methods=["POST"],
         view_func=handler.web_app_cancel_run,
     )
+    blueprint.add_url_rule(
+        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/commands",
+        methods=["POST"],
+        view_func=handler.creator_task_command,
+    )
+    blueprint.add_url_rule(
+        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/stream",
+        methods=["POST"],
+        view_func=handler.creator_task_stream,
+    )
+    blueprint.add_url_rule(
+        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/state",
+        methods=["GET"],
+        view_func=handler.creator_task_state,
+    )
+    blueprint.add_url_rule(
+        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/messages",
+        methods=["GET"],
+        view_func=handler.creator_task_messages,
+    )
+    blueprint.add_url_rule(
+        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+        methods=["POST"],
+        view_func=handler.creator_task_cancel_run,
+    )
 
 
 def register_assistant_agent_protocol_routes(

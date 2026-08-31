@@ -34,6 +34,7 @@ from internal.handler import (
     AgentWorkbenchHandler,
     AssistantAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
+    CreatorTaskHandler,
 )
 from .agent_workbench_routes import (
     register_agent_workbench_routes,
@@ -80,6 +81,7 @@ class Router:
     agent_workbench_handler: AgentWorkbenchHandler
     assistant_agent_protocol_handler: AssistantAgentProtocolHandler
     openapi_agent_protocol_handler: OpenAPIAgentProtocolHandler
+    creator_task_handler: CreatorTaskHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -552,6 +554,43 @@ class Router:
         register_assistant_agent_protocol_routes(
             bp,
             self.assistant_agent_protocol_handler,
+        )
+        # Creator 任务中心的 Agent 列表与统一会话历史。
+        bp.add_url_rule(
+            "/tasks/agents", endpoint="creator_task_agents", view_func=self.creator_task_handler.get_agents
+        )
+        bp.add_url_rule(
+            "/tasks/agents/<uuid:app_id>",
+            endpoint="creator_task_agent",
+            view_func=self.creator_task_handler.get_agent,
+        )
+        bp.add_url_rule(
+            "/tasks/conversations",
+            endpoint="creator_task_conversations",
+            view_func=self.creator_task_handler.get_conversations,
+        )
+        bp.add_url_rule(
+            "/tasks/conversations/<uuid:conversation_id>",
+            endpoint="creator_task_conversation",
+            view_func=self.creator_task_handler.get_conversation,
+        )
+        bp.add_url_rule(
+            "/tasks/conversations/<uuid:conversation_id>/name",
+            methods=["PATCH"],
+            endpoint="creator_task_conversation_name",
+            view_func=self.creator_task_handler.update_conversation_name,
+        )
+        bp.add_url_rule(
+            "/tasks/conversations/<uuid:conversation_id>/is-pinned",
+            methods=["PATCH"],
+            endpoint="creator_task_conversation_pin",
+            view_func=self.creator_task_handler.update_conversation_is_pinned,
+        )
+        bp.add_url_rule(
+            "/tasks/conversations/<uuid:conversation_id>",
+            methods=["DELETE"],
+            endpoint="creator_task_conversation_delete",
+            view_func=self.creator_task_handler.delete_conversation,
         )
         # endregion
 

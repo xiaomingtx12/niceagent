@@ -25,6 +25,7 @@ class Conversation(db.Model):
         PrimaryKeyConstraint("id", name="pk_conversation_id"),
         Index("conversation_app_id_idx", "app_id"),
         Index("conversation_app_created_by_idx", "created_by"),
+        Index("conversation_owner_account_idx", "owner_account_id"),
     )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
@@ -48,6 +49,10 @@ class Conversation(db.Model):
         UUID,
         nullable=True,
     )  # 会话创建者，会随着invoke_from的差异记录不同的信息，其中web_app和debugger会记录账号id、service_api会记录终端用户id
+    owner_account_id = Column(
+        UUID,
+        nullable=True,
+    )  # 登录账号维度的会话归属，用于 Creator 与 WebApp 历史互通
     updated_at = Column(
         DateTime,
         nullable=False,

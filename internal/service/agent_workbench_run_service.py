@@ -594,7 +594,6 @@ class AgentWorkbenchRunService(BaseService):
                 and_(
                     AgentRun.message_id == Message.id,
                     AgentRun.thread_id == thread_id,
-                    AgentRun.invoke_from == invoke_from.value,
                 ),
             )
             .filter(

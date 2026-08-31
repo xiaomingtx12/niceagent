@@ -62,6 +62,7 @@ class AgentWorkbenchService(BaseService):
             access_value=access_value,
             thread_id=thread_id,
             account=account,
+            allow_missing=invoke_from is InvokeFrom.CREATOR_TASK,
         )
         return self.stream_service.subscribe(
             invoke_from=invoke_from,
@@ -83,6 +84,7 @@ class AgentWorkbenchService(BaseService):
             access_value=access_value,
             thread_id=thread_id,
             account=account,
+            allow_missing=invoke_from is InvokeFrom.CREATOR_TASK,
         )
         return self.run_service.get_state(
             invoke_from=invoke_from,
@@ -106,6 +108,7 @@ class AgentWorkbenchService(BaseService):
             access_value=access_value,
             thread_id=thread_id,
             account=account,
+            allow_missing=invoke_from is InvokeFrom.CREATOR_TASK,
         )
         return self.run_service.get_message_page(
             thread_id=thread_id,
