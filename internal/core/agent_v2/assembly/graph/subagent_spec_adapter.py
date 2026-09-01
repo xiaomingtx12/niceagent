@@ -95,10 +95,17 @@ def build_async_subagent_specs(
     for config in subagents or []:
         if config.get("mode", "sync") != "async":
             continue
+        # graph_id 是 Agent Protocol 服务上的 graph key/assistant ID；
+        # url 仅在跨部署 HTTP 调用时提供，省略时由 SDK 使用 ASGI transport。
+        graph_id = config.get("graph_id")
+        if not isinstance(graph_id, str) or not graph_id.strip():
+            raise SubAgentConfigError(
+                f"subagent {config.get('name', '<unknown>')!r} 缺少 graph_id"
+            )
         spec: dict[str, Any] = {
             "name": config["name"],
             "description": config["description"],
-            "graph_id": config["graph_id"],
+            "graph_id": graph_id,
         }
         if config.get("url"):
             spec["url"] = config["url"]
@@ -140,6 +147,11 @@ def _build_subagent_permissions(
     )
     permissions.extend(
         [
+            FilesystemPermission(
+                operations=["read"],
+                paths=["/"],
+                mode="allow",
+            ),
             FilesystemPermission(
                 operations=["read"],
                 paths=["/", "/**"],

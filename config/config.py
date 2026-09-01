@@ -146,6 +146,21 @@ class Config:
         self.WORKSPACE_DOWNLOAD_URL_TTL_SECONDS = _get_workspace_limit(
             "WORKSPACE_DOWNLOAD_URL_TTL_SECONDS"
         )
+        self.AGENT_INTERNAL_PROTOCOL_BASE_URL = str(
+            _get_env("AGENT_INTERNAL_PROTOCOL_BASE_URL")
+            or "http://127.0.0.1:5000/agent-protocol"
+        ).rstrip("/")
+        self.AGENT_INTERNAL_PROTOCOL_SECRET = str(
+            _get_env("AGENT_INTERNAL_PROTOCOL_SECRET")
+            or os.getenv("JWT_SECRET_KEY", "")
+        )
+        self.AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS = int(
+            _get_env("AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS")
+        )
+        if self.AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS < 60:
+            raise ValueError(
+                "AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS 必须至少为 60 秒"
+            )
         self._validate_database_settings()
         self._validate_agent_settings()
 
@@ -298,9 +313,17 @@ class Config:
             "bwrap",
             "langsmith",
             "daytona",
+            "local_shell",
         }:
             raise ValueError(
-                "AGENT_SANDBOX_PROVIDER 必须是 disabled、bubblewrap、langsmith 或 daytona"
+                "AGENT_SANDBOX_PROVIDER 必须是 disabled、bubblewrap、langsmith、daytona 或 local_shell"
+            )
+        if (
+            os.getenv("FLASK_ENV", "").lower() == "production"
+            and self.AGENT_SANDBOX_PROVIDER == "local_shell"
+        ):
+            raise ValueError(
+                "生产环境禁止使用 local_shell，请配置 bubblewrap、langsmith 或 daytona"
             )
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"

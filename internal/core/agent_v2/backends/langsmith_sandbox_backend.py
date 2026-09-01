@@ -115,8 +115,8 @@ def build_sandbox_backend(
     """按配置创建 Sandbox，并上传本次运行所需的初始文件。
 
     ``bubblewrap`` 是 4 核 4G 单机部署的默认推荐 Provider；LangSmith 和
-    Daytona 作为可选的托管 Provider 保留。所有启用的 Provider 都使用同一套
-    Workspace 增量同步。
+    Daytona 作为可选的托管 Provider 保留，``local_shell`` 仅供 Windows 开发联调。
+    所有启用的 Provider 都使用同一套 Workspace 增量同步。
     """
     provider = str(getattr(settings, "AGENT_SANDBOX_PROVIDER", "disabled")).lower()
     if provider in {"disabled", "none", "off", "false"}:
@@ -156,6 +156,21 @@ def build_sandbox_backend(
             raise SandboxProviderError(
                 "failed to initialize Bubblewrap Sandbox"
             ) from exc
+    if provider == "local_shell":
+        if getattr(settings, "AGENT_SANDBOX_SNAPSHOT_ID", None):
+            raise SandboxProviderError(
+                "AGENT_SANDBOX_SNAPSHOT_ID 仅适用于 langsmith Sandbox"
+            )
+        from internal.core.agent_v2.backends.local_shell_backend import (
+            build_local_shell_backend,
+        )
+
+        return build_local_shell_backend(
+            settings=settings,
+            workspace=workspace,
+            skill_files=list(skill_files),
+            telemetry=telemetry,
+        )
     if provider == "daytona":
         try:
             from internal.core.agent_v2.backends.daytona_sandbox_backend import (

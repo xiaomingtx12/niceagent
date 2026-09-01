@@ -75,8 +75,9 @@ class BuiltinSkill:
 class SkillService(BaseService):
     """读取内置 Skill 目录并校验 AppConfig 的绑定。
 
-    Skill 内容来自版本化内置目录，应用配置只保存绑定引用；虚拟路径
-    和 Backend 路由的创建由 Agent Core 的 SkillContextAssembler 完成。
+    Skill 内容来自版本化内置目录，应用配置只保存绑定引用。内置包在同一
+    版本内发生修订时，旧摘要会在读取时自动刷新；版本变化仍要求显式更新。
+    虚拟路径和 Backend 路由的创建由 Agent Core 的 SkillContextAssembler 完成。
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -138,7 +139,7 @@ class SkillService(BaseService):
         self,
         bindings: Sequence[SkillBindingReq | dict[str, Any]] | None,
     ) -> list[dict[str, Any]]:
-        """解析 Skill 绑定，并校验目录版本和摘要。"""
+        """解析 Skill 绑定，并刷新同版本内置包的过期摘要。"""
         try:
             parsed = SkillBindingListReq.model_validate(bindings or []).root
         except ValidationError as exc:
@@ -152,9 +153,10 @@ class SkillService(BaseService):
                 raise FailException(f"Skill 不存在或未内置: {name}")
             skill = catalog[name]
             version = binding.version or skill.version
-            digest = binding.digest or skill.digest
-            if version != skill.version or digest != skill.digest:
-                raise FailException(f"Skill 版本或摘要不匹配: {name}")
+            if version != skill.version:
+                raise FailException(f"Skill 版本不匹配: {name}")
+            # 摘要是内置包内容的缓存指纹。平台升级同一 manifest 版本的
+            # 指令或参考文件后，历史 AppConfig 仍可运行并获得新摘要。
             normalized.append(
                 {
                     "name": skill.name,

@@ -27,6 +27,10 @@ from internal.core.agent_v2.entity.agent_config import AgentConfig
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.subagent_config import (
     SubAgentConfig,
+    build_published_graph_id,
+)
+from internal.core.agent_v2.protocol.internal_auth import (
+    issue_internal_agent_protocol_token,
 )
 from internal.core.agent_v2.execution.agent_executor import AgentExecutor
 from internal.core.agent_v2.execution.run_resources import AgentRuntimeResources
@@ -91,6 +95,7 @@ class AgentAssemblyService(BaseService):
     agent_attachment_service: AgentAttachmentService
     skill_service: SkillService
     workspace_file_storage_service: WorkspaceFileStorageService
+    config: Config
 
     def build_agent(
         self,
@@ -133,6 +138,7 @@ class AgentAssemblyService(BaseService):
         runtime_subagents, subagent_tools, subagent_models = self._prepare_subagents(
             req.app_config.subagents,
             account_id=req.account_id,
+            parent_app_id=req.app_id,
         )
         self._log_build_timing(req, "subagents", phase_started_at)
         phase_started_at = time.monotonic()
@@ -246,7 +252,7 @@ class AgentAssemblyService(BaseService):
             app_id=req.app_id,
             bindings=list(req.skill_bindings),
         )
-        settings = Config()
+        settings = self.config
         runtime_session = sessionmaker(
             bind=self.db.engine,
             expire_on_commit=False,
@@ -426,6 +432,7 @@ class AgentAssemblyService(BaseService):
         subagents: Sequence[SubAgentConfig],
         *,
         account_id: UUID,
+        parent_app_id: UUID,
     ) -> tuple[
         list[SubAgentConfig],
         dict[str, list[BaseTool]],
@@ -465,6 +472,25 @@ class AgentAssemblyService(BaseService):
                 raise AgentInvocationException(
                     f"子 Agent 引用的发布应用 {target_id} 不存在或已取消发布"
                 )
+
+            # 异步发布 Agent 由独立 Workbench Run 执行，不在父图内加载目标模型、工具和 Skill。
+            if config.mode == "async":
+                internal_transport = self._build_internal_async_transport(
+                    account_id=account_id,
+                    parent_app_id=parent_app_id,
+                    target_app_id=target_id,
+                    headers=config.headers,
+                )
+                normalized.append(
+                    config.model_copy(
+                        deep=True,
+                        update={
+                            "graph_id": build_published_graph_id(target_id),
+                            **internal_transport,
+                        },
+                    )
+                )
+                continue
 
             # 4.加载发布应用的工具、知识库和工作流能力。
             try:
@@ -525,6 +551,40 @@ class AgentAssemblyService(BaseService):
             tool_overrides,
             model_overrides,
         )
+
+    def _build_internal_async_transport(
+        self,
+        *,
+        account_id: UUID,
+        parent_app_id: UUID,
+        target_app_id: UUID,
+        headers: dict[str, str],
+    ) -> dict[str, object]:
+        """为平台内部发布 Agent 绑定 URL 和不可伪造的作用域凭证。"""
+        base_url = self.config.AGENT_INTERNAL_PROTOCOL_BASE_URL.rstrip("/")
+        secret = self.config.AGENT_INTERNAL_PROTOCOL_SECRET
+        ttl_seconds = self.config.AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS
+        token = issue_internal_agent_protocol_token(
+            account_id=account_id,
+            parent_app_id=parent_app_id,
+            target_app_id=target_app_id,
+            secret=secret,
+            ttl_seconds=ttl_seconds,
+        )
+        # 禁止持久化配置伪造内部凭证；大小写不同的 HTTP Header 也必须移除，
+        # 否则 HTTP 客户端可能发送重复 Header，导致服务端解析结果不确定。
+        safe_headers = {
+            key: value
+            for key, value in headers.items()
+            if key.lower() != "x-mydify-internal-token"
+        }
+        return {
+            "url": base_url,
+            "headers": {
+                **safe_headers,
+                "X-MyDify-Internal-Token": token,
+            },
+        }
 
     def _load_subagent_model(
         self,

@@ -24,8 +24,14 @@ MAX_SUBAGENT_GRAPH_ID_LENGTH = 255
 MAX_SUBAGENT_HEADER_COUNT = 32
 MAX_SUBAGENT_HEADER_NAME_LENGTH = 128
 MAX_SUBAGENT_HEADER_VALUE_LENGTH = 2048
+PUBLISHED_GRAPH_ID_PREFIX = "mydify:published:"
 
 _SUBAGENT_NAME = re.compile(r'^(?!\.{1,2}$)[^\x00-\x1f/\\:*?"<>|]+$')
+
+
+def build_published_graph_id(app_id: UUID | str) -> str:
+    """构造 MyDify 已发布 Agent 的稳定 graph ID。"""
+    return f"{PUBLISHED_GRAPH_ID_PREFIX}{app_id}"
 
 
 class SubAgentConfig(BaseModel):
@@ -55,10 +61,32 @@ class SubAgentConfig(BaseModel):
     graph_id: StrictStr | None = Field(
         default=None,
         max_length=MAX_SUBAGENT_GRAPH_ID_LENGTH,
+        description="Agent Protocol 服务注册的 graph key 或 assistant ID",
     )
-    url: StrictStr | None = None
+    url: StrictStr | None = Field(
+        default=None,
+        description="远程 Agent Protocol 服务地址；省略时使用同部署 ASGI transport",
+    )
     headers: dict[StrictStr, StrictStr] = Field(default_factory=dict)
     published_app_id: UUID | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def fill_published_graph_id(cls, value: Any) -> Any:
+        """为已发布异步 Agent 自动补齐平台 graph ID。"""
+        if not isinstance(value, dict):
+            return value
+        mode = str(value.get("mode", "sync")).lower()
+        source = str(value.get("source", "custom")).lower()
+        if (
+            mode == "async"
+            and source == "published"
+            and value.get("published_app_id")
+            and not value.get("graph_id")
+        ):
+            value = dict(value)
+            value["graph_id"] = build_published_graph_id(value["published_app_id"])
+        return value
 
     @field_validator("name")
     @classmethod
@@ -108,7 +136,7 @@ class SubAgentConfig(BaseModel):
     @classmethod
     def validate_url(cls, value: StrictStr | None) -> StrictStr | None:
         """校验远程 SubAgent 地址。"""
-        if value is None:
+        if value is None or not value.strip():
             return None
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -135,12 +163,14 @@ class SubAgentConfig(BaseModel):
     def validate_mode_constraints(self) -> "SubAgentConfig":
         """校验同步、异步和发布 Agent 之间的字段约束。"""
         if self.mode == "async":
-            if self.source != "custom":
-                raise ValueError("发布 Agent 只能以 sync 模式引用")
-            if not self.graph_id:
+            if self.source == "published":
+                if self.published_app_id is None:
+                    raise ValueError("异步发布 SubAgent 缺少 published_app_id")
+                expected_graph_id = build_published_graph_id(self.published_app_id)
+                if self.graph_id != expected_graph_id:
+                    raise ValueError("异步发布 SubAgent 的 graph_id 与发布应用不匹配")
+            elif not self.graph_id:
                 raise ValueError("异步 SubAgent 缺少 graph_id")
-            if not self.url:
-                raise ValueError("异步 SubAgent 缺少 url")
             if self.system_prompt or self.tools or self.skills or self.model:
                 raise ValueError(
                     "异步 SubAgent 不支持 system_prompt、tools、skills 或 model"
@@ -165,4 +195,9 @@ class SubAgentConfigList(RootModel[list[SubAgentConfig]]):
         return self
 
 
-__all__ = ["SubAgentConfig", "SubAgentConfigList"]
+__all__ = [
+    "PUBLISHED_GRAPH_ID_PREFIX",
+    "SubAgentConfig",
+    "SubAgentConfigList",
+    "build_published_graph_id",
+]

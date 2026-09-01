@@ -325,6 +325,17 @@ class DraftAppConfigPatchReq(BaseModel):
     suggested_after_answer: ToggleConfigReq | None = None
     review_config: ReviewConfigReq | None = None
 
+    @field_validator("model_config_data", mode="before")
+    @classmethod
+    def normalize_empty_model_config(cls, value: Any) -> Any:
+        """允许前端在尚未选择模型时提交空模型配置。
+
+        新建 Agent 的默认配置中模型暂时为空，空对象不应被当作一个
+        ``AppModelConfigReq`` 进行字段校验；真正运行或读取配置时会由
+        AppConfigService 解析并补充当前账号的默认模型。
+        """
+        return None if value == {} else value
+
     @model_validator(mode="before")
     @classmethod
     def reject_null_fields(cls, value: Any) -> Any:

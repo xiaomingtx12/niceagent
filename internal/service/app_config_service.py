@@ -174,11 +174,17 @@ class AppConfigService(BaseService):
             if config.mode == "async":
                 item.update(
                     {
+                        "source": config.source,
                         "graph_id": config.graph_id,
-                        "url": config.url,
                         "headers": dict(config.headers),
                     }
                 )
+                if config.source == "published":
+                    item["published_app_id"] = str(config.published_app_id)
+                # DeepAgents 的 AsyncSubAgent 将 url 作为可选 transport 配置；
+                # 未配置时省略字段，由运行时按来源解析内部或外部 transport。
+                if config.url is not None:
+                    item["url"] = config.url
             else:
                 item["system_prompt"] = config.system_prompt
                 if config.source == "published":
@@ -962,6 +968,12 @@ class AppConfigService(BaseService):
         def default_active_model_config() -> dict[str, Any]:
             """返回当前账号可用的默认激活模型配置。"""
             return self.language_model_service.get_default_model_config(account_id)
+
+        # 新建应用时 DEFAULT_APP_CONFIG 中的 model_config 为空对象。
+        # 空对象表示“尚未选择模型”，不是一个待解析的 AppModelConfigReq；
+        # 这里直接使用当前账号已激活的默认对话模型，并在调用方同步回数据库。
+        if origin_model_config == {}:
+            return default_active_model_config()
 
         try:
             parsed = AppModelConfigReq.model_validate(origin_model_config)

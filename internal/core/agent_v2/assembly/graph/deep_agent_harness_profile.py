@@ -12,6 +12,10 @@ from deepagents import (
 )
 from langchain_core.language_models import BaseChatModel
 
+from internal.core.agent_v2.middleware.filesystem_input_middleware import (
+    FilesystemInputMiddleware,
+)
+
 
 class HarnessProfileError(RuntimeError):
     """模型无法绑定平台安全配置时抛出。"""
@@ -58,7 +62,10 @@ def register_platform_harness_profile(
             register_harness_profile(
                 key,
                 HarnessProfile(
-                    general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=True)
+                    # Profile 中的中间件会同时应用到主 Agent 和默认
+                    # general-purpose 子 Agent，保持文件工具行为一致。
+                    extra_middleware=(FilesystemInputMiddleware(),),
+                    general_purpose_subagent=GeneralPurposeSubagentProfile(enabled=True),
                 ),
             )
             _REGISTERED_PROFILES.add(key)
