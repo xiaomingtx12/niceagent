@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from daytona import Daytona, DaytonaConfig
+from daytona.common.errors import DaytonaError
 from langchain_daytona import DaytonaSandbox
 
 from internal.core.agent_v2.assembly.observability.telemetry import (
@@ -163,6 +164,12 @@ def build_daytona_backend(
             close_workspace_safely(workspace, telemetry=telemetry)
         if isinstance(exc, SandboxProviderError):
             raise
+        if isinstance(exc, DaytonaError):
+            detail = str(exc).strip()
+            message = "failed to create Daytona Sandbox"
+            if detail:
+                message = f"{message}: {detail}"
+            raise SandboxProviderError(message) from exc
         raise SandboxProviderError("failed to create Daytona Sandbox") from exc
 
 
