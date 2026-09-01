@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import and_, desc, or_
+from sqlalchemy import and_, desc, or_, select
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
@@ -37,10 +37,8 @@ class CreatorTaskService(BaseService):
         ``owner_account_id`` 是新数据的稳定归属；created_by 和 EndUser
         条件用于兼容历史 WebApp 会话，待业务侧完成数据回填后仍可保留。
         """
-        legacy_end_users = (
-            self.db.session.query(EndUser.id)
-            .filter(EndUser.external_user_id == account.id)
-            .subquery()
+        legacy_end_users = select(EndUser.id).where(
+            EndUser.external_user_id == account.id
         )
         ownership = or_(
             Conversation.owner_account_id == account.id,

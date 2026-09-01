@@ -10,6 +10,7 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
 )
 from internal.core.agent_v2.backends.bubblewrap_sandbox_backend import (
     BubblewrapSandbox,
+    BubblewrapSandboxError,
 )
 from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
 from internal.core.agent_v2.backends.sandbox_workspace_sync import (
@@ -112,6 +113,8 @@ def build_bubblewrap_backend(
         close_workspace_safely(workspace, telemetry=telemetry)
         if isinstance(exc, SandboxProviderError):
             raise
+        if isinstance(exc, BubblewrapSandboxError):
+            raise SandboxProviderError(str(exc)) from exc
         raise SandboxProviderError("failed to create Bubblewrap Sandbox") from exc
 
 
