@@ -14,6 +14,8 @@ from deepagents.backends.protocol import (
 
 from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
 from internal.core.agent_v2.backends.sandbox_workspace_sync import (
+    close_workspace_safely,
+    make_skill_projection_read_only,
     sync_workspace_changes,
     sync_workspace_into_sandbox,
 )
@@ -61,15 +63,13 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
                 attributes={"sandbox_id": self.id},
             )
         finally:
-            try:
-                self._workspace.close()
-            except Exception as exc:  # noqa: BLE001
-                if sync_error is None:
-                    sync_error = exc
-                self._telemetry.emit(
-                    "sandbox.workspace_close_failed",
-                    attributes={"sandbox_id": self.id},
-                )
+            workspace_close_error = close_workspace_safely(
+                self._workspace,
+                telemetry=self._telemetry,
+                sandbox_id=self.id,
+            )
+            if sync_error is None and workspace_close_error is not None:
+                sync_error = workspace_close_error
             self._closed = True
         if sync_error is not None:
             raise SandboxProviderError(
@@ -80,12 +80,12 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
         """在会话或应用删除时显式清理远程 Sandbox。"""
         if self._remote_deleted:
             return
-        self._remote_deleted = True
         from langsmith.sandbox import ResourceNotFoundError
 
         try:
             self._client.delete_sandbox(self.id)
         except ResourceNotFoundError:
+            self._remote_deleted = True
             return
         except Exception as exc:  # noqa: BLE001
             self._telemetry.emit(
@@ -93,6 +93,7 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
                 attributes={"sandbox_id": self.id},
             )
             raise SandboxProviderError(f"failed to delete Sandbox {self.id}") from exc
+        self._remote_deleted = True
 
     def _sync_workspace_from_sandbox(self) -> None:
         """只把新增、变更和删除同步回权威 Workspace。"""
@@ -113,8 +114,9 @@ def build_sandbox_backend(
 ) -> SandboxBackendProtocol | None:
     """按配置创建 Sandbox，并上传本次运行所需的初始文件。
 
-    ``bubblewrap`` 是 4 核 4G 单机部署的默认推荐 Provider；LangSmith
-    仍作为可选的托管 Provider 保留。两者都使用同一套 Workspace 增量同步。
+    ``bubblewrap`` 是 4 核 4G 单机部署的默认推荐 Provider；LangSmith 和
+    Daytona 作为可选的托管 Provider 保留。所有启用的 Provider 都使用同一套
+    Workspace 增量同步。
     """
     provider = str(getattr(settings, "AGENT_SANDBOX_PROVIDER", "disabled")).lower()
     if provider in {"disabled", "none", "off", "false"}:
@@ -154,6 +156,22 @@ def build_sandbox_backend(
             raise SandboxProviderError(
                 "failed to initialize Bubblewrap Sandbox"
             ) from exc
+    if provider == "daytona":
+        try:
+            from internal.core.agent_v2.backends.daytona_sandbox_backend import (
+                build_daytona_backend,
+            )
+        except ImportError as exc:
+            raise SandboxProviderError(
+                "Daytona provider requires langchain-daytona and daytona"
+            ) from exc
+
+        return build_daytona_backend(
+            settings=settings,
+            workspace=workspace,
+            skill_files=list(skill_files),
+            telemetry=telemetry,
+        )
     if provider != "langsmith":
         raise SandboxProviderError(f"unsupported AGENT_SANDBOX_PROVIDER: {provider}")
 
@@ -204,7 +222,7 @@ def build_sandbox_backend(
         if files:
             responses = backend.upload_files(files)
             _raise_for_upload_errors(responses)
-            _make_skill_projection_read_only(backend)
+            make_skill_projection_read_only(backend)
         return backend
     except Exception as exc:  # noqa: BLE001
         if backend is not None:
@@ -223,9 +241,13 @@ def build_sandbox_backend(
                     client.delete_sandbox(sandbox.name)
                 except Exception:
                     pass
-            workspace.close()
+            close_workspace_safely(
+                workspace,
+                telemetry=telemetry,
+                sandbox_id=getattr(sandbox, "id", None),
+            )
         else:
-            workspace.close()
+            close_workspace_safely(workspace, telemetry=telemetry)
         if isinstance(exc, SandboxProviderError):
             raise
         raise SandboxProviderError("failed to create LangSmith Sandbox") from exc
@@ -241,18 +263,6 @@ def _reset_sandbox_projection(backend: ManagedLangSmithSandbox) -> None:
     result = backend.execute(command)
     if result.exit_code not in (0, None):
         raise SandboxProviderError("failed to reset Sandbox projections")
-
-
-def _make_skill_projection_read_only(backend: ManagedLangSmithSandbox) -> None:
-    """把 Sandbox 中的 Skill 副本设置为操作系统只读。"""
-    command = (
-        "for path in /skills /subagent_skills; do "
-        'if [ -e "$path" ]; then chmod -R a-w -- "$path"; fi; '
-        "done"
-    )
-    result = backend.execute(command)
-    if result.exit_code not in (0, None):
-        raise SandboxProviderError("failed to protect Sandbox Skill files")
 
 
 def _raise_for_upload_errors(

@@ -34,6 +34,9 @@ langchain-openai==1.1.7
 langchain-protocol==0.0.18
 langchain_text_splitters==1.1.0
 langchain_weaviate==0.0.6
+# langchain-daytona 0.0.7 matches deepagents 0.6.x; Daytona 0.207.1 requires Pydantic >=2.13.4.
+langchain-daytona==0.0.7
+daytona==0.207.1
 langgraph==1.2.9
 langgraph-checkpoint==4.1.1
 langgraph-checkpoint-postgres==3.0.5
@@ -92,7 +95,7 @@ jsonpatch==1.33
 marshmallow==3.26.2
 numpy==2.4.0
 orjson==3.11.5
-pydantic==2.12.5
+pydantic==2.13.4
 cryptography==46.0.5
 PyJWT==2.10.1
 python-dotenv==1.2.1

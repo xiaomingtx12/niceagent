@@ -7,8 +7,49 @@ from pathlib import PurePosixPath
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
+from internal.core.agent_v2.assembly.observability.telemetry import (
+    AgentTelemetry,
+    NOOP_AGENT_TELEMETRY,
+)
 from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
 from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
+
+
+def close_workspace_safely(
+    workspace: AgentWorkspaceBackend,
+    *,
+    telemetry: AgentTelemetry | None = None,
+    sandbox_id: str | None = None,
+) -> Exception | None:
+    """关闭 Workspace；返回清理异常，避免覆盖主异常。"""
+    try:
+        workspace.close()
+    except Exception as exc:  # noqa: BLE001
+        (telemetry or NOOP_AGENT_TELEMETRY).emit(
+            "sandbox.workspace_close_failed",
+            attributes={"sandbox_id": sandbox_id},
+        )
+        return exc
+    return None
+
+
+def ensure_sandbox_workspace(backend: SandboxBackendProtocol) -> None:
+    """确保远程 Provider 提供可用的权威 Workspace 目录。"""
+    result = backend.execute("mkdir -p /workspace")
+    if result.exit_code not in (0, None):
+        raise SandboxProviderError("failed to create Sandbox Workspace directory")
+
+
+def make_skill_projection_read_only(backend: SandboxBackendProtocol) -> None:
+    """把 Sandbox 中的 Skill 副本设置为操作系统只读。"""
+    command = (
+        "for path in /skills /subagent_skills; do "
+        'if [ -e "$path" ]; then chmod -R a-w -- "$path"; fi; '
+        "done"
+    )
+    result = backend.execute(command)
+    if result.exit_code not in (0, None):
+        raise SandboxProviderError("failed to protect Sandbox Skill files")
 
 
 def sync_workspace_changes(
@@ -116,4 +157,10 @@ def _normalize_sandbox_workspace_path(path: object) -> str | None:
     return candidate.as_posix()
 
 
-__all__ = ["sync_workspace_changes", "sync_workspace_into_sandbox"]
+__all__ = [
+    "close_workspace_safely",
+    "ensure_sandbox_workspace",
+    "make_skill_projection_read_only",
+    "sync_workspace_changes",
+    "sync_workspace_into_sandbox",
+]

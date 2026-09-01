@@ -28,7 +28,7 @@ Agent、语音转换等能力。
 - FAISS
 - LangChain / LangGraph
 - MCP
-- 沙箱执行：Bubblewrap（Linux 单机隔离）或可选 LangSmith Sandbox
+- 沙箱执行：Bubblewrap（Linux 单机隔离）或可选 LangSmith / Daytona Sandbox
 
 ## 项目结构
 
@@ -128,6 +128,17 @@ namespace；`/workspace` 可写，`/skills` 和 `/subagent_skills` 以只读挂�
 
 `AGENT_SANDBOX_PROVIDER=langsmith` 仍可选用托管沙箱，但需要
 `LANGSMITH_API_KEY`，并会产生 Provider 费用；`disabled` 表示不提供 `execute` 工具。
+也可以使用 Daytona 托管沙箱：
+
+```env
+AGENT_SANDBOX_PROVIDER=daytona
+DAYTONA_API_KEY=your_daytona_api_key
+DAYTONA_API_URL=https://app.daytona.io/api
+```
+
+Daytona 按 Run 创建临时 Sandbox，结束时先把 `/workspace` 增量同步回项目 Workspace，
+再调用 `sandbox.stop()`；它不会跨对话复用。Daytona 依赖 `langchain-daytona==0.0.7`
+以匹配当前 `deepagents==0.6.12`，切换 Provider 只需修改 `.env` 并重启服务。
 Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产入口脚本会在启用沙箱时
 检查该可执行文件并执行一次最小 namespace 烟雾检查。
 

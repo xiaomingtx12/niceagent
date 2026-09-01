@@ -13,6 +13,7 @@ from internal.core.agent_v2.backends.bubblewrap_sandbox_backend import (
 )
 from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
 from internal.core.agent_v2.backends.sandbox_workspace_sync import (
+    close_workspace_safely,
     sync_workspace_changes,
 )
 from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
@@ -67,17 +68,14 @@ class ManagedBubblewrapSandbox(BubblewrapSandbox):
             except Exception as exc:  # noqa: BLE001
                 if sync_error is None:
                     sync_error = exc
-            try:
-                self._workspace.close()
-            except Exception as exc:  # noqa: BLE001
-                if sync_error is None:
-                    sync_error = exc
-                self._telemetry.emit(
-                    "sandbox.workspace_close_failed",
-                    attributes={"sandbox_id": self.id},
-                )
-            finally:
-                self._managed_closed = True
+            workspace_close_error = close_workspace_safely(
+                self._workspace,
+                telemetry=self._telemetry,
+                sandbox_id=self.id,
+            )
+            if sync_error is None and workspace_close_error is not None:
+                sync_error = workspace_close_error
+            self._managed_closed = True
         if sync_error is not None:
             raise SandboxProviderError(
                 f"failed to close Sandbox {self.id}"
@@ -111,7 +109,7 @@ def build_bubblewrap_backend(
         )
         return backend
     except Exception as exc:  # noqa: BLE001
-        workspace.close()
+        close_workspace_safely(workspace, telemetry=telemetry)
         if isinstance(exc, SandboxProviderError):
             raise
         raise SandboxProviderError("failed to create Bubblewrap Sandbox") from exc

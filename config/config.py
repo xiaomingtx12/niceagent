@@ -133,6 +133,10 @@ class Config:
         self.AGENT_SANDBOX_MAX_OUTPUT_BYTES = int(
             _get_env("AGENT_SANDBOX_MAX_OUTPUT_BYTES")
         )
+        self.DAYTONA_API_KEY = str(_get_env("DAYTONA_API_KEY") or "")
+        self.DAYTONA_API_URL = str(
+            _get_env("DAYTONA_API_URL") or "https://app.daytona.io/api"
+        ).rstrip("/")
         self.BUILTIN_SKILLS_ROOT = _get_env("BUILTIN_SKILLS_ROOT")
         self.WORKSPACE_MAX_BYTES = _get_workspace_limit("WORKSPACE_MAX_BYTES")
         self.WORKSPACE_MAX_FILES = _get_workspace_limit("WORKSPACE_MAX_FILES")
@@ -293,9 +297,18 @@ class Config:
             "bubblewrap",
             "bwrap",
             "langsmith",
+            "daytona",
         }:
             raise ValueError(
-                "AGENT_SANDBOX_PROVIDER 必须是 disabled、bubblewrap 或 langsmith"
+                "AGENT_SANDBOX_PROVIDER 必须是 disabled、bubblewrap、langsmith 或 daytona"
+            )
+        if (
+            os.getenv("FLASK_ENV", "").lower() == "production"
+            and self.AGENT_SANDBOX_PROVIDER == "daytona"
+            and not self.DAYTONA_API_KEY
+        ):
+            raise ValueError(
+                "生产环境启用 Daytona Sandbox 时必须配置 DAYTONA_API_KEY"
             )
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"

@@ -197,6 +197,28 @@ def check_sandbox_provider(*, required: bool) -> ValidationCheck:
             "pass",
             "Bubblewrap executable and namespace smoke check passed",
         )
+    if provider == "daytona":
+        try:
+            from daytona import Daytona, DaytonaConfig
+            from langchain_daytona import DaytonaSandbox
+        except ImportError:
+            return ValidationCheck(
+                "sandbox_provider",
+                "fail" if required else "skip",
+                "Daytona Sandbox dependencies are not installed",
+            )
+        del Daytona, DaytonaConfig, DaytonaSandbox
+        if required and not os.getenv("DAYTONA_API_KEY"):
+            return ValidationCheck(
+                "sandbox_provider",
+                "fail",
+                "DAYTONA_API_KEY is required for Daytona Sandbox",
+            )
+        return ValidationCheck(
+            "sandbox_provider",
+            "pass",
+            "Daytona Sandbox dependencies are available",
+        )
     if provider != "langsmith":
         return ValidationCheck(
             "sandbox_provider",

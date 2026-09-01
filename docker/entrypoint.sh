@@ -3,8 +3,7 @@
 # 1.启用错误检查
 set -e
 
-# Fail closed before starting a production process. Script execution makes the
-# Bubblewrap smoke test mandatory.
+# Validate the selected Sandbox provider before starting a production process.
 if [[ "${FLASK_ENV}" == "production" ]]; then
   VALIDATION_ARGS=(--production)
   if [[ "${BUILTIN_SCRIPT_EXECUTION_ENABLED,,}" == "true" ]]; then
