@@ -124,6 +124,15 @@ class Config:
         self.AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS = int(
             _get_env("AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS")
         )
+        self.AGENT_SANDBOX_ALLOW_NETWORK = _get_bool_env(
+            "AGENT_SANDBOX_ALLOW_NETWORK"
+        )
+        self.AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS = int(
+            _get_env("AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS")
+        )
+        self.AGENT_SANDBOX_MAX_OUTPUT_BYTES = int(
+            _get_env("AGENT_SANDBOX_MAX_OUTPUT_BYTES")
+        )
         self.BUILTIN_SKILLS_ROOT = _get_env("BUILTIN_SKILLS_ROOT")
         self.WORKSPACE_MAX_BYTES = _get_workspace_limit("WORKSPACE_MAX_BYTES")
         self.WORKSPACE_MAX_FILES = _get_workspace_limit("WORKSPACE_MAX_FILES")
@@ -279,8 +288,15 @@ class Config:
             and self.AGENT_CHECKPOINT_BACKEND != "postgres"
         ):
             raise ValueError("生产环境必须使用 postgres checkpoint")
-        if self.AGENT_SANDBOX_PROVIDER not in {"disabled", "langsmith"}:
-            raise ValueError("AGENT_SANDBOX_PROVIDER 必须是 disabled 或 langsmith")
+        if self.AGENT_SANDBOX_PROVIDER not in {
+            "disabled",
+            "bubblewrap",
+            "bwrap",
+            "langsmith",
+        }:
+            raise ValueError(
+                "AGENT_SANDBOX_PROVIDER 必须是 disabled、bubblewrap 或 langsmith"
+            )
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"
             and self.AGENT_MEMORY_BACKEND != "postgres"
@@ -293,3 +309,7 @@ class Config:
             value = getattr(self, name)
             if value < 0 or value % 60 != 0:
                 raise ValueError(f"{name} 必须是 60 的倍数或 0")
+        if self.AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS <= 0:
+            raise ValueError("AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS 必须大于 0")
+        if self.AGENT_SANDBOX_MAX_OUTPUT_BYTES <= 0:
+            raise ValueError("AGENT_SANDBOX_MAX_OUTPUT_BYTES 必须大于 0")

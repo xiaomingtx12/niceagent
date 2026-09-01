@@ -28,6 +28,7 @@ Agent、语音转换等能力。
 - FAISS
 - LangChain / LangGraph
 - MCP
+- 沙箱执行：Bubblewrap（Linux 单机隔离）或可选 LangSmith Sandbox
 
 ## 项目结构
 
@@ -108,6 +109,32 @@ docker run --rm -p 5001:5001 my-dify
 ```
 
 容器内默认端口为 `5001`（可通过 `LLMOPS_PORT` 调整）。
+
+### 6. Agent 沙箱配置
+
+生产环境推荐使用已随镜像安装的 Bubblewrap，不需要 LangSmith 账号或按量付费：
+
+```env
+AGENT_SANDBOX_PROVIDER=bubblewrap
+AGENT_SANDBOX_ALLOW_NETWORK=False
+AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS=1800
+AGENT_SANDBOX_MAX_OUTPUT_BYTES=512000
+```
+
+Bubblewrap 会为每次 Agent Run 创建临时目录，并隔离 mount/PID/IPC/UTS/network
+namespace；`/workspace` 可写，`/skills` 和 `/subagent_skills` 以只读挂载提供，宿主
+环境变量不会传入。关闭网络是默认值，需要安装依赖或访问外部服务时才显式设置为
+`True`，并应配合工具审批和最小权限。
+
+`AGENT_SANDBOX_PROVIDER=langsmith` 仍可选用托管沙箱，但需要
+`LANGSMITH_API_KEY`，并会产生 Provider 费用；`disabled` 表示不提供 `execute` 工具。
+Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产入口脚本会在启用沙箱时
+检查该可执行文件并执行一次最小 namespace 烟雾检查。
+
+Bubblewrap 是 Linux 内核 namespace 的开源命令行工具，不能在 Windows 原生进程中运行。
+Windows 开发环境可将 Provider 设为 `disabled`，或在 WSL2 / Docker Linux 容器中启用
+`bubblewrap` 做沙箱验证；如果宿主机禁用了 unprivileged user namespace，需调整容器或
+内核策略后才能启动。
 
 ## 常用接口概览
 

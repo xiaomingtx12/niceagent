@@ -56,24 +56,37 @@ def build_filesystem_permissions(
     permissions = [
         FilesystemPermission(
             operations=["write"],
-            paths=["/skills/**", "/subagent_skills/**"],
+            paths=[
+                "/skills",
+                "/skills/**",
+                "/subagent_skills",
+                "/subagent_skills/**",
+            ],
             mode="deny",
         ),
         FilesystemPermission(
             operations=["read"],
-            paths=["/skills/**", "/subagent_skills/**", "/workspace/**"],
+            paths=[
+                "/",
+                "/skills",
+                "/skills/**",
+                "/subagent_skills",
+                "/subagent_skills/**",
+                "/workspace",
+                "/workspace/**",
+            ],
             mode="allow",
         ),
         FilesystemPermission(
             operations=["write"],
-            paths=["/workspace/**"],
+            paths=["/workspace", "/workspace/**"],
             mode="allow",
         ),
     ]
     permissions.append(
         FilesystemPermission(
             operations=["read", "write"],
-            paths=["/memories/**"],
+            paths=["/memories", "/memories/**"],
             mode="allow" if memory_enabled else "deny",
         )
     )

@@ -12,15 +12,16 @@ from deepagents.backends.protocol import (
     SandboxBackendProtocol,
 )
 
+from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
+from internal.core.agent_v2.backends.sandbox_workspace_sync import (
+    sync_workspace_changes,
+    sync_workspace_into_sandbox,
+)
 from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
 from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-
-
-class SandboxProviderError(RuntimeError):
-    """Sandbox provider 创建、文件同步或清理失败。"""
 
 
 class ManagedLangSmithSandbox(LangSmithSandbox):
@@ -50,7 +51,6 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
         """先回收工作文件，再删除远程 Sandbox。"""
         if self._closed:
             return
-        self._closed = True
         sync_error: Exception | None = None
         try:
             self._sync_workspace_from_sandbox()
@@ -61,7 +61,16 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
                 attributes={"sandbox_id": self.id},
             )
         finally:
-            self._workspace.close()
+            try:
+                self._workspace.close()
+            except Exception as exc:  # noqa: BLE001
+                if sync_error is None:
+                    sync_error = exc
+                self._telemetry.emit(
+                    "sandbox.workspace_close_failed",
+                    attributes={"sandbox_id": self.id},
+                )
+            self._closed = True
         if sync_error is not None:
             raise SandboxProviderError(
                 f"failed to close Sandbox {self.id}"
@@ -87,41 +96,11 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
 
     def _sync_workspace_from_sandbox(self) -> None:
         """只把新增、变更和删除同步回权威 Workspace。"""
-        paths: list[str] = []
-        for prefix in ("/workspace",):
-            result = self.glob("**/*", path=prefix)
-            if result.error:
-                raise SandboxProviderError(result.error)
-            for item in result.matches or []:
-                path = str(item.get("path", ""))
-                if path and not path.endswith("/"):
-                    paths.append(path)
-        responses = self.download_files(sorted(set(paths)))
-        current_files = {
-            response.path: response.content
-            for response in responses
-            if response.content is not None and not response.error
-        }
-        if len(current_files) != len(set(paths)):
-            raise SandboxProviderError("failed to read final Sandbox Workspace")
-
-        changed_files = [
-            (path, content)
-            for path, content in current_files.items()
-            if self._baseline_manifest.get(path) != sha256(content).hexdigest()
-        ]
-        upload_responses = self._workspace.upload_files(changed_files)
-        errors = [response for response in upload_responses if response.error]
-        if errors:
-            raise SandboxProviderError(
-                f"failed to persist {len(errors)} Workspace files"
-            )
-        deleted_paths = sorted(set(self._baseline_manifest) - set(current_files))
-        delete_errors = self._workspace.delete_files(deleted_paths)
-        if delete_errors:
-            raise SandboxProviderError(
-                f"failed to delete {len(delete_errors)} Workspace files"
-            )
+        sync_workspace_changes(
+            backend=self,
+            workspace=self._workspace,
+            baseline_manifest=self._baseline_manifest,
+        )
 
 
 def build_sandbox_backend(
@@ -132,10 +111,49 @@ def build_sandbox_backend(
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
 ) -> SandboxBackendProtocol | None:
-    """按配置创建官方 Sandbox，并上传本次运行所需的初始文件。"""
+    """按配置创建 Sandbox，并上传本次运行所需的初始文件。
+
+    ``bubblewrap`` 是 4 核 4G 单机部署的默认推荐 Provider；LangSmith
+    仍作为可选的托管 Provider 保留。两者都使用同一套 Workspace 增量同步。
+    """
     provider = str(getattr(settings, "AGENT_SANDBOX_PROVIDER", "disabled")).lower()
     if provider in {"disabled", "none", "off", "false"}:
         return None
+    if provider in {"bubblewrap", "bwrap"}:
+        if getattr(settings, "AGENT_SANDBOX_SNAPSHOT_ID", None):
+            raise SandboxProviderError(
+                "AGENT_SANDBOX_SNAPSHOT_ID 仅适用于 langsmith Sandbox"
+            )
+        from internal.core.agent_v2.backends.managed_bubblewrap_sandbox import (
+            build_bubblewrap_backend,
+        )
+
+        backend = build_bubblewrap_backend(
+            settings=settings,
+            workspace=workspace,
+            telemetry=telemetry,
+        )
+        try:
+            baseline = sync_workspace_into_sandbox(
+                backend=backend,
+                workspace=workspace,
+            )
+            backend.set_workspace_baseline(baseline)
+            files = list(skill_files)
+            if files:
+                responses = backend.upload_files(files)
+                _raise_for_upload_errors(responses)
+            return backend
+        except Exception as exc:  # noqa: BLE001
+            try:
+                backend.close()
+            except Exception:
+                pass
+            if isinstance(exc, SandboxProviderError):
+                raise
+            raise SandboxProviderError(
+                "failed to initialize Bubblewrap Sandbox"
+            ) from exc
     if provider != "langsmith":
         raise SandboxProviderError(f"unsupported AGENT_SANDBOX_PROVIDER: {provider}")
 
@@ -177,7 +195,10 @@ def build_sandbox_backend(
             telemetry=telemetry,
         )
         _reset_sandbox_projection(backend)
-        baseline = _sync_workspace_into_sandbox(backend, workspace)
+        baseline = sync_workspace_into_sandbox(
+            backend=backend,
+            workspace=workspace,
+        )
         backend.set_workspace_baseline(baseline)
         files = list(skill_files)
         if files:
@@ -208,37 +229,6 @@ def build_sandbox_backend(
         if isinstance(exc, SandboxProviderError):
             raise
         raise SandboxProviderError("failed to create LangSmith Sandbox") from exc
-
-
-def _sync_workspace_into_sandbox(
-    backend: ManagedLangSmithSandbox,
-    workspace: AgentWorkspaceBackend,
-) -> dict[str, str]:
-    """把 COS 权威文件放入 Sandbox，并返回初始内容清单。"""
-    manifest = workspace.content_manifest()
-    paths: list[str] = []
-    for prefix in ("/workspace",):
-        result = workspace.ls(prefix)
-        if result.error:
-            raise SandboxProviderError(result.error)
-        paths.extend(
-            str(item["path"])
-            for item in result.entries or []
-            if not item.get("is_dir") and item.get("path")
-        )
-    if not paths:
-        return manifest
-    responses = workspace.download_files(sorted(set(paths)))
-    files = [
-        (response.path, response.content)
-        for response in responses
-        if response.content is not None and not response.error
-    ]
-    if len(files) != len(paths):
-        raise SandboxProviderError("failed to read existing Workspace files")
-    upload_responses = backend.upload_files(files)
-    _raise_for_upload_errors(upload_responses)
-    return manifest
 
 
 def _reset_sandbox_projection(backend: ManagedLangSmithSandbox) -> None:

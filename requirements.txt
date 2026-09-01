@@ -39,7 +39,7 @@ langgraph-checkpoint==4.1.1
 langgraph-checkpoint-postgres==3.0.5
 langgraph-prebuilt==1.1.0
 langgraph-sdk==0.4.2
-langsmith==0.10.10
+langsmith[sandbox]==0.10.10
 mcp==1.26.0
 openai==2.24.0
 dashscope==1.20.1

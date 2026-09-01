@@ -29,6 +29,10 @@ def build_composite_backend(
             for path, route in routes.items()
             if not path.startswith("/workspace/")
         }
+        # DeepAgents 目前要求启用 execute 的 CompositeBackend 将每条
+        # FilesystemPermission 规则映射到某个路由。根路由继续指向同一个
+        # Sandbox，专用的 Skill/Memory 路由仍会因更长前缀优先而生效。
+        sandbox_routes["/"] = sandbox
         return CompositeBackend(
             default=sandbox,
             routes=sandbox_routes,

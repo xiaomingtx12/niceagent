@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import sys
 from typing import Callable
@@ -153,13 +154,48 @@ def check_builtin_skills(*, production: bool = False) -> ValidationCheck:
 
 
 def check_sandbox_provider(*, required: bool) -> ValidationCheck:
-    """Validate the configured official Sandbox provider without creating one."""
+    """Validate the configured Sandbox provider without creating one."""
     provider = os.getenv("AGENT_SANDBOX_PROVIDER", "disabled").lower()
     if provider in {"disabled", "none", "off", "false"}:
         return ValidationCheck(
             "sandbox_provider",
             "fail" if required else "skip",
             "AGENT_SANDBOX_PROVIDER is disabled",
+        )
+    if provider in {"bubblewrap", "bwrap"}:
+        if not shutil.which("bwrap"):
+            return ValidationCheck(
+                "sandbox_provider",
+                "fail",
+                "Bubblewrap provider requires the bwrap executable",
+            )
+        sandbox = None
+        try:
+            from internal.core.agent_v2.backends.bubblewrap_sandbox_backend import (
+                BubblewrapSandbox,
+            )
+
+            sandbox = BubblewrapSandbox(timeout=10, max_output_bytes=4096)
+            result = sandbox.execute("printf sandbox-smoke-ok", timeout=10)
+            if result.exit_code != 0 or "sandbox-smoke-ok" not in result.output:
+                return ValidationCheck(
+                    "sandbox_provider",
+                    "fail",
+                    "Bubblewrap namespace smoke check failed",
+                )
+        except Exception as exc:
+            return ValidationCheck(
+                "sandbox_provider",
+                "fail",
+                f"Bubblewrap namespace smoke check failed ({type(exc).__name__})",
+            )
+        finally:
+            if sandbox is not None:
+                sandbox.close()
+        return ValidationCheck(
+            "sandbox_provider",
+            "pass",
+            "Bubblewrap executable and namespace smoke check passed",
         )
     if provider != "langsmith":
         return ValidationCheck(
