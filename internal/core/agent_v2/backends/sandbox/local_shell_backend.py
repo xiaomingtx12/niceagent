@@ -7,6 +7,7 @@ import re
 import shutil
 import sys
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -17,13 +18,13 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
-from internal.core.agent_v2.backends.sandbox_workspace_sync import (
+from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+    SandboxProviderError,
     close_workspace_safely,
+    seed_sandbox_workspace,
     sync_workspace_changes,
-    sync_workspace_into_sandbox,
 )
-from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
 
 
 _VIRTUAL_PATH_PATTERN = re.compile(
@@ -123,17 +124,23 @@ class ManagedLocalShellBackend(LocalShellBackend):
         )
 
 
-def build_local_shell_backend(
+def create_backend(
     *,
     settings: Any,
     workspace: AgentWorkspaceBackend,
-    skill_files: list[tuple[str, bytes]],
+    sandbox_name: str,
+    skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
 ) -> ManagedLocalShellBackend:
     """创建仅供非生产环境使用的本机 Shell Backend。"""
+    del sandbox_name
     if os.getenv("FLASK_ENV", "").lower() == "production":
         raise SandboxProviderError(
             "local_shell 仅允许在开发环境使用，生产环境请配置隔离 Sandbox"
+        )
+    if getattr(settings, "AGENT_SANDBOX_SNAPSHOT_ID", None):
+        raise SandboxProviderError(
+            "AGENT_SANDBOX_SNAPSHOT_ID 仅适用于 langsmith Sandbox"
         )
 
     backend: ManagedLocalShellBackend | None = None
@@ -148,18 +155,11 @@ def build_local_shell_backend(
                 getattr(settings, "AGENT_SANDBOX_MAX_OUTPUT_BYTES", 500 * 1024)
             ),
         )
-        baseline = sync_workspace_into_sandbox(
-            backend=backend,
+        seed_sandbox_workspace(
+            backend,
             workspace=workspace,
+            skill_files=skill_files,
         )
-        backend.set_workspace_baseline(baseline)
-        if skill_files:
-            responses = backend.upload_files(skill_files)
-            errors = [response for response in responses if response.error]
-            if errors:
-                raise SandboxProviderError(
-                    f"failed to upload {len(errors)} local Shell Skill files"
-                )
         return backend
     except Exception as exc:  # noqa: BLE001
         if backend is not None:
@@ -187,6 +187,3 @@ def _translate_virtual_paths(command: str, root_dir: Path) -> str:
         return physical_roots[name] + virtual[len(name) + 1 :]
 
     return _VIRTUAL_PATH_PATTERN.sub(replace, command)
-
-
-__all__ = ["ManagedLocalShellBackend", "build_local_shell_backend"]

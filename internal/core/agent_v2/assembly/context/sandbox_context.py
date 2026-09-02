@@ -8,10 +8,10 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 from deepagents.middleware.filesystem import FilesystemPermission
 
-from internal.core.agent_v2.backends.langsmith_sandbox_backend import (
+from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
     build_sandbox_backend,
 )
-from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
 from internal.core.agent_v2.assembly.context.skill_context import SkillProjection
 from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 

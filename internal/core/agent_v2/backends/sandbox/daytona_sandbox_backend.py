@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from daytona import Daytona, DaytonaConfig
@@ -12,15 +13,14 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
-from internal.core.agent_v2.backends.sandbox_workspace_sync import (
+from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+    SandboxProviderError,
     close_workspace_safely,
     ensure_sandbox_workspace,
-    make_skill_projection_read_only,
+    seed_sandbox_workspace,
     sync_workspace_changes,
-    sync_workspace_into_sandbox,
 )
-from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
 
 
 class ManagedDaytonaSandbox(DaytonaSandbox):
@@ -92,14 +92,16 @@ class ManagedDaytonaSandbox(DaytonaSandbox):
             ) from close_error
 
 
-def build_daytona_backend(
+def create_backend(
     *,
     settings: Any,
     workspace: AgentWorkspaceBackend,
-    skill_files: list[tuple[str, bytes]],
+    sandbox_name: str,
+    skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
 ) -> ManagedDaytonaSandbox:
     """创建一次性 Daytona Sandbox，并播种 Workspace 与 Skill 文件。"""
+    del sandbox_name
     sandbox: Any | None = None
     backend: ManagedDaytonaSandbox | None = None
     try:
@@ -126,19 +128,12 @@ def build_daytona_backend(
             telemetry=telemetry,
         )
         ensure_sandbox_workspace(backend)
-        baseline = sync_workspace_into_sandbox(
-            backend=backend,
+        seed_sandbox_workspace(
+            backend,
             workspace=workspace,
+            skill_files=skill_files,
+            protect_skills=True,
         )
-        backend.set_workspace_baseline(baseline)
-        if skill_files:
-            responses = backend.upload_files(skill_files)
-            errors = [response for response in responses if response.error]
-            if errors:
-                raise SandboxProviderError(
-                    f"failed to upload {len(errors)} Daytona Sandbox files"
-                )
-            make_skill_projection_read_only(backend)
         return backend
     except Exception as exc:  # noqa: BLE001
         if backend is not None:
@@ -171,6 +166,3 @@ def build_daytona_backend(
                 message = f"{message}: {detail}"
             raise SandboxProviderError(message) from exc
         raise SandboxProviderError("failed to create Daytona Sandbox") from exc
-
-
-__all__ = ["ManagedDaytonaSandbox", "build_daytona_backend"]

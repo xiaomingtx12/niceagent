@@ -171,7 +171,7 @@ def check_sandbox_provider(*, required: bool) -> ValidationCheck:
             )
         sandbox = None
         try:
-            from internal.core.agent_v2.backends.bubblewrap_sandbox_backend import (
+            from internal.core.agent_v2.backends.sandbox.bubblewrap_sandbox_backend import (
                 BubblewrapSandbox,
             )
 

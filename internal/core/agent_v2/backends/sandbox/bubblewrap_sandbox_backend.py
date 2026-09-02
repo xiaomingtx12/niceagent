@@ -8,6 +8,7 @@ mount、PID、IPC、UTS 和 network namespace 中执行。宿主环境变量不�
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from pathlib import Path, PurePosixPath
 import shutil
 import signal
@@ -16,6 +17,7 @@ import sys
 import tempfile
 import threading
 import uuid
+from typing import Any
 
 from deepagents.backends.protocol import (
     ExecuteResponse,
@@ -23,6 +25,20 @@ from deepagents.backends.protocol import (
     FileUploadResponse,
 )
 from deepagents.backends.sandbox import BaseSandbox
+
+from internal.core.agent_v2.assembly.observability.telemetry import (
+    AgentTelemetry,
+    NOOP_AGENT_TELEMETRY,
+)
+from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+    SandboxProviderError,
+    close_workspace_safely,
+    seed_sandbox_workspace,
+    sync_workspace_changes,
+)
+from internal.core.agent_v2.backends.workspace.workspace_backend import (
+    AgentWorkspaceBackend,
+)
 
 
 class BubblewrapSandboxError(RuntimeError):
@@ -270,4 +286,122 @@ class BubblewrapSandbox(BaseSandbox):
         return target
 
 
-__all__ = ["BubblewrapSandbox", "BubblewrapSandboxError"]
+class ManagedBubblewrapSandbox(BubblewrapSandbox):
+    """一次性本机 Sandbox，结束时将 Workspace 增量写回 COS。"""
+
+    def __init__(
+        self,
+        *,
+        workspace: AgentWorkspaceBackend,
+        telemetry: AgentTelemetry | None = None,
+        allow_network: bool = False,
+        timeout: int = 1800,
+        max_output_bytes: int = 500 * 1024,
+    ) -> None:
+        """创建绑定 Workspace 同步的 Bubblewrap Sandbox。"""
+        super().__init__(
+            allow_network=allow_network,
+            timeout=timeout,
+            max_output_bytes=max_output_bytes,
+        )
+        self._workspace = workspace
+        self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
+        self._baseline_manifest: dict[str, str] = {}
+        self._managed_closed = False
+
+    def set_workspace_baseline(self, manifest: dict[str, str]) -> None:
+        """记录运行开始时的权威 Workspace 摘要。"""
+        self._baseline_manifest = dict(manifest)
+
+    def close(self) -> None:
+        """先同步增量产物，再关闭本机目录和 Workspace 会话。"""
+        if self._managed_closed:
+            return
+        sync_error: Exception | None = None
+        try:
+            sync_workspace_changes(
+                backend=self,
+                workspace=self._workspace,
+                baseline_manifest=self._baseline_manifest,
+            )
+        except Exception as exc:  # noqa: BLE001
+            sync_error = exc
+            self._telemetry.emit(
+                "sandbox.workspace_sync_failed",
+                attributes={"sandbox_id": self.id},
+            )
+        finally:
+            try:
+                super().close()
+            except Exception as exc:  # noqa: BLE001
+                if sync_error is None:
+                    sync_error = exc
+            workspace_close_error = close_workspace_safely(
+                self._workspace,
+                telemetry=self._telemetry,
+                sandbox_id=self.id,
+            )
+            if sync_error is None and workspace_close_error is not None:
+                sync_error = workspace_close_error
+            self._managed_closed = True
+        if sync_error is not None:
+            raise SandboxProviderError(
+                f"failed to close Sandbox {self.id}"
+            ) from sync_error
+
+
+def create_backend(
+    *,
+    settings: Any,
+    workspace: AgentWorkspaceBackend,
+    sandbox_name: str,
+    skill_files: Iterable[tuple[str, bytes]],
+    telemetry: AgentTelemetry | None = None,
+) -> ManagedBubblewrapSandbox:
+    """创建 Bubblewrap Sandbox，并播种 Workspace 与 Skill 文件。
+
+    ``sandbox_name`` 只属于可复用的远程 Provider；这里接收它是为了让
+    总工厂对所有 Provider 使用同一个创建契约。
+    """
+    del sandbox_name
+    if getattr(settings, "AGENT_SANDBOX_SNAPSHOT_ID", None):
+        raise SandboxProviderError(
+            "AGENT_SANDBOX_SNAPSHOT_ID 仅适用于 langsmith Sandbox"
+        )
+    backend: ManagedBubblewrapSandbox | None = None
+    try:
+        network_setting = getattr(settings, "AGENT_SANDBOX_ALLOW_NETWORK", False)
+        allow_network = (
+            network_setting.lower() == "true"
+            if isinstance(network_setting, str)
+            else bool(network_setting)
+        )
+        backend = ManagedBubblewrapSandbox(
+            workspace=workspace,
+            telemetry=telemetry,
+            allow_network=allow_network,
+            timeout=int(
+                getattr(settings, "AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS", 1800)
+            ),
+            max_output_bytes=int(
+                getattr(settings, "AGENT_SANDBOX_MAX_OUTPUT_BYTES", 500 * 1024)
+            ),
+        )
+        seed_sandbox_workspace(
+            backend,
+            workspace=workspace,
+            skill_files=list(skill_files),
+        )
+        return backend
+    except Exception as exc:  # noqa: BLE001
+        if backend is not None:
+            try:
+                backend.close()
+            except Exception:
+                pass
+        close_workspace_safely(workspace, telemetry=telemetry)
+        if isinstance(exc, SandboxProviderError):
+            raise
+        if isinstance(exc, BubblewrapSandboxError):
+            raise SandboxProviderError(str(exc)) from exc
+        raise SandboxProviderError("failed to create Bubblewrap Sandbox") from exc

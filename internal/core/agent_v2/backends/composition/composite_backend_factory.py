@@ -43,6 +43,3 @@ def build_composite_backend(
         routes=dict(routes),
         artifacts_root="/workspace",
     )
-
-
-__all__ = ["build_composite_backend"]

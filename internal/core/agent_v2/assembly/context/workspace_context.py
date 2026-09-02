@@ -3,21 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from deepagents.backends.protocol import BackendProtocol
 from sqlalchemy.orm import Session
 
-from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
-from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
-from internal.core.agent_v2.backends.workspace_route_backend import (
-    AgentWorkspaceRouteBackend,
+from internal.core.agent_v2.backends.workspace.workspace_backend import (
+    AgentWorkspaceBackend,
 )
+from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
-from internal.core.agent_v2.persistence.workspace_file_storage_protocol import (
-    WorkspaceFileStorageProtocol,
-)
+
+if TYPE_CHECKING:
+    from internal.service.workspace_file_storage_service import (
+        WorkspaceFileStorageService,
+    )
 
 
 @dataclass
@@ -38,7 +39,7 @@ class WorkspaceContextAssembler:
         run_context: AgentRunContext,
         settings: Any,
         telemetry: AgentTelemetry,
-        storage_service: WorkspaceFileStorageProtocol,
+        storage_service: WorkspaceFileStorageService,
     ) -> WorkspaceProjection:
         """创建本次运行连接到稳定用户 Workspace 的 Backend。"""
         workspace = AgentWorkspaceBackend(
@@ -58,13 +59,7 @@ class WorkspaceContextAssembler:
         )
         return WorkspaceProjection(
             backend=workspace,
-            routes={
-                "/workspace/": AgentWorkspaceRouteBackend(
-                    workspace,
-                    "/workspace/",
-                    close_owner=True,
-                ),
-            },
+            routes={"/workspace/": workspace},
         )
 
 

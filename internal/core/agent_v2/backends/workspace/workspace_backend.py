@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import fnmatch
 import base64
+import fnmatch
 import mimetypes
 from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from deepagents.backends.protocol import (
     BackendProtocol,
     EditResult,
+    FileData,
     FileDownloadResponse,
     FileInfo,
     FileUploadResponse,
@@ -24,35 +25,48 @@ from deepagents.backends.protocol import (
 )
 from sqlalchemy.orm import Session
 
+from internal.core.agent_v2.assembly.observability.telemetry import (
+    AgentTelemetry,
+    NOOP_AGENT_TELEMETRY,
+)
 from internal.core.agent_v2.entity.workspace_path import (
     AgentWorkspacePathPolicy,
     build_workspace_path_digest,
 )
-from internal.core.agent_v2.persistence.workspace_file_repository import (
-    WorkspaceFileRepository,
-    WorkspaceFileRevisionConflict,
-)
 from internal.core.agent_v2.entity.workspace_quota import (
     DEFAULT_AGENT_WORKSPACE_LIMITS,
     AgentWorkspaceLimits,
+)
+from internal.core.agent_v2.persistence.workspace_file_repository import (
+    WorkspaceFileRepository,
+    WorkspaceFileRevisionConflict,
 )
 from internal.exception import (
     WorkspacePathError,
     WorkspaceQuotaExceeded,
     WorkspaceStorageError,
 )
-from internal.core.agent_v2.assembly.observability.telemetry import (
-    AgentTelemetry,
-    NOOP_AGENT_TELEMETRY,
-)
 from internal.model import WorkspaceFile
-from internal.core.agent_v2.persistence.workspace_file_storage_protocol import (
-    WorkspaceFileStorageProtocol,
+
+if TYPE_CHECKING:
+    from internal.service.workspace_file_storage_service import (
+        WorkspaceFileStorageService,
+    )
+
+
+_WRITE_ERRORS = (
+    WorkspaceStorageError,
+    WorkspaceQuotaExceeded,
+    WorkspaceFileRevisionConflict,
 )
 
 
 class AgentWorkspaceBackend(BackendProtocol):
-    """把作用域版本存储适配为 Backend。"""
+    """把 Workspace 元数据和 COS 内容适配为 DeepAgents 文件 Backend。
+
+    Backend 使用本次运行独立的数据库 Session；业务 Workspace Service 负责
+    HTTP 查询和权限流程，两者不共享 Session 生命周期。
+    """
 
     def __init__(
         self,
@@ -60,17 +74,12 @@ class AgentWorkspaceBackend(BackendProtocol):
         account_id: UUID,
         app_id: UUID,
         conversation_id: UUID,
-        storage_service: WorkspaceFileStorageProtocol,
-        created_by: Optional[UUID] = None,
+        storage_service: WorkspaceFileStorageService,
+        created_by: UUID | None = None,
         limits: AgentWorkspaceLimits = DEFAULT_AGENT_WORKSPACE_LIMITS,
         telemetry: AgentTelemetry | None = None,
     ) -> None:
-        """绑定账号、应用和会话作用域。"""
-        self._session = session
-        self._account_id = account_id
-        self._app_id = app_id
-        self._conversation_id = conversation_id
-        self._created_by = created_by
+        """绑定存储适配器、数据库仓储和当前 Workspace 作用域。"""
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._storage_service = storage_service
         self._paths = AgentWorkspacePathPolicy(
@@ -90,9 +99,12 @@ class AgentWorkspaceBackend(BackendProtocol):
         self._repository.close()
 
     def _resolve(self, path: str) -> str:
-        """把 Agent 路径解析为已校验存储路径。"""
+        """把 CompositeBackend 传入的路由相对路径解析为存储路径。"""
+        normalized = "/" + (path or "/").lstrip("/")
+        if normalized != "/workspace" and not normalized.startswith("/workspace/"):
+            normalized = f"/workspace{normalized}"
         try:
-            return self._paths.resolve(path)
+            return self._paths.resolve(normalized)
         except WorkspacePathError as exc:
             self._telemetry.emit(
                 "workspace.path_rejected",
@@ -103,32 +115,34 @@ class AgentWorkspaceBackend(BackendProtocol):
             )
             raise
 
-    def _virtual_path(self, rest: str) -> str:
-        """把存储路径映射回 Agent 可见路径。"""
-        return self._paths.virtual_path(rest)
+    def _relative_path(self, storage_path: str) -> str:
+        """把存储路径转换为去掉 `/workspace` 前缀的可见路径。"""
+        full_path = self._paths.virtual_path(storage_path)
+        return full_path.removeprefix("/workspace") or "/"
 
     def _visible_prefixes(self) -> tuple[str, ...]:
         """返回当前 Backend 可见前缀。"""
         return self._paths.visible_prefixes()
 
-    def _list_paths(self, prefix: Optional[str]) -> list[WorkspaceFile]:
+    def _list_paths(self, prefix: str | None) -> list[WorkspaceFile]:
         """列出路径下的最新记录。"""
         prefixes = (prefix,) if prefix is not None else self._visible_prefixes()
-        return [
+        rows = [
             row
             for row in self._repository.list(prefixes)
             if self._paths.is_visible_storage_path(row.path)
         ]
+        return sorted(rows, key=lambda row: row.path)
 
     def content_manifest(self) -> dict[str, str]:
-        """返回当前会话文件路径到内容摘要的映射。"""
+        """返回 Sandbox 增量同步所需的 Workspace 文件摘要。"""
         return {
-            self._virtual_path(row.path): row.content_sha256
+            f"/workspace{self._relative_path(row.path)}": row.content_sha256
             for row in self._list_paths(None)
         }
 
     def delete_files(self, paths: list[str]) -> list[str]:
-        """删除一组已校验的 Workspace 文件并返回逐项错误。"""
+        """删除 Sandbox 回写阶段确认已移除的文件，返回逐项错误。"""
         errors: list[str] = []
         for path in paths:
             try:
@@ -140,6 +154,8 @@ class AgentWorkspaceBackend(BackendProtocol):
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
         """按协议读取文本片段或二进制 multimodal 数据。"""
+        if offset < 0 or limit < 0:
+            return ReadResult(error="offset and limit must be non-negative")
         try:
             rest = self._resolve(file_path)
         except WorkspacePathError as exc:
@@ -150,9 +166,9 @@ class AgentWorkspaceBackend(BackendProtocol):
         try:
             content_bytes = self._storage_service.read_bytes(row)
         except WorkspaceStorageError as exc:
-            return ReadResult(error=str(exc))
+            return ReadResult(error=f"failed to read file '{file_path}': {exc}")
         if self._is_binary(row):
-            file_data: dict[str, Any] = {
+            file_data: FileData = {
                 "content": base64.b64encode(content_bytes).decode("ascii"),
                 "encoding": "base64",
             }
@@ -160,16 +176,16 @@ class AgentWorkspaceBackend(BackendProtocol):
                 file_data["created_at"] = row.created_at.isoformat()
             if row.updated_at:
                 file_data["modified_at"] = row.updated_at.isoformat()
-            return ReadResult(file_data=file_data)  # type: ignore[arg-type]
+            return ReadResult(file_data=file_data)
 
         content = content_bytes.decode("utf-8", errors="replace")
         sliced = "".join(content.splitlines(keepends=True)[offset : offset + limit])
-        file_data: dict[str, Any] = {"content": sliced, "encoding": "utf-8"}
+        file_data: FileData = {"content": sliced, "encoding": "utf-8"}
         if row.created_at:
             file_data["created_at"] = row.created_at.isoformat()
         if row.updated_at:
             file_data["modified_at"] = row.updated_at.isoformat()
-        return ReadResult(file_data=file_data)  # type: ignore[arg-type]
+        return ReadResult(file_data=file_data)
 
     @staticmethod
     def _is_binary(row: WorkspaceFile) -> bool:
@@ -191,24 +207,14 @@ class AgentWorkspaceBackend(BackendProtocol):
         }
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        """为已校验路径追加文本快照。"""
+        """为已校验路径写入文本快照。"""
         try:
             rest = self._resolve(file_path)
         except WorkspacePathError as exc:
             return WriteResult(error=str(exc))
-        try:
-            self._storage_service.write_text(
-                self._repository,
-                rest,
-                content,
-                telemetry=self._telemetry,
-            )
-        except (
-            WorkspaceStorageError,
-            WorkspaceQuotaExceeded,
-            WorkspaceFileRevisionConflict,
-        ) as exc:
-            return WriteResult(error=str(exc))
+        error = self._write_text(rest, content)
+        if error is not None:
+            return WriteResult(error=error)
         return WriteResult(path=file_path)
 
     def edit(
@@ -219,10 +225,21 @@ class AgentWorkspaceBackend(BackendProtocol):
         replace_all: bool = False,
     ) -> EditResult:
         """替换文件中的一个或全部精确文本。"""
-        read_result = self.read(file_path)
-        if read_result.error:
-            return EditResult(error=read_result.error)
-        existing = read_result.file_data["content"]
+        try:
+            rest = self._resolve(file_path)
+        except WorkspacePathError as exc:
+            return EditResult(error=str(exc))
+        row = self._repository.fetch(rest)
+        if row is None:
+            return EditResult(error=f"file not found: {file_path}")
+        if self._is_binary(row):
+            return EditResult(error=f"cannot edit binary file: {file_path}")
+        try:
+            existing = self._storage_service.read_bytes(row).decode("utf-8")
+        except WorkspaceStorageError as exc:
+            return EditResult(error=f"failed to read file '{file_path}': {exc}")
+        except UnicodeDecodeError:
+            return EditResult(error=f"cannot edit non-UTF-8 file: {file_path}")
         occurrences = existing.count(old_string)
         if occurrences == 0:
             return EditResult(error=f"old_string not found in {file_path}")
@@ -237,9 +254,9 @@ class AgentWorkspaceBackend(BackendProtocol):
                     )
                 )
             new_content = existing.replace(old_string, new_string, 1)
-        write_result = self.write(file_path, new_content)
-        if write_result.error:
-            return EditResult(error=write_result.error)
+        error = self._write_text(rest, new_content)
+        if error is not None:
+            return EditResult(error=error)
         return EditResult(
             path=file_path,
             occurrences=occurrences if replace_all else 1,
@@ -252,13 +269,9 @@ class AgentWorkspaceBackend(BackendProtocol):
         except WorkspacePathError as exc:
             return LsResult(error=str(exc))
         entries: list[FileInfo] = [
-            {"path": self._virtual_path(row.path)} for row in self._list_paths(rest)
+            {"path": self._relative_path(row.path)} for row in self._list_paths(rest)
         ]
         return LsResult(entries=entries)
-
-    def ls_info(self, path: str = "/") -> list[FileInfo]:
-        """返回协议兼容的原始列表。"""
-        return self.ls(path).entries or []
 
     def glob(self, pattern: str, path: str | None = "/") -> GlobResult:
         """按相对路径或文件名匹配文件。"""
@@ -276,20 +289,14 @@ class AgentWorkspaceBackend(BackendProtocol):
             if fnmatch.fnmatch(candidate, pattern) or fnmatch.fnmatch(
                 candidate.rsplit("/", 1)[-1], pattern
             ):
-                matches.append({"path": self._virtual_path(row.path)})
+                matches.append({"path": self._relative_path(row.path)})
         return GlobResult(matches=matches)
-
-    def glob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
-        """返回协议兼容的原始 Glob 结果。"""
-        return self.glob(pattern, path).matches or []
 
     def grep(
         self,
         pattern: str,
         path: str | None = None,
         glob: str | None = None,
-        *,
-        max_count: int | None = None,
     ) -> GrepResult:
         """在可见 UTF-8 文件中查找文本。"""
         try:
@@ -298,33 +305,38 @@ class AgentWorkspaceBackend(BackendProtocol):
             return GrepResult(error=str(exc))
         matches: list[GrepMatch] = []
         for row in self._list_paths(rest):
+            if self._is_binary(row):
+                continue
             if glob and not fnmatch.fnmatch(row.path.split("/")[-1], glob):
                 continue
             try:
                 content = self._storage_service.read_bytes(row)
-            except WorkspaceStorageError:
-                continue
-            text = content.decode("utf-8", errors="replace")
+            except WorkspaceStorageError as exc:
+                return GrepResult(
+                    error=(
+                        f"failed to read file '{self._relative_path(row.path)}': {exc}"
+                    )
+                )
+            try:
+                text = content.decode("utf-8")
+            except UnicodeDecodeError:
+                return GrepResult(
+                    error=(
+                        f"cannot search non-UTF-8 file "
+                        f"'{self._relative_path(row.path)}'"
+                    )
+                )
             for line_number, line in enumerate(text.splitlines(), 1):
                 if pattern not in line:
                     continue
                 matches.append(
                     {
-                        "path": self._virtual_path(row.path),
+                        "path": self._relative_path(row.path),
                         "line": line_number,
                         "text": line,
                     }
                 )
-                if max_count is not None and len(matches) > max_count:
-                    return GrepResult(matches=matches[:max_count])
         return GrepResult(matches=matches)
-
-    def grep_raw(
-        self, pattern: str, path: str | None = None, glob: str | None = None
-    ) -> list[GrepMatch] | str:
-        """返回协议兼容的原始 Grep 结果。"""
-        result = self.grep(pattern, path, glob)
-        return result.error if result.error else result.matches or []
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
         """保存一批文本或二进制文件。"""
@@ -344,28 +356,16 @@ class AgentWorkspaceBackend(BackendProtocol):
                     mime_type=mime_type,
                     telemetry=self._telemetry,
                 )
-                result_path = path
                 error = None
-            except (
-                WorkspaceStorageError,
-                WorkspaceQuotaExceeded,
-                WorkspaceFileRevisionConflict,
-            ) as exc:
-                result_path = path
-                error = str(exc)
+            except _WRITE_ERRORS as exc:
+                error = f"failed to write file '{path}': {exc}"
             responses.append(
                 FileUploadResponse(
-                    path=result_path,
+                    path=path,
                     error=error,
                 )
             )
         return responses
-
-    async def aupload_files(
-        self, files: list[tuple[str, bytes]]
-    ) -> list[FileUploadResponse]:
-        """异步调用同步上传。"""
-        return self.upload_files(files)
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """为可信适配器读取完整文件字节。"""
@@ -383,7 +383,12 @@ class AgentWorkspaceBackend(BackendProtocol):
             try:
                 content = self._storage_service.read_bytes(row)
             except WorkspaceStorageError as exc:
-                responses.append(FileDownloadResponse(path=path, error=str(exc)))
+                responses.append(
+                    FileDownloadResponse(
+                        path=path,
+                        error=f"failed to read file '{path}': {exc}",
+                    )
+                )
                 continue
             responses.append(
                 FileDownloadResponse(
@@ -393,71 +398,21 @@ class AgentWorkspaceBackend(BackendProtocol):
             )
         return responses
 
-    async def adownload_files(self, paths: list[str]) -> list[FileDownloadResponse]:
-        """异步调用同步下载。"""
-        return self.download_files(paths)
-
-    async def aread(
-        self, file_path: str, offset: int = 0, limit: int = 2000
-    ) -> ReadResult:
-        """异步调用同步读取。"""
-        return self.read(file_path, offset, limit)
-
-    async def awrite(self, file_path: str, content: str) -> WriteResult:
-        """异步调用同步写入。"""
-        return self.write(file_path, content)
-
-    async def aedit(
-        self,
-        file_path: str,
-        old_string: str,
-        new_string: str,
-        replace_all: bool = False,
-    ) -> EditResult:
-        """异步调用同步编辑。"""
-        return self.edit(file_path, old_string, new_string, replace_all)
-
-    async def als(self, path: str = "/") -> LsResult:
-        """异步调用同步列表。"""
-        return self.ls(path)
-
-    async def aglob(self, pattern: str, path: str = "/") -> GlobResult:
-        """异步调用同步 Glob。"""
-        return self.glob(pattern, path)
-
-    async def agrep(
-        self,
-        pattern: str,
-        path: str | None = None,
-        glob: str | None = None,
-        *,
-        max_count: int | None = None,
-    ) -> GrepResult:
-        """异步调用同步 Grep。"""
-        return self.grep(pattern, path, glob, max_count=max_count)
-
-    async def aglob_info(self, pattern: str, path: str = "/") -> list[FileInfo]:
-        """异步返回原始 Glob 结果。"""
-        return self.glob_info(pattern, path)
-
-    async def als_info(self, path: str = "/") -> list[FileInfo]:
-        """异步返回原始列表。"""
-        return self.ls_info(path)
-
-    async def agrep_raw(
-        self, pattern: str, path: str | None = None, glob: str | None = None
-    ) -> list[GrepMatch] | str:
-        """异步返回原始 Grep 结果。"""
-        return self.grep_raw(pattern, path, glob)
-
-
-from internal.core.agent_v2.backends.workspace_route_backend import (
-    AgentWorkspaceRouteBackend,
-)
+    def _write_text(self, storage_path: str, content: str) -> str | None:
+        """写入文本并把可预期失败转换为稳定错误；其他异常继续抛出。"""
+        try:
+            self._storage_service.write_text(
+                self._repository,
+                storage_path,
+                content,
+                telemetry=self._telemetry,
+            )
+        except _WRITE_ERRORS as exc:
+            return f"failed to write file '{self._relative_path(storage_path)}': {exc}"
+        return None
 
 
 __all__ = [
     "AgentWorkspaceBackend",
     "WorkspacePathError",
-    "AgentWorkspaceRouteBackend",
 ]

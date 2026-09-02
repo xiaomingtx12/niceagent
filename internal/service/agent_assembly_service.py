@@ -2,49 +2,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
 import logging
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
 from uuid import UUID
 
-from flask import current_app
 from deepagents.backends.protocol import BackendProtocol
+from flask import current_app
 from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from sqlalchemy.orm import Session, sessionmaker
 
 from config.config import Config
-from internal.core.agent_v2.backends.composite_backend_factory import (
-    build_composite_backend,
+from internal.core.agent_v2.assembly.context.memory_context import (
+    MemoryContextAssembler,
 )
-from internal.core.agent_v2.backends.langsmith_sandbox_backend import (
-    build_stable_sandbox_name,
-)
-
-from internal.core.agent_v2.entity.agent_config import AgentConfig
-from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.entity.subagent_config import (
-    SubAgentConfig,
-    build_published_graph_id,
-)
-from internal.core.agent_v2.protocol.internal_auth import (
-    issue_internal_agent_protocol_token,
-)
-from internal.core.agent_v2.execution.agent_executor import AgentExecutor
-from internal.core.agent_v2.execution.run_resources import AgentRuntimeResources
-from internal.core.agent_v2.execution.run_resource_manager import close_runtime_backends
-from internal.core.agent_v2.execution.tool_validator import (
-    DEEPAGENTS_RESERVED_TOOL_NAMES,
-)
-from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
-    get_configured_checkpointer,
-)
-from internal.core.agent_v2.persistence.langgraph_store_provider import (
-    get_configured_store,
-)
-from internal.core.agent_v2.assembly.context.memory_context import MemoryContextAssembler
 from internal.core.agent_v2.assembly.context.sandbox_context import (
     SandboxContextAssembler,
     SandboxProjection,
@@ -59,13 +33,40 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     LoggingAgentTelemetrySink,
 )
+from internal.core.agent_v2.backends.composition.composite_backend_factory import (
+    build_composite_backend,
+)
+from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
+    build_stable_sandbox_name,
+)
+from internal.core.agent_v2.entity.agent_config import AgentConfig
+from internal.core.agent_v2.entity.run_context import AgentRunContext
+from internal.core.agent_v2.entity.subagent_config import (
+    SubAgentConfig,
+    build_published_graph_id,
+)
+from internal.core.agent_v2.execution.agent_executor import AgentExecutor
+from internal.core.agent_v2.execution.run_resource_manager import close_runtime_backends
+from internal.core.agent_v2.execution.run_resources import AgentRuntimeResources
+from internal.core.agent_v2.execution.tool_validator import (
+    DEEPAGENTS_RESERVED_TOOL_NAMES,
+)
+from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
+    get_configured_checkpointer,
+)
+from internal.core.agent_v2.persistence.langgraph_store_provider import (
+    get_configured_store,
+)
+from internal.core.agent_v2.protocol.internal_auth import (
+    issue_internal_agent_protocol_token,
+)
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import AgentInvocationException, ValidateErrorException
 from internal.model import App
-from internal.schema.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from internal.schema.agent_runtime_schema import AgentInvocation, AgentRuntimePrepareReq
+from internal.schema.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_attachment_service import AgentAttachmentService
 from .app_config_service import AppConfigService
@@ -111,6 +112,7 @@ class AgentAssemblyService(BaseService):
             req.app_config,
             req.selected_skills,
         )
+
         # 1.加载本次调用使用的主模型。
         llm = req.llm
         if llm is None:
@@ -122,6 +124,7 @@ class AgentAssemblyService(BaseService):
             )
         self._log_build_timing(req, "model", phase_started_at)
         phase_started_at = time.monotonic()
+
         # 2.把额外工具和应用配置中的工具转换成 LangChain 工具实例。
         tools = list(req.extra_tools)
         tools.extend(
@@ -142,6 +145,7 @@ class AgentAssemblyService(BaseService):
         )
         self._log_build_timing(req, "subagents", phase_started_at)
         phase_started_at = time.monotonic()
+
         # 4.按用户和会话作用域装配 Workspace、Skill、Memory、Sandbox 等资源。
         runtime = self._prepare_runtime(
             AgentRuntimePrepareReq(
@@ -158,6 +162,7 @@ class AgentAssemblyService(BaseService):
         )
         self._log_build_timing(req, "runtime", phase_started_at)
         phase_started_at = time.monotonic()
+
         try:
             # 5.先把附件投影到 Workspace；此时资源仍由装配服务持有。
             self.agent_attachment_service.materialize(
@@ -339,9 +344,11 @@ class AgentAssemblyService(BaseService):
             # 装配中途失败时两个 Backend 都可能已经创建；清理异常不能覆盖主异常。
             for backend_to_close in (
                 sandbox_projection.backend if sandbox_projection is not None else None,
-                workspace_projection.backend
-                if workspace_projection is not None
-                else None,
+                (
+                    workspace_projection.backend
+                    if workspace_projection is not None
+                    else None
+                ),
             ):
                 if backend_to_close is None:
                     continue
@@ -539,7 +546,7 @@ class AgentAssemblyService(BaseService):
                         ).strip(),
                         "tools": tool_names,
                         "skills": [],
-                    }
+                    },
                 )
             )
             tool_overrides[name] = target_tools

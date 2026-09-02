@@ -26,7 +26,11 @@ from internal.core.agent_v2.entity.agent_memory import (
 
 
 class AgentMemoryBackend(StoreBackend):
-    """复用官方 StoreBackend，并限制记忆为小体量 UTF-8 文本。"""
+    """复用官方 StoreBackend，并限制记忆为小体量 UTF-8 文本。
+
+    本类只增加路径、编码和容量校验；实际 Store 读写仍交给
+    DeepAgents 官方实现，避免复制持久化格式和查询语义。
+    """
 
     def __init__(
         self,
@@ -96,7 +100,7 @@ class AgentMemoryBackend(StoreBackend):
                 replace_all,
             )
             if isinstance(replacement, str):
-                return super().edit(key, old_string, new_string, replace_all)
+                return EditResult(error=replacement)
             self._validate_projected_content(
                 store=store,
                 namespace=namespace,
@@ -132,7 +136,7 @@ class AgentMemoryBackend(StoreBackend):
                 replace_all,
             )
             if isinstance(replacement, str):
-                return await super().aedit(key, old_string, new_string, replace_all)
+                return EditResult(error=replacement)
             await self._avalidate_projected_content(
                 store=store,
                 namespace=namespace,

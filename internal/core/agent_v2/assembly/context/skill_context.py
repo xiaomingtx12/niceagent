@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
-from internal.core.agent_v2.backends.skill_catalog_backend import SkillCatalogBackend
 from internal.exception import SubAgentConfigError
 
 
@@ -42,7 +43,7 @@ class SkillContextAssembler:
             else enabled_skills
         )
         if main_skills:
-            projection.routes["/skills/"] = SkillCatalogBackend(main_skills)
+            projection.routes["/skills/"] = _filesystem_backend(main_skills)
             projection.sources = ["/skills/"]
             for skill in main_skills:
                 projection.files.extend(
@@ -63,7 +64,7 @@ class SkillContextAssembler:
             name = subagent_config["name"]
             prefix = f"/subagent_skills/{name}/"
             selected = [skill_map[item] for item in requested]
-            projection.routes[prefix] = SkillCatalogBackend(selected)
+            projection.routes[prefix] = _filesystem_backend(selected)
             projection.subagent_sources[name] = [prefix]
             for skill in selected:
                 projection.files.extend(
@@ -89,6 +90,18 @@ def _package_files(*, root: str, skill: Any) -> list[tuple[str, bytes]]:
             raise ValueError(f"invalid Skill package path: {relative}")
         files.append((f"{root.rstrip('/')}/{normalized}", str(content).encode("utf-8")))
     return files
+
+
+def _filesystem_backend(skills: Sequence[Any]) -> FilesystemBackend:
+    """把内置 Skill 根目录接入 DeepAgents 文件 Backend。"""
+    roots = {
+        Path(skill.package_root).resolve().parent
+        for skill in skills
+        if getattr(skill, "package_root", None) is not None
+    }
+    if len(roots) != 1:
+        raise ValueError("enabled Skills must share one package root")
+    return FilesystemBackend(root_dir=next(iter(roots)), virtual_mode=True)
 
 
 __all__ = ["SkillContextAssembler", "SkillProjection"]

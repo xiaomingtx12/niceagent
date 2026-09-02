@@ -30,8 +30,9 @@ logger = logging.getLogger(__name__)
 class WorkspaceFileStorageService:
     """协调 Workspace 文件的对象存储内容和 SQL 元数据。
 
-    本服务负责持久化一致性、配额和失败补偿；Agent Core 通过文件存储
-    协议使用它，不应直接依赖 COS 或 ``WorkspaceFile`` 数据库模型。
+    本服务不是普通附件 COS 门面，而是 Workspace 持久化协调器：负责 COS
+    对象、WorkspaceFile 元数据、配额和失败补偿。Agent Core 直接使用这个
+    具体服务，业务层的普通附件操作仍由 ``CosService`` 负责。
     """
 
     object_storage: CosObjectStorageRepository

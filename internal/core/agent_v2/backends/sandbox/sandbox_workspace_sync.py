@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from hashlib import sha256
 from pathlib import PurePosixPath
+from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
@@ -11,8 +13,11 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
-from internal.core.agent_v2.backends.sandbox_provider import SandboxProviderError
-from internal.core.agent_v2.backends.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
+
+
+class SandboxProviderError(RuntimeError):
+    """Sandbox provider 创建、文件同步或清理失败。"""
 
 
 def close_workspace_safely(
@@ -52,6 +57,27 @@ def make_skill_projection_read_only(backend: SandboxBackendProtocol) -> None:
         raise SandboxProviderError("failed to protect Sandbox Skill files")
 
 
+def seed_sandbox_workspace(
+    backend: Any,
+    *,
+    workspace: AgentWorkspaceBackend,
+    skill_files: list[tuple[str, bytes]],
+    protect_skills: bool = False,
+) -> None:
+    """把权威 Workspace 和 Skill 文件播种到一个新 Sandbox。"""
+    baseline = sync_workspace_into_sandbox(
+        backend=backend,
+        workspace=workspace,
+    )
+    backend.set_workspace_baseline(baseline)
+    if not skill_files:
+        return
+    skill_responses = backend.upload_files(skill_files)
+    raise_for_file_errors(skill_responses, operation="upload Sandbox Skill files")
+    if protect_skills:
+        make_skill_projection_read_only(backend)
+
+
 def sync_workspace_changes(
     *,
     backend: SandboxBackendProtocol,
@@ -73,14 +99,25 @@ def sync_workspace_changes(
     unique_paths = sorted(set(paths))
     responses = backend.download_files(unique_paths)
     current_files: dict[str, bytes] = {}
+    transfer_errors: list[str] = []
     for response in responses:
-        if response.error or response.content is None:
+        if response.error:
+            transfer_errors.append(f"{response.path}: {response.error}")
+            continue
+        if response.content is None:
+            transfer_errors.append(f"{response.path}: empty response")
             continue
         path = _normalize_sandbox_workspace_path(response.path)
         if path is not None:
             current_files[path] = response.content
-    if len(current_files) != len(unique_paths):
-        raise SandboxProviderError("failed to read final Sandbox Workspace")
+    missing_paths = sorted(set(unique_paths) - set(current_files))
+    if missing_paths:
+        transfer_errors.extend(f"{path}: response missing" for path in missing_paths)
+    if transfer_errors:
+        raise SandboxProviderError(
+            "failed to read final Sandbox Workspace: "
+            + "; ".join(transfer_errors[:5])
+        )
 
     changed_files = [
         (path, content)
@@ -88,15 +125,14 @@ def sync_workspace_changes(
         if baseline_manifest.get(path) != sha256(content).hexdigest()
     ]
     upload_responses = workspace.upload_files(changed_files)
-    errors = [response for response in upload_responses if response.error]
-    if errors:
-        raise SandboxProviderError(f"failed to persist {len(errors)} Workspace files")
+    raise_for_file_errors(upload_responses, operation="persist Workspace files")
 
     deleted_paths = sorted(set(baseline_manifest) - set(current_files))
     delete_errors = workspace.delete_files(deleted_paths)
     if delete_errors:
         raise SandboxProviderError(
-            f"failed to delete {len(delete_errors)} Workspace files"
+            "failed to delete Workspace files: "
+            + "; ".join(delete_errors[:5])
         )
 
 
@@ -107,7 +143,7 @@ def sync_workspace_into_sandbox(
 ) -> dict[str, str]:
     """把权威 Workspace 文件播种到 Sandbox，并返回初始摘要。"""
     manifest = workspace.content_manifest()
-    result = workspace.ls("/workspace")
+    result = workspace.ls("/")
     if result.error:
         raise SandboxProviderError(result.error)
     paths = sorted(
@@ -121,18 +157,25 @@ def sync_workspace_into_sandbox(
         return manifest
 
     responses = workspace.download_files(paths)
+    raise_for_file_errors(responses, operation="read existing Workspace files")
     files = [
-        (response.path, response.content)
+        (_workspace_sandbox_path(response.path), response.content)
         for response in responses
         if response.content is not None and not response.error
     ]
     if len(files) != len(paths):
-        raise SandboxProviderError("failed to read existing Workspace files")
+        raise SandboxProviderError(
+            "failed to read existing Workspace files: response content missing"
+        )
     upload_responses = backend.upload_files(files)
-    errors = [response for response in upload_responses if response.error]
-    if errors:
-        raise SandboxProviderError(f"failed to upload {len(errors)} Sandbox files")
+    raise_for_file_errors(upload_responses, operation="upload Sandbox files")
     return manifest
+
+
+def _workspace_sandbox_path(path: str) -> str:
+    """把 Workspace Backend 的路由相对路径转换为 Sandbox 路径。"""
+    normalized = "/" + path.lstrip("/")
+    return "/workspace" if normalized == "/" else f"/workspace{normalized}"
 
 
 def _normalize_sandbox_workspace_path(path: object) -> str | None:
@@ -157,10 +200,28 @@ def _normalize_sandbox_workspace_path(path: object) -> str | None:
     return candidate.as_posix()
 
 
+def raise_for_file_errors(
+    responses: Iterable[object],
+    *,
+    operation: str,
+) -> None:
+    """把批量文件传输的逐项错误转换为包含路径的同步异常。"""
+    errors = [
+        f"{getattr(response, 'path', '<unknown>')}: {getattr(response, 'error', '')}"
+        for response in responses
+        if getattr(response, "error", None)
+    ]
+    if errors:
+        raise SandboxProviderError(f"{operation} failed: {'; '.join(errors[:5])}")
+
+
 __all__ = [
     "close_workspace_safely",
     "ensure_sandbox_workspace",
     "make_skill_projection_read_only",
+    "raise_for_file_errors",
+    "seed_sandbox_workspace",
+    "SandboxProviderError",
     "sync_workspace_changes",
     "sync_workspace_into_sandbox",
 ]

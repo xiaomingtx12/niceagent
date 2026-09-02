@@ -23,7 +23,11 @@ class WorkspaceFileRevisionConflict(RuntimeError):
 
 
 class WorkspaceFileRepository:
-    """在一个租户应用作用域内维护当前文件元数据。"""
+    """在一个租户应用作用域内维护当前文件元数据。
+
+    该仓储只服务 Agent Runtime 的独立 Session，封装元数据事务、配额、锁和
+    revision；HTTP Workspace Service 的展示查询可以直接使用 SQLAlchemy。
+    """
 
     def __init__(
         self,

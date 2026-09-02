@@ -10,7 +10,7 @@ from uuid import UUID
 from injector import inject
 
 from config.config import Config
-from internal.core.agent_v2.backends.langsmith_sandbox_backend import (
+from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
     build_stable_sandbox_name,
 )
 from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (

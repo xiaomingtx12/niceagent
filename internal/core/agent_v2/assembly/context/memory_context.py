@@ -10,7 +10,7 @@ from deepagents.backends.protocol import BackendProtocol
 from langgraph.store.base import BaseStore
 
 from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.backends.agent_memory_backend import AgentMemoryBackend
+from internal.core.agent_v2.backends.memory.agent_memory_backend import AgentMemoryBackend
 from internal.core.agent_v2.entity.agent_memory import AGENT_MEMORY_SOURCE
 
 
