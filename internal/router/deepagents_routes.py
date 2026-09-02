@@ -62,6 +62,11 @@ def register_deepagents_routes(
         view_func=memory_file_handler.read_app_memory_file,
     )
     blueprint.add_url_rule(
+        "/apps/<uuid:app_id>/memory/file/download",
+        methods=["GET"],
+        view_func=memory_file_handler.download_app_memory_file,
+    )
+    blueprint.add_url_rule(
         "/apps/<uuid:app_id>/memory/file",
         methods=["POST"],
         view_func=memory_file_handler.write_app_memory_file,
@@ -75,6 +80,16 @@ def register_deepagents_routes(
         "/web-apps/<string:token>/workspace/files",
         methods=["GET"],
         view_func=workspace_file_handler.list_all_web_app_files,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/workspace/file",
+        methods=["GET"],
+        view_func=workspace_file_handler.read_web_app_file,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/workspace/file/download",
+        methods=["GET"],
+        view_func=workspace_file_handler.download_web_app_file,
     )
     blueprint.add_url_rule(
         "/web-apps/<string:token>/conversations/<uuid:conversation_id>/file",
@@ -95,6 +110,11 @@ def register_deepagents_routes(
         "/web-apps/<string:token>/memory/file",
         methods=["GET"],
         view_func=memory_file_handler.read_web_app_memory_file,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/memory/file/download",
+        methods=["GET"],
+        view_func=memory_file_handler.download_web_app_memory_file,
     )
     blueprint.add_url_rule(
         "/web-apps/<string:token>/memory/file",

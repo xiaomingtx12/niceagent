@@ -35,6 +35,7 @@ from .workspace_quota import (
     AgentWorkspaceQuotaPolicy,
     DEFAULT_AGENT_WORKSPACE_LIMITS,
 )
+from .workspace_scope import build_workspace_scope_id
 
 __all__ = [
     "AgentConfig",
@@ -67,4 +68,5 @@ __all__ = [
     "normalize_workspace_path",
     "resolve_workspace_storage_path",
     "workspace_conversation_id",
+    "build_workspace_scope_id",
 ]

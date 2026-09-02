@@ -25,6 +25,7 @@ class AgentInvocation(BaseModel):
     )
 
     account_id: UUID
+    configuration_account_id: UUID
     app_id: UUID
     app_name: str
     app_description: str

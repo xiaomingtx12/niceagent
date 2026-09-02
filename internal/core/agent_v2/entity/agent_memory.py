@@ -40,22 +40,20 @@ class AgentMemoryQuotaExceeded(ValueError):
 
 
 class AgentMemoryIdentity(BaseModel):
-    """租户、应用和主体组成的长期记忆隔离身份。"""
+    """账号和 Agent 组成的长期记忆隔离身份。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    tenant_id: UUID
+    account_id: UUID
     app_id: UUID
-    principal_id: UUID
 
     @property
     def namespace(self) -> tuple[str, ...]:
         """返回 LangGraph Store 使用的稳定命名空间。"""
         return (
             *AGENT_MEMORY_NAMESPACE_ROOT,
-            str(self.tenant_id),
+            str(self.account_id),
             str(self.app_id),
-            str(self.principal_id),
         )
 
 

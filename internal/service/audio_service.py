@@ -105,10 +105,10 @@ class AudioService(BaseService):
             logging.error("语音转文本失败: %(error)s", {"error": e}, exc_info=True)
             raise FailException(f"语音转文本失败: {str(e)}")
 
-    def message_to_audio(self, message_id: UUID, account: Account) -> Generator:
+    def message_to_audio(self, message_id: UUID | str, account: Account) -> Generator:
         """使用Edge-TTS将消息转换成流式输出语音"""
         # 1.根据传递的消息id获取有效消息
-        message = self.get(Message, message_id)
+        message = self.get(Message, self._normalize_message_id(message_id))
         if (
             not message
             or message.is_deleted
@@ -168,6 +168,28 @@ class AudioService(BaseService):
             text_to_speech = app_config.text_to_speech
             enable = text_to_speech.get("enable", False)
             voice = text_to_speech.get("voice", "xiaoxiao")
+        elif message.invoke_from == InvokeFrom.CREATOR_TASK:
+            # Creator 任务消息由当前账号创建，并使用已发布 Agent 的配置。
+            # 任务中心还会展示 WebApp 历史消息，但这条分支只处理
+            # invoke_from=creator_task 的业务消息。
+            app = self.get(App, conversation.app_id)
+            if (
+                app is None
+                or app.id != message.app_id
+                or app.account_id != account.id
+                or app.status != AppStatus.PUBLISHED
+                or message.created_by != account.id
+                or not (
+                    conversation.owner_account_id == account.id
+                    or conversation.created_by == account.id
+                )
+            ):
+                raise NotFoundException("该消息不存在，请核实后重试")
+
+            app_config: Union[AppConfig, AppConfigVersion] = app.app_config
+            text_to_speech = app_config.text_to_speech
+            enable = text_to_speech.get("enable", False)
+            voice = text_to_speech.get("voice", "xiaoxiao")
         elif message.invoke_from == InvokeFrom.ASSISTANT_AGENT:
             if (
                 message.created_by != account.id
@@ -216,6 +238,17 @@ class AudioService(BaseService):
 
         # 9.调用tts函数流式事件输出语音数据
         return tts()
+
+    @staticmethod
+    def _normalize_message_id(message_id: UUID | str) -> UUID:
+        """把业务 UUID 和工作台 ``UUID:assistant`` ID 统一成业务主键。"""
+        value = str(message_id).strip()
+        if value.endswith(":assistant"):
+            value = value[: -len(":assistant")]
+        try:
+            return UUID(value)
+        except (TypeError, ValueError) as exc:
+            raise NotFoundException("该消息不存在，请核实后重试") from exc
 
     @staticmethod
     def _edge_tts_synthesize(text: str, voice: str) -> bytes:

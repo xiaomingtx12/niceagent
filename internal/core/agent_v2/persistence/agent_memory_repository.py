@@ -117,9 +117,9 @@ class AgentMemoryRepository:
 
         return self._execute(operation)
 
-    def delete_app_memories(self, *, tenant_id: str, app_id: str) -> None:
-        """删除应用下所有主体的长期记忆。"""
-        prefix = (*AGENT_MEMORY_NAMESPACE_ROOT, tenant_id, app_id)
+    def delete_app_memories(self, *, account_id: str, app_id: str) -> None:
+        """删除账号下应用的全部长期记忆。"""
+        prefix = (*AGENT_MEMORY_NAMESPACE_ROOT, account_id, app_id)
 
         def operation(store: BaseStore) -> None:
             namespaces: list[tuple[str, ...]] = []

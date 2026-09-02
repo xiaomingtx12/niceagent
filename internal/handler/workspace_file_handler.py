@@ -33,7 +33,7 @@ class WorkspaceFileHandler:
 
     @login_required
     def list_app_files(self, app_id: UUID):
-        """列出创建者指定会话的文件。"""
+        """列出当前用户在该 Agent 下的共享 Workspace 文件。"""
         req = ListWorkspaceFilesReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
@@ -41,14 +41,13 @@ class WorkspaceFileHandler:
         rows = self.workspace_file_service.list_creator_files(
             account_id=app.account_id,
             app_id=app.id,
-            conversation_id=req.conversation_id.data,
             prefix=req.path_prefix.data,
         )
         return success_json({"items": WorkspaceFileResp(many=True).dump(rows)})
 
     @login_required
     def write_app_file(self, app_id: UUID):
-        """写入创建者会话中的文本文件。"""
+        """写入当前用户在该 Agent 下的共享 Workspace 文件。"""
         req = WriteWorkspaceFileReq()
         if not req.validate():
             return validate_error_json(req.errors)
@@ -56,7 +55,6 @@ class WorkspaceFileHandler:
         row = self.workspace_file_service.write_text(
             account_id=app.account_id,
             app_id=app.id,
-            conversation_id=req.conversation_id.data,
             path=req.path.data,
             content=req.content.data,
             created_by=current_user.id,
@@ -66,7 +64,7 @@ class WorkspaceFileHandler:
 
     @login_required
     def read_app_file(self, app_id: UUID):
-        """预览创建者会话中的文件。"""
+        """预览当前用户在该 Agent 下的共享 Workspace 文件。"""
         req = ReadWorkspaceFileReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
@@ -75,14 +73,13 @@ class WorkspaceFileHandler:
             account_id=app.account_id,
             app_id=app.id,
             path=req.path.data,
-            conversation_id=req.conversation_id.data,
         )
         preview = self.workspace_file_service.preview(row)
         return success_json(WorkspaceFilePreviewResp().dump(preview))
 
     @login_required
     def download_app_file(self, app_id: UUID):
-        """下载创建者会话中的文件。"""
+        """下载当前用户在该 Agent 下的共享 Workspace 文件。"""
         req = ReadWorkspaceFileReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
@@ -91,13 +88,12 @@ class WorkspaceFileHandler:
             account_id=app.account_id,
             app_id=app.id,
             path=req.path.data,
-            conversation_id=req.conversation_id.data,
         )
         return redirect(self.workspace_file_service.get_download_url(row), code=302)
 
     @login_required
     def delete_app_file(self, app_id: UUID):
-        """删除创建者会话中的文件。"""
+        """删除当前用户在该 Agent 下的共享 Workspace 文件。"""
         req = DeleteWorkspaceFileReq()
         if not req.validate():
             return validate_error_json(req.errors)
@@ -106,36 +102,26 @@ class WorkspaceFileHandler:
             account_id=app.account_id,
             app_id=app.id,
             path=req.path.data,
-            conversation_id=req.conversation_id.data,
         )
         return success_message("Workspace 文件已删除")
 
     @login_required
     def list_all_web_app_files(self, token: str):
-        """列出当前终端用户拥有的全部会话文件。"""
+        """列出当前用户在该 Agent 下的共享 Workspace 文件。"""
         req = SearchWorkspaceFilesReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.web_app_service.get_web_app(token)
-        end_user = self.web_app_service.resolve_web_app_end_user(
-            app=app,
-            account=current_user,
-        )
-        rows = self.workspace_file_service.list_end_user_all_files(
-            account_id=app.account_id,
+        rows = self.workspace_file_service.list_shared_files(
+            account_id=current_user.id,
             app_id=app.id,
-            owner_ids=[end_user.id, current_user.id],
             query=req.query.data,
-        )
-        names = self.workspace_file_service.conversation_names(
-            app_id=app.id,
-            conversation_ids=[row.conversation_id for row in rows],
         )
         items = WorkspaceFileWithConversationResp(many=True).dump(
             [
                 (
                     row,
-                    names.get(str(row.conversation_id), "未命名会话"),
+                    "统一工作区",
                 )
                 for row in rows
             ]
@@ -143,22 +129,50 @@ class WorkspaceFileHandler:
         return success_json({"items": items})
 
     @login_required
+    def read_web_app_file(self, token: str):
+        """预览当前用户在 WebApp Agent 下的共享 Workspace 文件。"""
+        req = ReadWorkspaceFileReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
+        app = self.web_app_service.get_web_app(token)
+        row = self.workspace_file_service.read_owned(
+            account_id=current_user.id,
+            app_id=app.id,
+            path=req.path.data,
+        )
+        return success_json(
+            WorkspaceFilePreviewResp().dump(self.workspace_file_service.preview(row))
+        )
+
+    @login_required
+    def download_web_app_file(self, token: str):
+        """下载当前用户在 WebApp Agent 下的共享 Workspace 文件。"""
+        req = ReadWorkspaceFileReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
+        app = self.web_app_service.get_web_app(token)
+        row = self.workspace_file_service.read_owned(
+            account_id=current_user.id,
+            app_id=app.id,
+            path=req.path.data,
+        )
+        return redirect(self.workspace_file_service.get_download_url(row), code=302)
+
+    @login_required
     def read_conversation_file(self, token: str, conversation_id: UUID):
-        """预览终端用户当前会话中的文件。"""
+        """兼容按会话路由预览当前用户的共享 Workspace 文件。"""
         req = ConversationWorkspaceFileReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
-        app, _, conversation = self.web_app_service.get_owned_web_conversation(
+        app, _, _ = self.web_app_service.get_owned_web_conversation(
             token=token,
             conversation_id=conversation_id,
             account=current_user,
         )
         row = self.workspace_file_service.read_owned(
-            account_id=app.account_id,
+            account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
-            conversation_id=conversation.id,
-            end_user_conversation_id=conversation.id,
         )
         return success_json(
             WorkspaceFilePreviewResp().dump(self.workspace_file_service.preview(row))
@@ -166,21 +180,19 @@ class WorkspaceFileHandler:
 
     @login_required
     def download_conversation_file(self, token: str, conversation_id: UUID):
-        """下载终端用户当前会话中的文件。"""
+        """兼容按会话路由下载当前用户的共享 Workspace 文件。"""
         req = ConversationWorkspaceFileReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
-        app, _, conversation = self.web_app_service.get_owned_web_conversation(
+        app, _, _ = self.web_app_service.get_owned_web_conversation(
             token=token,
             conversation_id=conversation_id,
             account=current_user,
         )
         row = self.workspace_file_service.read_owned(
-            account_id=app.account_id,
+            account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
-            conversation_id=conversation.id,
-            end_user_conversation_id=conversation.id,
         )
         return redirect(self.workspace_file_service.get_download_url(row), code=302)
 

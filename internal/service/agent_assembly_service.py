@@ -118,7 +118,7 @@ class AgentAssemblyService(BaseService):
                 raise AgentInvocationException("Agent 运行配置缺少模型")
             llm = self.language_model_service.load_language_model(
                 req.app_config.model_config_data,
-                account_id=req.account_id,
+                account_id=req.configuration_account_id,
             )
         self._log_build_timing(req, "model", phase_started_at)
         phase_started_at = time.monotonic()
@@ -127,7 +127,7 @@ class AgentAssemblyService(BaseService):
         tools.extend(
             self._build_configured_tools(
                 req.app_config,
-                account_id=req.account_id,
+                account_id=req.configuration_account_id,
                 app_id=req.app_id,
             )
         )
@@ -137,12 +137,12 @@ class AgentAssemblyService(BaseService):
         # 3.解析 SubAgent 的模型、工具和发布应用引用。
         runtime_subagents, subagent_tools, subagent_models = self._prepare_subagents(
             req.app_config.subagents,
-            account_id=req.account_id,
+            account_id=req.configuration_account_id,
             parent_app_id=req.app_id,
         )
         self._log_build_timing(req, "subagents", phase_started_at)
         phase_started_at = time.monotonic()
-        # 4.按会话作用域装配 Workspace、Skill、Memory、Sandbox 等资源。
+        # 4.按用户和会话作用域装配 Workspace、Skill、Memory、Sandbox 等资源。
         runtime = self._prepare_runtime(
             AgentRuntimePrepareReq(
                 account_id=req.account_id,

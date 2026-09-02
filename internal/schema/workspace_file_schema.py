@@ -12,11 +12,11 @@ from internal.model import WorkspaceFile
 
 
 class ListWorkspaceFilesReq(FlaskForm):
-    """按会话列出 Workspace 文件请求。"""
+    """列出当前用户 Agent Workspace 文件请求。"""
 
     conversation_id = StringField(
         "conversation_id",
-        validators=[DataRequired("conversation_id 不能为空"), UUID()],
+        validators=[Optional(), UUID()],
     )
     path_prefix = StringField("path_prefix", validators=[Optional(), Length(max=512)])
 
@@ -28,11 +28,11 @@ class SearchWorkspaceFilesReq(FlaskForm):
 
 
 class ReadWorkspaceFileReq(FlaskForm):
-    """读取 Workspace 文件请求。"""
+    """读取当前用户 Agent Workspace 文件请求。"""
 
     conversation_id = StringField(
         "conversation_id",
-        validators=[DataRequired("conversation_id 不能为空"), UUID()],
+        validators=[Optional(), UUID()],
     )
     path = StringField(
         "path",

@@ -113,10 +113,11 @@
 
 # Agent 分层记忆规范
 
-- LangGraph Checkpointer 只负责 `tenant + app + principal + thread` 作用域的会话状态；跨线程长期记忆使用 Deep Agents `MemoryMiddleware`、`CompositeBackend`、`StoreBackend` 和 LangGraph Store，不得用 Redis 或业务消息表重建第二套记忆机制。
-- 长期记忆命名空间固定包含 `tenant_id + app_id + principal_id`，不得包含 `thread_id`；`principal_id` 必须由服务端解析为稳定 UUID，不得使用 `None`、`account`、`public` 等应用共享兜底。
-- 应用编排通过已有 `long_term_memory.enable` 控制长期记忆。关闭时不得初始化 Store、注册 `/memories/` 路由、注入 Memory source、提示记忆能力或允许记忆路径；关闭只停用能力，不删除已有数据。
+- LangGraph Checkpointer 只负责 `account + app + principal + thread` 作用域的会话状态；跨线程长期记忆使用 Deep Agents `MemoryMiddleware`、`CompositeBackend`、`StoreBackend` 和 LangGraph Store，不得用 Redis 或业务消息表重建第二套记忆机制。
+- 长期记忆命名空间固定包含 `account_id + app_id`，不得包含 `principal_id` 或 `thread_id`；同一账号使用同一 Agent 的 Creator、WebApp、Service API 和微信入口必须共享同一命名空间。
+- 应用编排通过已有 `long_term_memory.enable` 控制长期记忆。关闭时不得初始化 Store、向 Agent 注入 Memory source、提示记忆能力、允许记忆路径或允许记忆 HTTP 操作；关闭只停用能力，不删除已有数据。
+- Skill 只提供运行规则，Workspace 只保存项目文件和任务产物；长期记忆使用专门的 `/memories/` Store 机制，三者不互相承担存储职责。
 - `CompositeBackend` 会把 `/memories/MEMORY.md` 的路由前缀移除后交给 StoreBackend，因此 Store key 为 `/MEMORY.md`。HTTP Repository 必须统一转换虚拟路径与 Store key，不得自行恢复前缀或让两条链路保存重复记录。
-- 长期记忆只保存小体量 UTF-8 文本，不承担业务文件、媒体、附件和交付物存储。默认上限为单文件 64 KiB、每主体 100 个文件、每主体总计 1 MiB，HTTP Service 与 Agent Backend 必须执行同一组限制。
+- 长期记忆只保存小体量 UTF-8 文本，不承担业务文件、媒体、附件和交付物存储。默认上限为单个账号 Agent 单文件 64 KiB、100 个文件、总计 1 MiB，HTTP Service 与 Agent Backend 必须执行同一组限制。
 - `/memories/MEMORY.md` 保存稳定偏好和事实；应用行为指令属于 AppConfig 或 Skill，不使用 `/memories/AGENTS.md`。知识材料进入 Dataset/RAG，业务产出文件进入 Workspace/COS。
-- 删除会话或消息不得删除跨会话记忆；删除应用时按 `tenant + app` 命名空间前缀清理所有主体记忆。禁用开关不触发清理。
+- 删除会话或消息不得删除跨会话记忆；删除应用时按 `account + app` 命名空间前缀清理全部长期记忆。禁用开关不触发清理。

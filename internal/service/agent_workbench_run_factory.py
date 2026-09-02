@@ -152,6 +152,7 @@ class AgentWorkbenchRunFactory(BaseService):
         self.db.session.add(message)
         request = AgentInvocation(
             account_id=account.id,
+            configuration_account_id=account.id,
             app_id=app_id,
             app_name=app.name,
             app_description=app.description,
@@ -228,7 +229,8 @@ class AgentWorkbenchRunFactory(BaseService):
         )
         self.db.session.add(message)
         request = AgentInvocation(
-            account_id=app.account_id,
+            account_id=account.id,
+            configuration_account_id=app.account_id,
             app_id=app.id,
             app_name=app.name,
             app_description=app.description,
@@ -303,6 +305,7 @@ class AgentWorkbenchRunFactory(BaseService):
         self.db.session.add(message)
         request = AgentInvocation(
             account_id=account.id,
+            configuration_account_id=account.id,
             app_id=app.id,
             app_name=app.name,
             app_description=app.description,
@@ -357,6 +360,7 @@ class AgentWorkbenchRunFactory(BaseService):
         llm, tools = self.assistant_agent_service.prepare_runtime(account)
         request = AgentInvocation(
             account_id=account.id,
+            configuration_account_id=account.id,
             app_id=conversation.app_id,
             app_name="应用构建助手",
             app_description="帮助 Creator 创建应用和工作流。",
@@ -442,6 +446,7 @@ class AgentWorkbenchRunFactory(BaseService):
         self.db.session.add(message)
         request = AgentInvocation(
             account_id=account.id,
+            configuration_account_id=account.id,
             app_id=app.id,
             app_name=app.name,
             app_description=app.description,

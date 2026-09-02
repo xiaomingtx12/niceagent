@@ -10,12 +10,12 @@ from sqlalchemy import or_
 
 from config import Config
 from internal.core.agent_v2.entity.workspace_path import normalize_workspace_path
+from internal.core.agent_v2.entity.workspace_scope import build_workspace_scope_id
 from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
 from internal.core.agent_v2.persistence.workspace_file_repository import (
     WorkspaceFileRepository,
     WorkspaceFileRevisionConflict,
 )
-from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.workspace_file_entity import (
     WorkspaceFilePreview,
     supports_text_preview,
@@ -26,7 +26,7 @@ from internal.exception import (
     WorkspaceQuotaExceeded,
     WorkspaceStorageError,
 )
-from internal.model import Conversation, WorkspaceFile
+from internal.model import WorkspaceFile
 from pkg.sqlalchemy import SQLAlchemy
 
 from .base_service import BaseService
@@ -48,8 +48,8 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _conversation_storage_path(path: str, conversation_id: UUID) -> str:
-    """把前端虚拟路径转换为会话隔离的物理元数据路径。"""
+def _workspace_storage_path(path: str, scope_id: UUID) -> str:
+    """把前端虚拟路径转换为稳定 Workspace 作用域下的物理路径。"""
     try:
         normalized = normalize_workspace_path(path)
     except WorkspacePathError as exc:
@@ -64,7 +64,7 @@ def _conversation_storage_path(path: str, conversation_id: UUID) -> str:
         or any(part in {"", ".", "..", "~"} for part in segments)
     ):
         raise FailException("Workspace 路径不合法")
-    return f"{conversation_id}/{relative}"
+    return f"{scope_id}/{relative}"
 
 
 @inject
@@ -81,108 +81,88 @@ class WorkspaceFileService(BaseService):
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        conversation_id: str | UUID,
         prefix: str | None = None,
     ) -> list[WorkspaceFile]:
-        """列出创建者当前会话内的文件元数据。"""
-        conversation_uuid = self._require_conversation(app_id, conversation_id)
+        """列出当前用户在 Agent 下共享 Workspace 的文件元数据。"""
+        scope_id = self._resolve_workspace_scope(
+            account_id=account_id,
+            app_id=app_id,
+        )
         query = self.db.session.query(WorkspaceFile).filter(
             WorkspaceFile.account_id == _uuid(account_id, "account_id"),
             WorkspaceFile.app_id == _uuid(app_id, "app_id"),
-            WorkspaceFile.conversation_id == conversation_uuid,
+            WorkspaceFile.conversation_id == scope_id,
             WorkspaceFile.is_deleted.is_(False),
         )
         if prefix:
-            storage_prefix = _conversation_storage_path(prefix, conversation_uuid)
-            escaped = _escape_like(storage_prefix)
-            query = query.filter(
-                or_(
-                    WorkspaceFile.path == storage_prefix,
-                    WorkspaceFile.path.like(f"{escaped}/%", escape="\\"),
+            normalized_prefix = prefix.strip()
+            if normalized_prefix not in {"/workspace", "/workspace/"}:
+                if not normalized_prefix.startswith("/workspace/"):
+                    normalized_prefix = f"/workspace/{normalized_prefix.lstrip('/')}"
+                storage_prefix = _workspace_storage_path(
+                    normalized_prefix,
+                    scope_id,
                 )
-            )
+                escaped = _escape_like(storage_prefix)
+                query = query.filter(
+                    or_(
+                        WorkspaceFile.path == storage_prefix,
+                        WorkspaceFile.path.like(f"{escaped}/%", escape="\\"),
+                    )
+                )
         return query.order_by(WorkspaceFile.updated_at.desc()).all()
 
-    def list_end_user_all_files(
+    def list_shared_files(
         self,
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        owner_ids: list[str | UUID],
         query: str | None = None,
     ) -> list[WorkspaceFile]:
-        """列出终端用户拥有的 WebApp 会话文件。"""
+        """列出账号在 Agent 下共享 Workspace 的文件。"""
         app_uuid = _uuid(app_id, "app_id")
-        owner_uuids = [_uuid(value, "owner_id") for value in owner_ids]
-        file_query = (
-            self.db.session.query(WorkspaceFile)
-            .join(Conversation, Conversation.id == WorkspaceFile.conversation_id)
-            .filter(
-                WorkspaceFile.account_id == _uuid(account_id, "account_id"),
-                WorkspaceFile.app_id == app_uuid,
-                WorkspaceFile.is_deleted.is_(False),
-                Conversation.app_id == app_uuid,
-                Conversation.invoke_from == InvokeFrom.WEB_APP,
-                Conversation.created_by.in_(owner_uuids),
-                Conversation.is_deleted.is_(False),
-            )
+        scope_id = self._resolve_workspace_scope(
+            account_id=account_id,
+            app_id=app_uuid,
+        )
+        file_query = self.db.session.query(WorkspaceFile).filter(
+            WorkspaceFile.account_id == _uuid(account_id, "account_id"),
+            WorkspaceFile.app_id == app_uuid,
+            WorkspaceFile.conversation_id == scope_id,
+            WorkspaceFile.is_deleted.is_(False),
         )
         query_text = (query or "").strip()
         if query_text:
             pattern = f"%{_escape_like(query_text)}%"
-            file_query = file_query.filter(
-                or_(
-                    WorkspaceFile.path.ilike(pattern, escape="\\"),
-                    Conversation.name.ilike(pattern, escape="\\"),
-                )
-            )
+            file_query = file_query.filter(WorkspaceFile.path.ilike(pattern, escape="\\"))
         return file_query.order_by(WorkspaceFile.updated_at.desc()).all()
-
-    def conversation_names(
-        self,
-        *,
-        app_id: str | UUID,
-        conversation_ids: list[str | UUID],
-    ) -> dict[str, str]:
-        """返回文件列表所需的会话名称映射。"""
-        if not conversation_ids:
-            return {}
-        rows = (
-            self.db.session.query(Conversation.id, Conversation.name)
-            .filter(
-                Conversation.app_id == _uuid(app_id, "app_id"),
-                Conversation.id.in_(
-                    [_uuid(value, "conversation_id") for value in conversation_ids]
-                ),
-            )
-            .all()
-        )
-        return {str(item_id): name or "未命名会话" for item_id, name in rows}
 
     def write_text(
         self,
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        conversation_id: str | UUID,
         path: str,
         content: str,
         created_by: str | UUID,
         mime_type: str = "text/plain",
     ) -> WorkspaceFile:
-        """校验会话归属并把文本内容写入 COS。"""
+        """解析用户 Workspace 作用域并把文本内容写入 COS。"""
         app_uuid = _uuid(app_id, "app_id")
-        conversation_uuid = self._require_conversation(app_uuid, conversation_id)
+        scope_id = self._resolve_workspace_scope(
+            account_id=account_id,
+            app_id=app_uuid,
+        )
         repository = self._repository(
             account_id=_uuid(account_id, "account_id"),
             app_id=app_uuid,
-            conversation_id=conversation_uuid,
+            conversation_id=scope_id,
             created_by=_uuid(created_by, "created_by"),
         )
         try:
             return self.storage_service.write_text(
                 repository,
-                _conversation_storage_path(path, conversation_uuid),
+                _workspace_storage_path(path, scope_id),
                 content,
                 mime_type=mime_type or "text/plain",
             )
@@ -197,19 +177,19 @@ class WorkspaceFileService(BaseService):
         account_id: str | UUID,
         app_id: str | UUID,
         path: str,
-        conversation_id: str | UUID,
-        end_user_conversation_id: str | UUID | None = None,
     ) -> WorkspaceFile:
-        """读取当前会话拥有的文件元数据。"""
-        expected = end_user_conversation_id or conversation_id
-        conversation_uuid = self._require_conversation(app_id, expected)
-        storage_path = _conversation_storage_path(path, conversation_uuid)
+        """读取当前用户在 Agent 共享 Workspace 中的文件元数据。"""
+        scope_id = self._resolve_workspace_scope(
+            account_id=account_id,
+            app_id=app_id,
+        )
+        storage_path = _workspace_storage_path(path, scope_id)
         row = (
             self.db.session.query(WorkspaceFile)
             .filter(
                 WorkspaceFile.account_id == _uuid(account_id, "account_id"),
                 WorkspaceFile.app_id == _uuid(app_id, "app_id"),
-                WorkspaceFile.conversation_id == conversation_uuid,
+                WorkspaceFile.conversation_id == scope_id,
                 WorkspaceFile.path == storage_path,
                 WorkspaceFile.is_deleted.is_(False),
             )
@@ -255,14 +235,12 @@ class WorkspaceFileService(BaseService):
         account_id: str | UUID,
         app_id: str | UUID,
         path: str,
-        conversation_id: str | UUID,
     ) -> None:
         """提交删除状态并清理 COS 对象。"""
         row = self.read_owned(
             account_id=account_id,
             app_id=app_id,
             path=path,
-            conversation_id=conversation_id,
         )
         repository = self._repository(
             account_id=_uuid(account_id, "account_id"),
@@ -279,7 +257,7 @@ class WorkspaceFileService(BaseService):
         conversation_id: UUID,
         created_by: UUID | None = None,
     ) -> WorkspaceFileRepository:
-        """构造绑定当前业务会话的元数据仓储。"""
+        """构造绑定稳定 Workspace 作用域的元数据仓储。"""
         return WorkspaceFileRepository(
             session=self.db.session,
             account_id=account_id,
@@ -292,25 +270,16 @@ class WorkspaceFileService(BaseService):
             ),
         )
 
-    def _require_conversation(
-        self,
+    @staticmethod
+    def _resolve_workspace_scope(
+        *,
+        account_id: str | UUID,
         app_id: str | UUID,
-        conversation_id: str | UUID,
     ) -> UUID:
-        """确认会话存在且属于当前应用。"""
-        conversation_uuid = _uuid(conversation_id, "conversation_id")
-        exists = (
-            self.db.session.query(Conversation.id)
-            .filter(
-                Conversation.id == conversation_uuid,
-                Conversation.app_id == _uuid(app_id, "app_id"),
-                Conversation.is_deleted.is_(False),
-            )
-            .one_or_none()
+        """解析账号级 Workspace 作用域；会话只负责线程状态。"""
+        return build_workspace_scope_id(
+            _uuid(account_id, "account_id"),
+            _uuid(app_id, "app_id"),
         )
-        if exists is None:
-            raise FailException("Workspace 会话不存在或不属于当前应用")
-        return conversation_uuid
-
 
 __all__ = ["WorkspaceFileService"]

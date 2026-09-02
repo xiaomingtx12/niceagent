@@ -15,12 +15,12 @@ allowed-tools:
 
 # Agent 记忆
 
-持久记忆使用 `/workspace/memory/` 下的 Markdown 文件，按主题保存而不是把所有历史对话原样堆积。记忆写入前判断信息是否长期有用、是否得到用户明确表达，以及是否含敏感数据。
+本 Skill 只定义长期记忆的整理规则，不定义记忆的存储实现。长期记忆由系统专门的 `/memories/` 机制提供，不是 Workspace 文件；Workspace 只用于项目文件和任务产物。记忆写入前判断信息是否长期有用、是否得到用户明确表达，以及是否含敏感数据。
 
 ## 文件布局
 
 ```text
-/workspace/memory/
+/memories/
   MEMORY.md              # 精炼的长期事实与偏好
   projects/<project>.md  # 项目状态、决策和待办
   lessons/<topic>.md     # 可复用经验与失败教训

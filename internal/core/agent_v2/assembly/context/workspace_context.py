@@ -40,12 +40,14 @@ class WorkspaceContextAssembler:
         telemetry: AgentTelemetry,
         storage_service: WorkspaceFileStorageProtocol,
     ) -> WorkspaceProjection:
-        """创建本次运行独立的 Workspace Backend。"""
+        """创建本次运行连接到稳定用户 Workspace 的 Backend。"""
         workspace = AgentWorkspaceBackend(
             session=runtime_session,
             account_id=run_context.account_id,
             app_id=run_context.app_id,
-            conversation_id=run_context.conversation_id,
+            # Workspace 跨会话共享；conversation_id 仅用于线程状态，不能
+            # 继续作为文件存储作用域。
+            conversation_id=run_context.workspace_scope_id,
             storage_service=storage_service,
             created_by=run_context.created_by,
             limits=AgentWorkspaceLimits(

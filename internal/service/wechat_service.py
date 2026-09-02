@@ -222,6 +222,7 @@ class WechatService(BaseService):
             message = self.get(Message, message_id)
             invocation = AgentInvocation(
                 account_id=app.account_id,
+                configuration_account_id=app.account_id,
                 app_id=app.id,
                 app_name=app.name,
                 app_description=app.description,

@@ -251,6 +251,7 @@ class WebAppService(BaseService):
                 "native_file_input": bool(model_config.get("native_file_input", False)),
                 "text_to_speech": app_config.get("text_to_speech"),
                 "speech_to_text": app_config.get("speech_to_text"),
+                "long_term_memory": app_config.get("long_term_memory"),
                 "skills": skills,
             },
         }
@@ -299,7 +300,7 @@ class WebAppService(BaseService):
         )
         self.agent_cleanup_service.cleanup_conversation(
             AgentConversationCleanupReq(
-                account_id=app.account_id,
+                account_id=account.id,
                 app_id=app.id,
                 conversation_id=conversation.id,
             )

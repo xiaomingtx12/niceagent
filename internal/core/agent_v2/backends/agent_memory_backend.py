@@ -45,8 +45,6 @@ class AgentMemoryBackend(StoreBackend):
             key = self._normalize_store_key(file_path)
             store = self._get_store()
             namespace = self._get_namespace()
-            if store.get(namespace, key) is not None:
-                return super().write(key, content)
             self._validate_projected_content(
                 store=store,
                 namespace=namespace,
@@ -63,8 +61,6 @@ class AgentMemoryBackend(StoreBackend):
             key = self._normalize_store_key(file_path)
             store = self._get_store()
             namespace = self._get_namespace()
-            if await store.aget(namespace, key) is not None:
-                return await super().awrite(key, content)
             await self._avalidate_projected_content(
                 store=store,
                 namespace=namespace,
@@ -151,21 +147,30 @@ class AgentMemoryBackend(StoreBackend):
         self,
         files: list[tuple[str, bytes]],
     ) -> list[FileUploadResponse]:
-        """逐项拒绝二进制内容，并对批量覆盖后的容量逐项校验。"""
-        responses: list[FileUploadResponse] = []
-        for path, raw_content in files:
+        """先完整校验批次，再一次性写入合法的 UTF-8 文本。"""
+        prepared: list[tuple[int, str, bytes]] = []
+        responses: list[FileUploadResponse | None] = [None] * len(files)
+        store = self._get_store()
+        namespace = self._get_namespace()
+        sizes = self._stored_sizes(
+            store.search(namespace, limit=self._limits.max_files + 1)
+        )
+        for index, (path, raw_content) in enumerate(files):
             try:
                 content = raw_content.decode("utf-8")
                 key = self._normalize_store_key(path)
-                self._validate_projected_content(
-                    store=self._get_store(),
-                    namespace=self._get_namespace(),
-                    key=key,
-                    content=content,
+                size = validate_agent_memory_content(content, limits=self._limits)
+                projected_count = len(sizes) + (0 if key in sizes else 1)
+                projected_total = sum(sizes.values()) - sizes.get(key, 0) + size
+                validate_agent_memory_scope(
+                    file_count=projected_count,
+                    total_bytes=projected_total,
+                    limits=self._limits,
                 )
             except UnicodeDecodeError:
-                responses.append(
-                    FileUploadResponse(path=path, error="记忆文件只支持 UTF-8 文本")
+                responses[index] = FileUploadResponse(
+                    path=path,
+                    error="记忆文件只支持 UTF-8 文本",
                 )
                 continue
             except (
@@ -173,12 +178,25 @@ class AgentMemoryBackend(StoreBackend):
                 AgentMemoryQuotaExceeded,
                 TypeError,
             ) as exc:
-                responses.append(
-                    FileUploadResponse(path=path, error=self._error_message(exc))
+                responses[index] = FileUploadResponse(
+                    path=path,
+                    error=self._error_message(exc),
                 )
                 continue
-            responses.extend(super().upload_files([(key, raw_content)]))
-        return responses
+            sizes[key] = size
+            prepared.append((index, key, raw_content))
+
+        if prepared:
+            upload_responses = super().upload_files(
+                [(key, raw_content) for _, key, raw_content in prepared]
+            )
+            for (index, _, _), response in zip(
+                prepared,
+                upload_responses,
+                strict=True,
+            ):
+                responses[index] = response
+        return [response for response in responses if response is not None]
 
     def _validate_projected_content(
         self,

@@ -48,13 +48,8 @@ class AgentConversationCleanupService:
         """清理整个会话的派生状态。"""
         # 1.删除 LangGraph checkpoint，阻止会话继续恢复旧状态。
         self._delete_checkpoint(req.account_id, req.app_id, req.conversation_id)
-        # 2.在独立事务中软删除会话下的 Workspace 文件版本。
-        self._soft_delete_workspace_files(
-            account_id=req.account_id,
-            app_id=req.app_id,
-            conversation_id=req.conversation_id,
-        )
-        # 3.数据库状态提交后再尽力释放远程运行资源。
+        # Workspace 按账号、Agent 和用户共享，删除一段会话不能删除共享文件。
+        # 2.数据库状态处理后再尽力释放当前会话的远程运行资源。
         self._delete_sandbox(
             account_id=req.account_id,
             app_id=req.app_id,
@@ -86,7 +81,7 @@ class AgentConversationCleanupService:
         for conversation_id in conversation_ids:
             self._delete_checkpoint(req.account_id, req.app_id, conversation_id)
 
-        # 2.批量软删除应用下的 Workspace 文件并提交事务。
+        # 2.批量软删除应用下全部用户 Workspace 文件并提交事务。
         self._soft_delete_workspace_files(
             account_id=req.account_id,
             app_id=req.app_id,
@@ -100,7 +95,7 @@ class AgentConversationCleanupService:
             )
         # 4.应用是长期记忆作用域的一部分，删除应用时清理所有主体记忆。
         self.agent_memory_repository.delete_app_memories(
-            tenant_id=str(req.account_id),
+            account_id=str(req.account_id),
             app_id=str(req.app_id),
         )
 

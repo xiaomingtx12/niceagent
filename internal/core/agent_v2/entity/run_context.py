@@ -9,6 +9,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from .agent_memory import AgentMemoryIdentity
+from .workspace_scope import build_workspace_scope_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,12 +72,13 @@ class AgentRunContext(BaseModel):
 
     @property
     def memory_namespace(self) -> tuple[str, ...]:
-        """返回原生 Store 使用的租户、应用和主体命名空间。"""
-        return AgentMemoryIdentity(
-            tenant_id=self.account_id,
-            app_id=self.app_id,
-            principal_id=self.principal_id,
-        ).namespace
+        """返回账号和 Agent 共享的原生 Store 命名空间。"""
+        return AgentMemoryIdentity(account_id=self.account_id, app_id=self.app_id).namespace
+
+    @property
+    def workspace_scope_id(self) -> UUID:
+        """返回跨会话共享 Workspace 的稳定内部作用域 ID。"""
+        return build_workspace_scope_id(self.account_id, self.app_id)
 
     @property
     def telemetry_attributes(self) -> dict[str, str | None]:

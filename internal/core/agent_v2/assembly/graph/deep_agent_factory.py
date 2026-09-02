@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any, Sequence
 
 from deepagents import create_deep_agent
+from deepagents.backends import StateBackend
 from deepagents.backends.protocol import BackendProtocol
 from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.middleware.filesystem import supports_execution
@@ -26,6 +27,9 @@ from internal.core.agent_v2.middleware.runtime_context_middleware import (
 )
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.middleware.trace_middleware import TraceMiddleware
+from internal.core.agent_v2.middleware.reloading_memory_middleware import (
+    ReloadingMemoryMiddleware,
+)
 from internal.core.agent_v2.assembly.graph.deep_agent_harness_profile import (
     register_platform_harness_profile,
 )
@@ -81,6 +85,14 @@ def build_deep_agent(
             exit_behavior="continue",
         ),
     ]
+    if memory_sources:
+        middleware.append(
+            ReloadingMemoryMiddleware(
+                backend=backend if backend is not None else StateBackend(),
+                sources=list(memory_sources),
+                add_cache_control=True,
+            )
+        )
 
     # 2.为主模型和 SubAgent 模型注册平台 Harness Profile。
     # execute 由原生 FilesystemMiddleware 按本次 Backend 动态过滤。
@@ -114,7 +126,9 @@ def build_deep_agent(
         middleware=middleware,
         subagents=subagent_specs,
         skills=list(skill_sources) or None,
-        memory=list(memory_sources) or None,
+        # 记忆由上面的刷新中间件装配，不能同时启用官方默认中间件，
+        # 否则会在同一请求链中重复注入记忆提示词。
+        memory=None,
         permissions=list(permissions or []),
         backend=backend,
         checkpointer=checkpointer,

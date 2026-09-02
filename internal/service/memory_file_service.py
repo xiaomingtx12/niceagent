@@ -36,10 +36,9 @@ class MemoryFileService:
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        principal_id: str | UUID,
     ) -> list[AgentMemoryFile]:
-        """列出当前租户、应用和主体的长期记忆。"""
-        identity = self._identity(account_id, app_id, principal_id)
+        """列出当前账号、应用的长期记忆。"""
+        identity = self._identity(account_id, app_id)
         try:
             return self.agent_memory_repository.list_files(identity)
         except AgentMemoryStorageError as exc:
@@ -50,11 +49,10 @@ class MemoryFileService:
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        principal_id: str | UUID,
         path: str,
     ) -> AgentMemoryFile:
-        """读取当前主体的一个记忆文件。"""
-        identity = self._identity(account_id, app_id, principal_id)
+        """读取当前账号、应用的一个记忆文件。"""
+        identity = self._identity(account_id, app_id)
         try:
             normalized_path = normalize_agent_memory_path(path)
             row = self.agent_memory_repository.get_file(identity, normalized_path)
@@ -71,12 +69,11 @@ class MemoryFileService:
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        principal_id: str | UUID,
         path: str,
         content: str,
     ) -> AgentMemoryFile:
-        """按配额新增或覆盖当前主体的 UTF-8 文本记忆。"""
-        identity = self._identity(account_id, app_id, principal_id)
+        """按配额新增或覆盖当前账号、应用的 UTF-8 文本记忆。"""
+        identity = self._identity(account_id, app_id)
         try:
             normalized_path = normalize_agent_memory_path(path)
             size = validate_agent_memory_content(content)
@@ -114,11 +111,10 @@ class MemoryFileService:
         *,
         account_id: str | UUID,
         app_id: str | UUID,
-        principal_id: str | UUID,
         path: str,
     ) -> None:
-        """删除当前主体的一个长期记忆文件。"""
-        identity = self._identity(account_id, app_id, principal_id)
+        """删除当前账号、应用的一个长期记忆文件。"""
+        identity = self._identity(account_id, app_id)
         try:
             normalized_path = normalize_agent_memory_path(path)
             deleted = self.agent_memory_repository.delete_file(
@@ -136,14 +132,12 @@ class MemoryFileService:
     def _identity(
         account_id: str | UUID,
         app_id: str | UUID,
-        principal_id: str | UUID,
     ) -> AgentMemoryIdentity:
-        """把服务边界 ID 转换为强制主体隔离身份。"""
+        """把服务边界 ID 转换为账号级长期记忆身份。"""
         try:
             return AgentMemoryIdentity(
-                tenant_id=UUID(str(account_id)),
+                account_id=UUID(str(account_id)),
                 app_id=UUID(str(app_id)),
-                principal_id=UUID(str(principal_id)),
             )
         except (TypeError, ValueError) as exc:
             raise ValidateErrorException("记忆文件作用域不是合法 UUID") from exc
