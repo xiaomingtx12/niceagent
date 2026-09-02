@@ -145,7 +145,16 @@ Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产�
 Bubblewrap 是 Linux 内核 namespace 的开源命令行工具，不能在 Windows 原生进程中运行。
 Windows 开发环境可将 Provider 设为 `disabled`，或在 WSL2 / Docker Linux 容器中启用
 `bubblewrap` 做沙箱验证；如果宿主机禁用了 unprivileged user namespace，需调整容器或
-内核策略后才能启动。
+内核策略后才能启动。只做本机功能联调时，也可以使用开发专用的 `local_shell`：
+
+```env
+FLASK_ENV=development
+AGENT_SANDBOX_PROVIDER=local_shell
+```
+
+`local_shell` 使用 DeepAgents 的 `LocalShellBackend`，命令直接运行在当前 Windows
+用户权限下，没有安全隔离；每次运行使用临时目录，结束时仍会把 `/workspace` 增量同步回
+权威 Workspace。该模式被配置校验明确禁止用于生产环境。
 
 ## 常用接口概览
 
