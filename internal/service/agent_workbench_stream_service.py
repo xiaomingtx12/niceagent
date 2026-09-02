@@ -184,7 +184,7 @@ class AgentWorkbenchStreamService:
         }
         visible = AgentProtocolEventProjector.to_public_event(event)
         if visible is None:
-            raise ValueError("游标重置事件被协议安全策略拒绝")
+            raise ValueError("游标重置事件不属于工作台公开通道")
         return visible
 
     def _stream_local_run(

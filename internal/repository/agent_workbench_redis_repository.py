@@ -11,6 +11,9 @@ from redis import Redis
 from redis.client import PubSub
 from redis.exceptions import RedisError
 
+from internal.core.agent_v2.protocol.event_projector import (
+    AgentProtocolEventProjector,
+)
 from internal.exception import WorkbenchReplayCursorExpired
 from internal.schema import WorkbenchEvent, WorkbenchReplayBatchResp
 
@@ -170,9 +173,10 @@ class AgentWorkbenchRedisRepository:
 
         entries: list[RedisStreamEntry] = streams[0][1] if streams else []
         decoded_events = [
-            decoded
+            projected
             for entry in entries
             if (decoded := self._decode_event(entry)) is not None
+            and (projected := self._project_event(decoded)) is not None
         ]
         decoded_events.sort(key=lambda item: item[0])
         oldest_event_sequence = decoded_events[0][0] if decoded_events else None
@@ -186,6 +190,15 @@ class AgentWorkbenchRedisRepository:
             events=[event for sequence, event in decoded_events if sequence > cursor],
             oldest_event_sequence=oldest_event_sequence,
         )
+
+    @staticmethod
+    def _project_event(
+        decoded: tuple[int, WorkbenchEvent],
+    ) -> tuple[int, WorkbenchEvent] | None:
+        """对历史 Redis 事件重新执行统一公开通道投影。"""
+        sequence, event = decoded
+        visible = AgentProtocolEventProjector.to_public_event(event)
+        return (sequence, visible) if visible is not None else None
 
     def _decode_event(
         self,

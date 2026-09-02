@@ -190,34 +190,37 @@ class AgentWorkbenchService(BaseService):
         account: Account,
     ) -> WorkbenchCancelResp:
         """鉴权后请求停止指定 Agent Run。"""
-        self.access_service.authorize_thread(
-            invoke_from=invoke_from,
-            access_value=access_value,
-            thread_id=thread_id,
-            account=account,
-        )
-        row = self.run_service.get_run(run_id)
-        if (
-            row is None
-            or row.thread_id != thread_id
-            or row.invoke_from != invoke_from.value
-        ):
+        try:
+            self.access_service.authorize_thread(
+                invoke_from=invoke_from,
+                access_value=access_value,
+                thread_id=thread_id,
+                account=account,
+            )
+            row = self.run_service.get_run(run_id)
+            if (
+                row is None
+                or row.thread_id != thread_id
+                or row.invoke_from != invoke_from.value
+            ):
+                raise NotFoundException("Agent Run 不存在或不属于当前线程")
+            self.access_service.authorize_persisted_run(row, account)
+            cancel_requested = self.run_coordinator.request_cancel(
+                row,
+                thread_id=thread_id,
+            )
+            return WorkbenchCancelResp(
+                cancel_requested=cancel_requested,
+                run_id=row.id,
+                status=(
+                    WorkbenchRunStatus.CANCELLING.value
+                    if cancel_requested
+                    else str(row.status)
+                ),
+            )
+        finally:
+            # 取消是 SDK 高频轮询路径，不能把连接交给请求上下文兜底。
             self.db.session.close()
-            raise NotFoundException("Agent Run 不存在或不属于当前线程")
-        self.access_service.authorize_persisted_run(row, account)
-        cancel_requested = self.run_coordinator.request_cancel(
-            row,
-            thread_id=thread_id,
-        )
-        return WorkbenchCancelResp(
-            cancel_requested=cancel_requested,
-            run_id=row.id,
-            status=(
-                WorkbenchRunStatus.CANCELLING.value
-                if cancel_requested
-                else str(row.status)
-            ),
-        )
 
 
 __all__ = ["AgentWorkbenchService"]

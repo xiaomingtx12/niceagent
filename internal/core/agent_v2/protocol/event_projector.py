@@ -11,14 +11,13 @@ from langchain_core.language_models._compat_bridge import message_to_events
 from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 
 from internal.schema.agent_workbench_schema import WorkbenchEvent
-from .event_sanitizer import sanitize_workbench_event
+from .event_sanitizer import project_workbench_event
 
 _TERMINAL_LIFECYCLE_EVENTS = frozenset(
     {"completed", "failed", "interrupted", "drained", "cancelled"}
 )
 _SKILL_TOOL_NAME = "read_file"
 _SKILL_FILE_NAME = "SKILL.md"
-_SKILL_CONTENT_REDACTED = "[SKILL_CONTENT_REDACTED]"
 
 
 class _SkillRef(NamedTuple):
@@ -78,7 +77,7 @@ class AgentProtocolEventProjector:
     """把一次 DeepAgents v3 运行转换成有序的 Agent Protocol 事件流。
 
     本类只负责事件编号、消息分片合并和协议形状，不负责数据库、Redis
-    或 SSE；出站安全裁剪由 ``event_sanitizer`` 统一完成。
+    或 SSE；公开通道投影由 ``event_sanitizer`` 统一完成。
     """
 
     def __init__(
@@ -106,13 +105,13 @@ class AgentProtocolEventProjector:
     def to_public_event(
         event: Mapping[str, Any] | WorkbenchEvent,
     ) -> WorkbenchEvent | None:
-        """完成 Agent Protocol 出站脱敏、通道过滤和结构校验。"""
+        """完成 Agent Protocol 公开通道投影和结构校验。"""
         raw_event = _json_value(
             event.model_dump(mode="python")
             if isinstance(event, WorkbenchEvent)
             else event
         )
-        visible = sanitize_workbench_event(raw_event)
+        visible = project_workbench_event(raw_event)
         return WorkbenchEvent.model_validate(visible) if visible is not None else None
 
     def _event(
@@ -326,10 +325,8 @@ class AgentProtocolEventProjector:
             else active.ref if active is not None else None
         )
 
-        # Skill 正文只供模型上下文使用，不应通过 tools 通道回传给浏览器。
+        # Skill 生命周期是工作台派生事件；原始工具事件及其正文保持不变。
         projected_data: Mapping[str, Any] = data
-        if active is not None or ref is not None:
-            projected_data = _redact_skill_tool_payload(data)
 
         derived: list[dict[str, Any]] = []
         if event_type == "tool-started" and ref is not None and call_id:
@@ -574,17 +571,5 @@ def _skill_ref_from_tool_event(data: Mapping[str, Any]) -> _SkillRef | None:
             return _SkillRef(skill_name, raw_path)
     return None
 
-
-def _redact_skill_tool_payload(data: Mapping[str, Any]) -> Mapping[str, Any]:
-    """隐藏 Skill 文件正文，同时保留工具调用的可观测生命周期。"""
-    event_type = data.get("event")
-    if event_type not in {"tool-output-delta", "tool-finished"}:
-        return data
-    key = "delta" if event_type == "tool-output-delta" else "output"
-    if key not in data or data[key] is None:
-        return data
-    projected = dict(data)
-    projected[key] = _SKILL_CONTENT_REDACTED
-    return projected
 
 __all__ = ["AgentProtocolEventProjector"]

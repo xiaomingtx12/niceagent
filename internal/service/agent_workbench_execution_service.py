@@ -201,7 +201,12 @@ class AgentWorkbenchRunExecutionService(BaseService):
         llm: BaseChatModel,
         projector: AgentProtocolEventProjector,
     ) -> None:
-        """消费 Agent 原始事件，并交给统一事件发布入口。"""
+        """消费 Agent 原始事件，并交给统一事件发布入口。
+
+        每个投影事件先进入本地队列，确保 SSE 能立即收到增量；Redis
+        重放和 PostgreSQL 历史事件随后按批刷新。高频 ``messages`` 增量
+        不直接更新业务消息表，最终回答由 Run 终态统一写入。
+        """
         query = llm.convert_to_human_message(
             run.spec.query,
             run.spec.image_urls,
@@ -338,7 +343,11 @@ class AgentWorkbenchRunExecutionService(BaseService):
         run: WorkbenchRun,
         events: list[WorkbenchEvent],
     ) -> None:
-        """把连续非消息事件合并为一次 PostgreSQL 事务。"""
+        """把连续非消息事件合并为一次 PostgreSQL 事务。
+
+        这里只持久化工具、生命周期和 State 快照；文本增量由 Redis
+        重放承载，业务消息正文在 Run 终态写入消息表。
+        """
         if not events:
             return
         batch = list(events)
@@ -508,7 +517,11 @@ class AgentWorkbenchRunExecutionService(BaseService):
         snapshot = run.state_snapshot
         if not isinstance(snapshot, Mapping):
             return {}
-        return {key: snapshot[key] for key in ("todos", "files") if key in snapshot}
+        return {
+            key: snapshot[key]
+            for key in ("todos", "files", "async_tasks")
+            if key in snapshot
+        }
 
     def _build_terminal_message_updates(
         self,

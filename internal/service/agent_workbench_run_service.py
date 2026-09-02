@@ -18,6 +18,9 @@ from internal.entity import (
     WorkbenchRun,
     WorkbenchRunStatus,
 )
+from internal.core.agent_v2.protocol.event_projector import (
+    AgentProtocolEventProjector,
+)
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
 from internal.model import AgentRun, AgentRunEvent, Message
@@ -45,7 +48,11 @@ def _state_snapshot_event(
     """把 Run 最新快照压缩成一条历史水合事件。"""
     if not snapshot:
         return None
-    data = {key: snapshot[key] for key in ("todos", "files") if key in snapshot}
+    data = {
+        key: snapshot[key]
+        for key in ("todos", "files", "async_tasks")
+        if key in snapshot
+    }
     if not data:
         return None
     return WorkbenchEvent(
@@ -332,7 +339,12 @@ class AgentWorkbenchRunService(BaseService):
                 .order_by(AgentRunEvent.sequence.asc())
                 .all()
             )
-            return [WorkbenchEvent.model_validate(row.payload) for row in rows]
+            return [
+                visible
+                for row in rows
+                if (visible := AgentProtocolEventProjector.to_public_event(row.payload))
+                is not None
+            ]
         finally:
             self.db.session.close()
 
@@ -364,9 +376,9 @@ class AgentWorkbenchRunService(BaseService):
                 run_id: [] for run_id in run_ids
             }
             for row in rows:
-                events.setdefault(row.run_id, []).append(
-                    WorkbenchEvent.model_validate(row.payload)
-                )
+                visible = AgentProtocolEventProjector.to_public_event(row.payload)
+                if visible is not None:
+                    events.setdefault(row.run_id, []).append(visible)
             return events
         finally:
             if close_session:
@@ -498,7 +510,7 @@ class AgentWorkbenchRunService(BaseService):
             )
             values = {
                 key: source_snapshot[key]
-                for key in ("todos", "files")
+                for key in ("todos", "files", "async_tasks")
                 if key in source_snapshot
             }
             values["messages"] = [

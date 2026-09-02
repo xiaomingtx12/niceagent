@@ -14,6 +14,8 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    AliasChoices,
+    RootModel,
     StrictInt,
     StrictStr,
     ValidationError,
@@ -141,8 +143,75 @@ class WorkbenchEventParams(BaseModel):
     node: StrictStr | None = None
 
 
+class _WorkbenchToolEventBase(BaseModel):
+    """工具事件的公共字段和 LangChain 兼容解析。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    tool_call_id: StrictStr = Field(
+        validation_alias=AliasChoices("tool_call_id", "id")
+    )
+
+    @field_validator("tool_call_id", mode="before")
+    @classmethod
+    def normalize_tool_call_id(cls, value: Any) -> str:
+        """把旧事件中的调用标识统一为协议字段。"""
+        return str(value)
+
+
+class WorkbenchToolStartedData(_WorkbenchToolEventBase):
+    """工具开始事件。"""
+
+    event: Literal["tool-started"]
+    tool_name: StrictStr = Field(
+        validation_alias=AliasChoices("tool_name", "name")
+    )
+    input: Any = None
+
+
+class WorkbenchToolOutputDeltaData(_WorkbenchToolEventBase):
+    """工具输出增量事件。"""
+
+    event: Literal["tool-output-delta"]
+    delta: Any = None
+
+
+class WorkbenchToolFinishedData(_WorkbenchToolEventBase):
+    """工具完成事件。"""
+
+    event: Literal["tool-finished"]
+    output: Any = None
+
+
+class WorkbenchToolErrorData(_WorkbenchToolEventBase):
+    """工具失败事件。"""
+
+    event: Literal["tool-error"]
+    message: StrictStr
+
+    @field_validator("message", mode="before")
+    @classmethod
+    def normalize_message(cls, value: Any) -> str:
+        """将异常对象转换为协议字符串，不改写或截断错误正文。"""
+        return "" if value is None else str(value)
+
+
+class WorkbenchToolEventData(
+    RootModel[
+        Annotated[
+            WorkbenchToolStartedData
+            | WorkbenchToolOutputDeltaData
+            | WorkbenchToolFinishedData
+            | WorkbenchToolErrorData,
+            Field(discriminator="event"),
+        ]
+    ]
+):
+    """标准工具生命周期事件的带判别联合。"""
+
+
 class WorkbenchEvent(BaseModel):
-    """经过安全投影、可持久化和对外传输的工作台事件。"""
+    """经过公开通道投影、可持久化和对外传输的工作台事件。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -307,6 +376,11 @@ __all__ = [
     "WorkbenchCommandErrorResp",
     "WorkbenchEvent",
     "WorkbenchEventParams",
+    "WorkbenchToolEventData",
+    "WorkbenchToolErrorData",
+    "WorkbenchToolFinishedData",
+    "WorkbenchToolOutputDeltaData",
+    "WorkbenchToolStartedData",
     "WorkbenchHistoryMessageResp",
     "WorkbenchReplayBatchResp",
     "WorkbenchMessagePageInfoResp",
