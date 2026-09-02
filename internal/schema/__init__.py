@@ -19,6 +19,11 @@ from .agent_workbench_schema import (
     WorkbenchCommandErrorResp,
     WorkbenchEvent,
     WorkbenchEventParams,
+    WorkbenchToolEventData,
+    WorkbenchToolErrorData,
+    WorkbenchToolFinishedData,
+    WorkbenchToolOutputDeltaData,
+    WorkbenchToolStartedData,
     WorkbenchHistoryMessageResp,
     WorkbenchReplayBatchResp,
     WorkbenchMessagePageInfoResp,
@@ -45,6 +50,12 @@ from .memory_file_schema import (
     ReadMemoryFileReq,
     WriteMemoryFileReq,
 )
+from .internal_agent_protocol_schema import (
+    InternalRunCreateReq,
+    InternalRunResp,
+    InternalThreadCreateReq,
+    InternalThreadResp,
+)
 
 __all__ = [
     "ListField",
@@ -68,6 +79,11 @@ __all__ = [
     "WorkbenchCommandErrorResp",
     "WorkbenchEvent",
     "WorkbenchEventParams",
+    "WorkbenchToolEventData",
+    "WorkbenchToolErrorData",
+    "WorkbenchToolFinishedData",
+    "WorkbenchToolOutputDeltaData",
+    "WorkbenchToolStartedData",
     "WorkbenchHistoryMessageResp",
     "WorkbenchReplayBatchResp",
     "WorkbenchMessagePageInfoResp",
@@ -89,4 +105,8 @@ __all__ = [
     "MemoryFileResp",
     "ReadMemoryFileReq",
     "WriteMemoryFileReq",
+    "InternalRunCreateReq",
+    "InternalRunResp",
+    "InternalThreadCreateReq",
+    "InternalThreadResp",
 ]

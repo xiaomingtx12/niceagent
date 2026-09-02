@@ -44,6 +44,7 @@ from .workflow_service import WorkflowService
 from .agent_workbench_service import AgentWorkbenchService
 from .agent_workbench_access_service import AgentWorkbenchAccessService
 from .agent_workbench_run_service import AgentWorkbenchRunService
+from .internal_agent_protocol_service import InternalAgentProtocolService
 from .creator_task_service import CreatorTaskService
 
 __all__ = [
@@ -79,6 +80,7 @@ __all__ = [
     "AgentWorkbenchService",
     "AgentWorkbenchAccessService",
     "AgentWorkbenchRunService",
+    "InternalAgentProtocolService",
     "BuiltinAppService",
     "AssistantAgentService",
     "FaissService",

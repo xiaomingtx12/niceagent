@@ -33,12 +33,14 @@ from internal.handler import (
     MemoryFileHandler,
     AgentWorkbenchHandler,
     AssistantAgentProtocolHandler,
+    InternalAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
     CreatorTaskHandler,
 )
 from .agent_workbench_routes import (
     register_agent_workbench_routes,
     register_assistant_agent_protocol_routes,
+    register_internal_agent_protocol_routes,
     register_openapi_agent_protocol_routes,
 )
 from .web_app_routes import register_web_app_routes
@@ -80,6 +82,7 @@ class Router:
     memory_file_handler: MemoryFileHandler
     agent_workbench_handler: AgentWorkbenchHandler
     assistant_agent_protocol_handler: AssistantAgentProtocolHandler
+    internal_agent_protocol_handler: InternalAgentProtocolHandler
     openapi_agent_protocol_handler: OpenAPIAgentProtocolHandler
     creator_task_handler: CreatorTaskHandler
 
@@ -554,6 +557,10 @@ class Router:
         register_assistant_agent_protocol_routes(
             bp,
             self.assistant_agent_protocol_handler,
+        )
+        register_internal_agent_protocol_routes(
+            bp,
+            self.internal_agent_protocol_handler,
         )
         # Creator 任务中心的 Agent 列表与统一会话历史。
         bp.add_url_rule(

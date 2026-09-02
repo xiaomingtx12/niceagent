@@ -27,6 +27,7 @@ from .workspace_file_handler import WorkspaceFileHandler
 from .memory_file_handler import MemoryFileHandler
 from .agent_workbench_handler import AgentWorkbenchHandler
 from .assistant_agent_protocol_handler import AssistantAgentProtocolHandler
+from .internal_agent_protocol_handler import InternalAgentProtocolHandler
 from .openapi_agent_protocol_handler import OpenAPIAgentProtocolHandler
 from .creator_task_handler import CreatorTaskHandler
 
@@ -60,6 +61,7 @@ __all__ = [
     "MemoryFileHandler",
     "AgentWorkbenchHandler",
     "AssistantAgentProtocolHandler",
+    "InternalAgentProtocolHandler",
     "OpenAPIAgentProtocolHandler",
     "CreatorTaskHandler",
 ]

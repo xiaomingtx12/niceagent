@@ -5,6 +5,7 @@ from flask import Blueprint
 from internal.handler import (
     AgentWorkbenchHandler,
     AssistantAgentProtocolHandler,
+    InternalAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
 )
 
@@ -110,6 +111,7 @@ def register_assistant_agent_protocol_routes(
     blueprint.add_url_rule(
         f"{prefix}/runs/<uuid:run_id>/cancel",
         methods=["POST"],
+        endpoint="assistant_agent_protocol_cancel_run",
         view_func=handler.cancel_run,
     )
 
@@ -143,6 +145,41 @@ def register_openapi_agent_protocol_routes(
     blueprint.add_url_rule(
         f"{prefix}/runs/<uuid:run_id>/cancel",
         methods=["POST"],
+        endpoint="openapi_agent_protocol_cancel_run",
+        view_func=handler.cancel_run,
+    )
+
+
+def register_internal_agent_protocol_routes(
+    blueprint: Blueprint,
+    handler: InternalAgentProtocolHandler,
+) -> None:
+    """注册供 DeepAgents AsyncSubAgent 使用的标准 SDK 路由。"""
+    prefix = "/agent-protocol"
+    blueprint.add_url_rule(
+        f"{prefix}/threads",
+        methods=["POST"],
+        view_func=handler.create_thread,
+    )
+    blueprint.add_url_rule(
+        f"{prefix}/threads/<uuid:thread_id>",
+        methods=["GET"],
+        view_func=handler.get_thread,
+    )
+    blueprint.add_url_rule(
+        f"{prefix}/threads/<uuid:thread_id>/runs",
+        methods=["POST"],
+        view_func=handler.create_run,
+    )
+    blueprint.add_url_rule(
+        f"{prefix}/threads/<uuid:thread_id>/runs/<uuid:run_id>",
+        methods=["GET"],
+        view_func=handler.get_run,
+    )
+    blueprint.add_url_rule(
+        f"{prefix}/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+        methods=["POST"],
+        endpoint="internal_agent_protocol_cancel_run",
         view_func=handler.cancel_run,
     )
 
@@ -150,5 +187,6 @@ def register_openapi_agent_protocol_routes(
 __all__ = [
     "register_agent_workbench_routes",
     "register_assistant_agent_protocol_routes",
+    "register_internal_agent_protocol_routes",
     "register_openapi_agent_protocol_routes",
 ]
