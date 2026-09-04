@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from flask import current_app
 from injector import inject
 from langgraph.errors import GraphDrained
 from langchain_core.language_models import BaseChatModel
@@ -31,6 +30,7 @@ from internal.exception import (
     NotFoundException,
     ValidateErrorException,
 )
+from internal.extension.logging_extension import logger
 from internal.model import App
 from internal.repository import AgentWorkbenchRedisRepository
 from internal.schema.agent_attachment_schema import dump_agent_attachments
@@ -122,7 +122,7 @@ class AgentWorkbenchRunExecutionService(BaseService):
                     try:
                         close_agent()
                     except Exception:
-                        current_app.logger.exception("关闭 Agent 运行时资源失败")
+                        logger.exception("关闭 Agent 运行时资源失败")
             self.event_queue.finish(run)
             self._log_timing(
                 run,
@@ -294,7 +294,7 @@ class AgentWorkbenchRunExecutionService(BaseService):
                 try:
                     close()
                 except Exception:
-                    current_app.logger.exception("关闭 Agent v3 事件流失败")
+                    logger.exception("关闭 Agent v3 事件流失败")
             self._log_timing(
                 run,
                 stage="stream.consume",
@@ -369,7 +369,7 @@ class AgentWorkbenchRunExecutionService(BaseService):
             details += f" event_count={event_count}"
         if publish_ms is not None:
             details += f" publish_ms={publish_ms:.2f}"
-        current_app.logger.info(
+        logger.info(
             "agent_workbench_timing run_id=%s stage=%s duration_ms=%.2f%s",
             run.run_id,
             stage,
@@ -454,12 +454,12 @@ class AgentWorkbenchRunExecutionService(BaseService):
             ),
         )
         if isinstance(exc, _AGENT_PERSISTENCE_ERRORS):
-            current_app.logger.error(
+            logger.error(
                 "Agent PostgreSQL 持久化失败 error_type=%s checkpoint_pool_stats=%s",
                 type(exc).__name__,
                 get_postgres_pool_stats(),
             )
-        current_app.logger.exception("Agent 工作台运行失败")
+        logger.exception("Agent 工作台运行失败")
 
     def _finish_cancelled_run(
         self,

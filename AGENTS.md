@@ -40,6 +40,10 @@
   序列化，Agent Protocol 使用原始 JSON 和真实 HTTP 状态码。
 - `try/except` 只用于异常转换、重试、事务补偿和资源清理；未知异常由全局异常处理器统一记录堆栈并返回固定错误信息。
 
+# 日志规范
+
+- 业务代码统一从 `internal.extension.logging_extension` 导入 `logger`；按语义选择日志级别，使用 `%s` 参数化传参，在 `except` 中需要保留堆栈时使用 `logger.exception(...)`，并只记录排障所需的脱敏上下文。
+
 # 数据库迁移规范
 
 - 功能开发涉及数据库结构变化时，只修改 `internal.model` 中的 ORM Model，不手写、创建或生成 `internal/migration/versions`
@@ -47,4 +51,3 @@
 - 不主动执行 `flask db migrate`；迁移文件统一由用户在确认 Model 定义后自行执行该命令生成。
 - 不主动执行 `flask db upgrade`、`flask db downgrade` 或直接修改数据库结构、数据的 SQL；只有用户明确要求执行具体迁移操作时才允许执行。
 - 不修改已经存在的 revision、`down_revision` 或迁移链来适配未落库代码。发现 Model 与数据库或迁移链不一致时，只报告差异和风险，由用户决定迁移生成与执行时机。
-

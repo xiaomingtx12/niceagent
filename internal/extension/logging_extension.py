@@ -5,6 +5,10 @@ from concurrent_log_handler import ConcurrentTimedRotatingFileHandler
 from flask import Flask
 
 
+# 应用代码统一导入该日志器；具体 Handler 由 init_app 配置。
+logger = logging.getLogger("my_dify")
+
+
 def init_app(app: Flask):
     """日志记录器初始化"""
     # 1.根据不同的环境设置logging根处理器的日志级别
@@ -51,3 +55,6 @@ def init_app(app: Flask):
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(formatter)
         logging.getLogger().addHandler(console_handler)
+
+
+__all__ = ["init_app", "logger"]

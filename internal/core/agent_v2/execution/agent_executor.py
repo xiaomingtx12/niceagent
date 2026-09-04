@@ -1,6 +1,5 @@
 """Agent V2 单次 Deep Agents 图执行与资源生命周期。"""
 
-import logging
 from collections.abc import Mapping, Sequence
 from threading import Lock
 from typing import Any, Iterator, Optional
@@ -41,8 +40,7 @@ from internal.core.agent_v2.backends.composition.composite_backend_factory impor
 from internal.core.agent_v2.entity.agent_config import AgentConfig
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.exception import FailException
-
-_logger = logging.getLogger(__name__)
+from internal.extension.logging_extension import logger
 
 
 class AgentExecutor(Serializable):
@@ -195,14 +193,14 @@ class AgentExecutor(Serializable):
         try:
             close_runtime_backends(self._backend)
         except Exception:
-            _logger.exception(message)
+            logger.exception(message)
 
     def _close_invalid_input(self) -> None:
         """输入无效时关闭未开始运行的执行器。"""
         try:
             self.close()
         except Exception:
-            _logger.exception("无效输入导致 Agent 关闭失败")
+            logger.exception("无效输入导致 Agent 关闭失败")
 
     def _build_stream_config(
         self,

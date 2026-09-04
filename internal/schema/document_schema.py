@@ -62,7 +62,6 @@ class CreateDocumentsReq(FlaskForm):
             field.data = DEFAULT_PROCESS_RULE["rule"]
         else:
             # 2.检测自定义处理类型下是否传递了rule
-            print("rule数据:", field.data)
             if not isinstance(field.data, dict) or len(field.data) == 0:
                 raise ValidationError("自定义处理模式下，rule不能为空")
 

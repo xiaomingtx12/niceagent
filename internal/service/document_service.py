@@ -1,4 +1,3 @@
-import logging
 import random
 import time
 from dataclasses import dataclass
@@ -13,6 +12,7 @@ from internal.entity.cache_entity import LOCK_DOCUMENT_UPDATE_ENABLED, LOCK_EXPI
 from internal.entity.dataset_entity import ProcessType, DocumentStatus, SegmentStatus
 from internal.entity.upload_file_entity import ALLOWED_DOCUMENT_EXTENSION
 from internal.exception import ForbiddenException, FailException, NotFoundException
+from internal.extension.logging_extension import logger
 from internal.lib.helper import datetime_to_timestamp
 from internal.model import Dataset, Document, Segment, UploadFile, ProcessRule, Account
 from internal.task.document_task import (
@@ -65,8 +65,11 @@ class DocumentService(BaseService):
         ]
 
         if len(upload_files) == 0:
-            logging.warning(
-                f"上传文档列表未解析到合法文件，account_id: {account.id}, dataset_id: {dataset_id}, upload_file_ids: {upload_file_ids}"
+            logger.warning(
+                "上传文档列表未解析到合法文件，account_id: %s, dataset_id: %s, upload_file_ids: %s",
+                account.id,
+                dataset_id,
+                upload_file_ids,
             )
             raise FailException("暂未解析到合法文件，请重新上传")
 

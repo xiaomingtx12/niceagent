@@ -1,9 +1,10 @@
 """Token 计数工具模块"""
-import logging
 import os
 from typing import Any
 
 from langchain_core.messages import BaseMessage
+
+from internal.extension.logging_extension import logger
 
 # 设置 HuggingFace 镜像（中国加速）
 if not os.getenv('HF_ENDPOINT'):
@@ -63,7 +64,7 @@ class TokenCounter:
             
         except ImportError:
             # 方案2: tiktoken 未安装，尝试使用 transformers
-            logging.warning("tiktoken 未安装，尝试使用 transformers tokenizer")
+            logger.warning("tiktoken 未安装，尝试使用 transformers tokenizer")
             try:
                 from transformers import AutoTokenizer
                 
@@ -86,7 +87,7 @@ class TokenCounter:
                 return num_tokens
                 
             except Exception as e:
-                logging.error(f"transformers tokenizer 加载失败: {str(e)}")
+                logger.exception("transformers tokenizer 加载失败: %s", e)
                 # 方案3: 使用字符估算作为最后的后备方案
                 return TokenCounter._estimate_tokens_from_messages(messages)
     

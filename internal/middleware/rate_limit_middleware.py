@@ -3,7 +3,6 @@ API 限流中间件
 
 提供装饰器和中间件函数，用于保护 API 端点
 """
-import logging
 from functools import wraps
 from typing import Optional, Callable, Union
 
@@ -11,15 +10,13 @@ from flask import request, g, current_app
 from redis import Redis
 
 from internal.exception import TooManyRequestsException
+from internal.extension.logging_extension import logger
 from internal.lib.rate_limiter import (
     RateLimiter,
     RateLimitConfig,
     RateLimitStrategy,
     RateLimitResult
 )
-
-
-logger = logging.getLogger(__name__)
 
 
 # 默认限流配置
@@ -117,7 +114,7 @@ def get_rate_limiter() -> Optional[RateLimiter]:
         if redis_client:
             return RateLimiter(redis_client)
     except Exception as e:
-        logger.warning(f"获取限流器失败: {str(e)}")
+        logger.warning("获取限流器失败: %s", e)
     return None
 
 
@@ -218,8 +215,11 @@ def check_rate_limit(
     # 如果超过限流，抛出异常
     if not result.allowed:
         logger.warning(
-            f"限流触发: scope={scope}, identifier={identifier}, "
-            f"limit={config.max_requests}/{config.window_seconds}s"
+            "限流触发: scope=%s, identifier=%s, limit=%s/%ss",
+            scope,
+            identifier,
+            config.max_requests,
+            config.window_seconds,
         )
         raise TooManyRequestsException(
             message=f"请求过于频繁，请在 {result.retry_after} 秒后重试",

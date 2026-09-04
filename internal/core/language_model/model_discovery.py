@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import time
 from dataclasses import dataclass
 from threading import RLock
@@ -11,6 +10,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
+
+from internal.extension.logging_extension import logger
 
 from .entities.default_model_parameter_template import (
     DEFAULT_MODEL_PARAMETER_TEMPLATE,
@@ -23,9 +24,6 @@ from .entities.model_entity import (
     ModelType,
 )
 from .entities.provider_entity import ModelDiscoveryConfig, ProviderEntity
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True)
 class _CacheEntry:

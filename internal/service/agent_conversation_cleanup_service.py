@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import UUID
@@ -20,6 +19,7 @@ from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
 from internal.core.agent_v2.persistence.agent_memory_repository import (
     AgentMemoryRepository,
 )
+from internal.extension.logging_extension import logger
 from internal.model import App, Conversation, WorkspaceFile
 from internal.schema.agent_runtime_schema import (
     AgentAppCleanupReq,
@@ -28,9 +28,6 @@ from internal.schema.agent_runtime_schema import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 from .workspace_file_storage_service import WorkspaceFileStorageService
-
-_logger = logging.getLogger(__name__)
-
 
 @inject
 @dataclass
@@ -62,7 +59,7 @@ class AgentConversationCleanupService:
     ) -> None:
         """清理单条消息所在会话的可恢复状态。"""
         # 1.消息删除后清理对应会话 checkpoint，避免恢复到已删除输入。
-        _logger.debug("清理消息关联的 Agent checkpoint: message_id=%s", req.message_id)
+        logger.debug("清理消息关联的 Agent checkpoint: message_id=%s", req.message_id)
         self._delete_checkpoint(req.account_id, req.app_id, req.conversation_id)
 
     def cleanup_app(self, req: AgentAppCleanupReq) -> None:
@@ -181,7 +178,7 @@ class AgentConversationCleanupService:
             return
         except Exception:
             # 远程资源有空闲 TTL 兜底，删除失败不回滚已提交的业务删除。
-            _logger.warning(
+            logger.warning(
                 "删除 Agent Sandbox 失败，将等待 TTL 回收: "
                 "account_id=%s app_id=%s conversation_id=%s sandbox=%s",
                 account_id,

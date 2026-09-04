@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -66,6 +65,7 @@ from internal.exception import (
     AgentInvocationException,
     ValidateErrorException,
 )
+from internal.extension.logging_extension import logger
 from internal.model import App
 from internal.schema.agent_runtime_schema import (
     AgentInvocation,
@@ -80,9 +80,6 @@ from .language_model_service import LanguageModelService
 from .retrieval_service import RetrievalService
 from .skill_service import BuiltinSkill, SkillService
 from .workspace_file_storage_service import WorkspaceFileStorageService
-
-_logger = logging.getLogger(__name__)
-
 
 @dataclass(frozen=True, slots=True)
 class _AgentRuntimeResources:
@@ -251,7 +248,7 @@ class AgentAssemblyService(BaseService):
         started_at: float,
     ) -> None:
         """记录 Agent 装配子阶段耗时。"""
-        _logger.info(
+        logger.info(
             "agent_assembly_timing app_id=%s conversation_id=%s stage=%s duration_ms=%.2f",
             req.app_id,
             req.conversation_id,
@@ -265,7 +262,7 @@ class AgentAssemblyService(BaseService):
         try:
             close_runtime_backends(backend)
         except Exception:
-            _logger.exception("关闭未接管的 Agent Backend 失败")
+            logger.exception("关闭未接管的 Agent Backend 失败")
 
     def _prepare_runtime(
         self,

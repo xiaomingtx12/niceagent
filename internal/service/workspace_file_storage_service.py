@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-import logging
 from pathlib import PurePosixPath
 from uuid import uuid4
 
@@ -20,10 +19,8 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
 )
 from internal.model import WorkspaceFile
 from internal.exception import WorkspaceStorageError
+from internal.extension.logging_extension import logger
 from internal.repository import CosObjectStorageRepository, ObjectStorageError
-
-logger = logging.getLogger(__name__)
-
 
 @inject
 @dataclass

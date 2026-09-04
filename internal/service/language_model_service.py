@@ -1,4 +1,3 @@
-import logging
 import hashlib
 import mimetypes
 import os
@@ -19,6 +18,7 @@ from internal.core.language_model.entities.model_entity import (
 )
 from internal.model.provider_api_key import ProviderApiKey
 from internal.exception import NotFoundException, ValidateErrorException
+from internal.extension.logging_extension import logger
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.embeddings import Embeddings
 from pydantic import ValidationError
@@ -28,7 +28,6 @@ from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from ..lib.api_key_helper import get_api_key_for_provider
 
-logger = logging.getLogger(__name__)
 AGENT_MODEL_TYPES = {ModelType.CHAT}
 
 

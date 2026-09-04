@@ -1,4 +1,3 @@
-import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +11,7 @@ from sqlalchemy import asc, func
 from internal.entity.cache_entity import LOCK_EXPIRE_TIME, LOCK_SEGMENT_UPDATE_ENABLED
 from internal.entity.dataset_entity import DocumentStatus, SegmentStatus
 from internal.exception import NotFoundException, FailException, ValidateErrorException
+from internal.extension.logging_extension import logger
 from internal.lib.helper import generate_text_hash
 from internal.model import Document, Segment, Account
 from internal.schema.segment_schema import (
@@ -153,7 +153,7 @@ class SegmentService(BaseService):
                 )
 
         except Exception as e:
-            logging.exception(f"新增文档片段内容发生异常, 错误信息: {str(e)}")
+            logger.exception("新增文档片段内容发生异常, 错误信息: %s", e)
             if segment:
                 self.update(
                     segment,
@@ -252,8 +252,10 @@ class SegmentService(BaseService):
                     ),
                 )
         except Exception as e:
-            logging.exception(
-                f"更新文档片段记录失败, segment_id: {segment}, 错误信息: {str(e)}"
+            logger.exception(
+                "更新文档片段记录失败, segment_id: %s, 错误信息: %s",
+                segment,
+                e,
             )
             raise FailException("更新文档片段记录失败，请稍后尝试")
 
@@ -377,8 +379,10 @@ class SegmentService(BaseService):
                     uuid=segment.node_id, properties={"segment_enabled": enabled}
                 )
             except Exception as e:
-                logging.exception(
-                    f"更改文档片段启用状态出现异常, segment_id: {segment_id}, 错误信息: {str(e)}"
+                logger.exception(
+                    "更改文档片段启用状态出现异常, segment_id: %s, 错误信息: %s",
+                    segment_id,
+                    e,
                 )
                 self.update(
                     segment,
@@ -432,8 +436,10 @@ class SegmentService(BaseService):
                 str(segment.node_id)
             )
         except Exception as e:
-            logging.exception(
-                f"删除文档片段记录失败, segment_id: {segment_id}, 错误信息: {str(e)}"
+            logger.exception(
+                "删除文档片段记录失败, segment_id: %s, 错误信息: %s",
+                segment_id,
+                e,
             )
 
         # 6.更新文档信息，涵盖字符总数、token总次数

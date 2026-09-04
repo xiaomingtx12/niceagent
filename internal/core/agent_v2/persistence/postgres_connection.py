@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import logging
+from logging import Logger
 from typing import Any, TypeVar
 
 from psycopg import InterfaceError as PsycopgInterfaceError
@@ -63,7 +63,7 @@ def build_langgraph_pool_config(
 def execute_with_postgres_retry(
     operation: Callable[[], T],
     *,
-    logger: logging.Logger,
+    logger: Logger,
     resource: str,
     operation_name: str,
 ) -> T:

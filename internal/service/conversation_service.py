@@ -1,4 +1,3 @@
-import logging
 from dataclasses import dataclass
 from datetime import datetime
 from collections.abc import Mapping
@@ -16,6 +15,7 @@ from internal.entity.conversation_entity import (
     InvokeFrom,
     MessageStatus,
 )
+from internal.extension.logging_extension import logger
 from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from internal.schema.agent_runtime_schema import (
@@ -110,7 +110,7 @@ class ConversationService(BaseService):
                     model_config, account_id
                 )
         except Exception as e:
-            logging.warning(f"加载配置模型失败: {str(e)}，使用默认模型")
+            logger.warning("加载配置模型失败: %s，使用默认模型", e)
 
     @classmethod
     def generate_conversation_name(
@@ -132,11 +132,11 @@ class ConversationService(BaseService):
                     model_config, account_id
                 )
         except Exception as e:
-            logging.warning(f"加载模型失败: {str(e)}")
+            logger.warning("加载模型失败: %s", e)
             return "新的会话"
 
         if llm is None:
-            logging.warning("模型加载结果为None，跳过会话命名")
+            logger.warning("模型加载结果为None，跳过会话命名")
             return "新的会话"
 
         # 2.创建会话命名提示词。
@@ -164,8 +164,10 @@ class ConversationService(BaseService):
             if conversation_info and hasattr(conversation_info, "subject"):
                 name = conversation_info.subject
         except Exception as e:
-            logging.exception(
-                f"提取会话名称出错, conversation_info: {conversation_info}, 错误信息: {str(e)}"
+            logger.exception(
+                "提取会话名称出错, conversation_info: %s, 错误信息: %s",
+                conversation_info,
+                e,
             )
         if len(name) > 75:
             name = name[:75] + "..."
@@ -194,11 +196,11 @@ class ConversationService(BaseService):
                         model_config, account_id
                     )
             except Exception as e:
-                logging.warning(f"加载模型失败: {str(e)}")
+                logger.warning("加载模型失败: %s", e)
                 return []
 
             if llm is None:
-                logging.warning("模型加载结果为None，跳过建议问题生成")
+                logger.warning("模型加载结果为None，跳过建议问题生成")
                 return []
 
             # 2.创建提示词，直接要求模型输出 JSON 数组。
@@ -237,8 +239,9 @@ class ConversationService(BaseService):
                     if isinstance(parsed, list):
                         questions = [str(q) for q in parsed if isinstance(q, str)]
                 except json_module.JSONDecodeError:
-                    logging.warning(
-                        f"建议问题JSON解析失败, raw_output: {raw_output[:200]}"
+                    logger.warning(
+                        "建议问题JSON解析失败, raw_output: %s",
+                        raw_output[:200],
                     )
 
             # 6.限制建议问题数量。
@@ -248,8 +251,10 @@ class ConversationService(BaseService):
             return questions
 
         except Exception as e:
-            logging.exception(
-                f"生成建议问题失败, histories: {histories[:200]}..., 错误信息: {str(e)}"
+            logger.exception(
+                "生成建议问题失败, histories: %s..., 错误信息: %s",
+                histories[:200],
+                e,
             )
             # 返回空列表，避免影响主流程。
             return []

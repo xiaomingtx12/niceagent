@@ -19,6 +19,7 @@ from internal.entity import (
     WorkbenchRunStatus,
 )
 from internal.entity.conversation_entity import InvokeFrom
+from internal.extension.logging_extension import logger
 from internal.model import AgentRun
 from internal.repository import AgentWorkbenchRedisRepository
 from internal.schema.agent_workbench_schema import (
@@ -262,10 +263,10 @@ class AgentWorkbenchRunCoordinator:
                 error_message=str(exc),
             )
         except Exception:
-            current_app.logger.exception("保存 Agent Run 初始化失败状态失败")
+            logger.exception("保存 Agent Run 初始化失败状态失败")
         finally:
             self.event_queue.finish(run)
-        current_app.logger.exception(
+        logger.error(
             "Agent 工作台后台初始化失败",
             exc_info=(type(exc), exc, exc.__traceback__),
         )

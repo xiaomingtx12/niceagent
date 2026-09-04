@@ -1,7 +1,6 @@
 """工作流生成服务"""
 
 import json
-import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +28,7 @@ from internal.entity.workflow_entity import (
     WORKFLOW_GENERATION_PROMPT_TEMPLATE,
 )
 from internal.exception import ValidateErrorException, FailException
+from internal.extension.logging_extension import logger
 from internal.lib.helper import convert_model_to_dict
 from internal.model import Account, Workflow
 from pkg.sqlalchemy import SQLAlchemy
@@ -176,11 +176,11 @@ class WorkflowGeneratorService(BaseService):
             return workflow_config
 
         except json.JSONDecodeError as e:
-            logging.error(f"解析LLM生成的工作流配置失败: {str(e)}")
-            logging.error(f"LLM响应: {llm_response}")
+            logger.error("解析LLM生成的工作流配置失败: %s", e)
+            logger.error("LLM响应: %s", llm_response)
             raise FailException("生成工作流配置失败，请重试")
         except Exception as e:
-            logging.error(f"生成工作流配置时发生错误: {str(e)}")
+            logger.exception("生成工作流配置时发生错误: %s", e)
             raise FailException(f"生成工作流配置失败: {str(e)}")
 
     # 节点类型与节点数据类映射
@@ -271,7 +271,7 @@ class WorkflowGeneratorService(BaseService):
                 validated_nodes.append(node)
 
             except Exception as e:
-                logging.warning(f"跳过无效节点: {str(e)}")
+                logger.warning("跳过无效节点: %s", e)
                 continue
 
         # 3. 校验并修复边
@@ -306,7 +306,7 @@ class WorkflowGeneratorService(BaseService):
                     validated_edges.append(edge)
 
             except Exception as e:
-                logging.warning(f"跳过无效边: {str(e)}")
+                logger.warning("跳过无效边: %s", e)
                 continue
 
         # 4. 通过Pydantic实体类规范化节点数据，自动填充缺失字段的默认值
@@ -320,7 +320,7 @@ class WorkflowGeneratorService(BaseService):
                 node_type = node.get("node_type", "")
                 node_data_cls = self.NODE_DATA_CLASSES.get(node_type)
                 if node_data_cls is None:
-                    logging.warning(f"未知节点类型: {node_type}，跳过规范化")
+                    logger.warning("未知节点类型: %s，跳过规范化", node_type)
                     normalized_nodes.append(node)
                     continue
 
@@ -329,7 +329,11 @@ class WorkflowGeneratorService(BaseService):
                 # 序列化回字典，UUID/Enum等类型会被转换为可JSON序列化的格式
                 normalized_nodes.append(convert_model_to_dict(node_data))
             except Exception as e:
-                logging.warning(f"节点规范化失败({node.get('title', '')}): {str(e)}，使用原始数据")
+                logger.warning(
+                    "节点规范化失败(%s): %s，使用原始数据",
+                    node.get("title", ""),
+                    e,
+                )
                 normalized_nodes.append(node)
 
         # 5. 通过Pydantic实体类规范化边数据
@@ -339,7 +343,7 @@ class WorkflowGeneratorService(BaseService):
                 edge_data = BaseEdgeData(**edge)
                 normalized_edges.append(convert_model_to_dict(edge_data))
             except Exception as e:
-                logging.warning(f"边规范化失败: {str(e)}，使用原始数据")
+                logger.warning("边规范化失败: %s，使用原始数据", e)
                 normalized_edges.append(edge)
 
         return {"nodes": normalized_nodes, "edges": normalized_edges}

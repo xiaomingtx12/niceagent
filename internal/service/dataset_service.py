@@ -1,4 +1,3 @@
-import logging
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -7,6 +6,7 @@ from sqlalchemy import desc
 
 from internal.entity.dataset_entity import DEFAULT_DATASET_DESCRIPTION_FORMATTER
 from internal.exception import ValidateErrorException, NotFoundException, FailException
+from internal.extension.logging_extension import logger
 from internal.model import Dataset, DatasetQuery, Segment, Account
 from internal.schema.dataset_schema import (
     CreateDatasetReq,
@@ -236,8 +236,10 @@ class DatasetService(BaseService):
             # 3.调用异步任务执行后续的操作
             delete_dataset.delay(dataset_id, embedding_fingerprint)
         except Exception as e:
-            logging.exception(
-                f"删除知识库失败, dataset_id: {dataset_id}, 错误信息: {str(e)}"
+            logger.exception(
+                "删除知识库失败, dataset_id: %s, 错误信息: %s",
+                dataset_id,
+                e,
             )
             raise FailException("删除知识库失败，请稍后重试")
 

@@ -1,4 +1,3 @@
-import logging
 import os
 
 from flask import Flask
@@ -13,6 +12,7 @@ from sqlalchemy.exc import OperationalError
 from config import Config
 from internal.exception import CustomException, TooManyRequestsException
 from internal.extension import redis_extension, celery_extension, logging_extension
+from internal.extension.logging_extension import logger
 from internal.middleware import Middleware
 from internal.middleware.rate_limit_middleware import init_rate_limit_middleware
 from internal.router import Router
@@ -115,7 +115,7 @@ class Http(Flask):
         # 2.未知异常仅在服务端保留详情，避免向客户端泄露内部信息。
         if self.debug or os.getenv("FLASK_ENV") == "development":
             raise error
-        logging.error(
+        logger.error(
             "Unhandled application exception",
             exc_info=(type(error), error, error.__traceback__),
         )
@@ -139,7 +139,7 @@ class Http(Flask):
 
     def _handle_database_operational_error(self, error: Exception):
         """处理数据库操作异常"""
-        logging.error(f"Database operational error: {str(error)}")
+        logger.error("Database operational error: %s", error)
         return json(
             Response(
                 code=HttpCode.FAIL,
@@ -150,7 +150,7 @@ class Http(Flask):
 
     def _handle_rate_limit_error(self, error: TooManyRequestsException):
         """处理限流异常"""
-        logging.warning(f"Rate limit exceeded: {error.message}")
+        logger.warning("Rate limit exceeded: %s", error.message)
         return too_many_requests_message(
             msg=error.message,
             retry_after=error.retry_after

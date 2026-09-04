@@ -7,7 +7,6 @@ API 限流器 - 基于 Redis 的分布式限流实现
 3. 令牌桶 (Token Bucket)
 """
 import time
-import logging
 from typing import Optional, Tuple
 from enum import Enum
 from dataclasses import dataclass
@@ -18,8 +17,8 @@ from redis.exceptions import (
     TimeoutError as RedisTimeoutError,
 )
 
+from internal.extension.logging_extension import logger
 
-logger = logging.getLogger(__name__)
 _REDIS_CONNECTION_ERRORS = (RedisConnectionError, RedisTimeoutError)
 
 

@@ -7,6 +7,7 @@ from langchain_core.tools import BaseTool, tool
 from pydantic import BaseModel, Field
 
 from internal.core.agent_v2.entity.tool import DATASET_RETRIEVAL_TOOL_NAME
+from internal.extension.logging_extension import logger
 from internal.lib.helper import combine_documents
 from .embeddings_service import EmbeddingsService
 
@@ -47,7 +48,7 @@ class FaissService:
                 allow_dangerous_deserialization=True,
             )
         except Exception as e:
-            print(f"Faiss load error: {e}")
+            logger.warning("Faiss 向量库加载失败，将创建空索引: %s", e)
             # 如果向量存储不存在或加载失败，创建一个空的FAISS实例
             # 创建一个空的FAISS向量存储
             from langchain_core.documents import Document

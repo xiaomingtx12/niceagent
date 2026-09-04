@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import json
-import logging
 import threading
 from dataclasses import dataclass
 from typing import Generator, Union
@@ -13,6 +12,7 @@ from injector import inject
 from werkzeug.datastructures import FileStorage
 
 from internal.exception import ForbiddenException, NotFoundException, FailException
+from internal.extension.logging_extension import logger
 from internal.lib.api_key_helper import get_api_key_for_provider
 from internal.model import Account, Message, App, AppConfig, AppConfigVersion
 from pkg.sqlalchemy import SQLAlchemy
@@ -102,7 +102,7 @@ class AudioService(BaseService):
         except FailException:
             raise
         except Exception as e:
-            logging.error("语音转文本失败: %(error)s", {"error": e}, exc_info=True)
+            logger.exception("语音转文本失败: %s", e)
             raise FailException(f"语音转文本失败: {str(e)}")
 
     def message_to_audio(self, message_id: UUID | str, account: Account) -> Generator:
@@ -215,7 +215,7 @@ class AudioService(BaseService):
                 voice=edge_voice,
             )
         except Exception as error:
-            logging.error("文字转语音失败: %(error)s", {"error": error}, exc_info=True)
+            logger.exception("文字转语音失败: %s", error)
             raise FailException("文字转语音失败，请稍后重试")
 
         # 8.定义内部函数实现流式事件输出

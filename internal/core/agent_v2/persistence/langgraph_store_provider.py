@@ -5,7 +5,6 @@ from __future__ import annotations
 import atexit
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-import logging
 from threading import Lock
 from typing import Any, Callable, Optional
 
@@ -19,9 +18,7 @@ from internal.core.agent_v2.persistence.postgres_connection import (
     execute_with_postgres_retry,
     pg_uri_for_langgraph,
 )
-
-
-_logger = logging.getLogger(__name__)
+from internal.extension.logging_extension import logger
 
 
 def _pg_uri_for_langgraph(sqlalchemy_uri: str) -> str:
@@ -37,7 +34,7 @@ class ResilientPostgresStore(PostgresStore):
         parent = super()
         execute_with_postgres_retry(
             parent.setup,
-            logger=_logger,
+            logger=logger,
             resource="Agent memory store",
             operation_name="setup",
         )
@@ -48,7 +45,7 @@ class ResilientPostgresStore(PostgresStore):
         parent = super()
         return execute_with_postgres_retry(
             lambda: parent.batch(operations),
-            logger=_logger,
+            logger=logger,
             resource="Agent memory store",
             operation_name="batch",
         )

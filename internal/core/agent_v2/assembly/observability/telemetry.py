@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-import logging
+from logging import Logger
 from typing import Mapping, Protocol
 
 from internal.core.agent_v2.entity.telemetry import (
     AgentTelemetryEvent,
     TelemetryValue,
 )
+from internal.extension.logging_extension import logger as application_logger
 
 
 class AgentTelemetrySink(Protocol):
@@ -30,9 +31,9 @@ class NullAgentTelemetrySink:
 class LoggingAgentTelemetrySink:
     """通过应用日志写入结构化遥测。"""
 
-    def __init__(self, logger: logging.Logger | None = None) -> None:
+    def __init__(self, logger: Logger | None = None) -> None:
         """使用指定日志器或默认遥测日志器。"""
-        self._logger = logger or logging.getLogger("my_dify.agent_v2.telemetry")
+        self._logger = logger or application_logger
 
     def record(self, event: AgentTelemetryEvent) -> None:
         """写入不含模型和文件内容的 JSON 事件。"""
@@ -73,7 +74,7 @@ class AgentTelemetry:
                 )
             )
         except Exception:
-            logging.getLogger(__name__).exception(
+            application_logger.exception(
                 "Agent telemetry sink failed for %s", name
             )
 

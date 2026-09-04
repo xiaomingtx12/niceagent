@@ -1,10 +1,10 @@
-import logging
 from typing import Any, Optional
 
 from psycopg2 import OperationalError as Psycopg2OperationalError
 from sqlalchemy.exc import OperationalError
 
 from internal.exception import FailException
+from internal.extension.logging_extension import logger
 from pkg.sqlalchemy import SQLAlchemy
 
 
@@ -41,8 +41,11 @@ class BaseService:
         try:
             return self.db.session.query(model).get(primary_key)
         except (OperationalError, Psycopg2OperationalError) as e:
-            logging.error(
-                f"Database connection error when getting {model.__name__} with id {primary_key}: {str(e)}"
+            logger.exception(
+                "Database connection error when getting %s with id %s: %s",
+                model.__name__,
+                primary_key,
+                e,
             )
             # 尝试刷新会话连接
             try:

@@ -36,6 +36,7 @@ from internal.exception import (
     ForbiddenException,
     FailException,
 )
+from internal.extension.logging_extension import logger
 from internal.lib.helper import convert_model_to_dict
 from internal.model import (
     Account,
@@ -472,8 +473,7 @@ class WorkflowService(BaseService):
                 debug_success = True
 
             except Exception as e:
-                import logging
-                logging.error(f"工作流调试执行失败: {str(e)}", exc_info=True)
+                logger.exception("工作流调试执行失败: %s", e)
                 self.update(
                     workflow_result,
                     **{
