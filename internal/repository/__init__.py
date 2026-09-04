@@ -4,6 +4,10 @@ from .agent_workbench_redis_repository import (
     AgentWorkbenchRedisRepository,
     WorkbenchReplayCursorExpired,
 )
+from .builtin_skill_repository import (
+    BuiltinSkillRepository,
+    BuiltinSkillRepositoryError,
+)
 from .cos_object_storage_repository import (
     CosObjectStorageRepository,
     ObjectStorageError,
@@ -11,6 +15,8 @@ from .cos_object_storage_repository import (
 
 __all__ = [
     "AgentWorkbenchRedisRepository",
+    "BuiltinSkillRepository",
+    "BuiltinSkillRepositoryError",
     "CosObjectStorageRepository",
     "ObjectStorageError",
     "WorkbenchReplayCursorExpired",

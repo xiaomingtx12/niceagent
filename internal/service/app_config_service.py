@@ -17,7 +17,6 @@ from internal.core.tools.builtin_tools.providers import BuiltinProviderManager
 from internal.core.mcp import MCPRuntimeManager
 from internal.core.workflow import Workflow as WorkflowTool
 from internal.exception import (
-    FailException,
     NotFoundException,
     ValidateErrorException,
 )
@@ -102,12 +101,9 @@ class AppConfigService(BaseService):
             )
 
         if draft_app_config.skills is not None:
-            try:
-                normalized["skills"] = self.skill_service.normalize_bindings(
-                    draft_app_config.skills
-                )
-            except FailException as exc:
-                raise ValidateErrorException(str(exc)) from exc
+            normalized["skills"] = self.skill_service.normalize_bindings(
+                draft_app_config.skills
+            )
 
         if draft_app_config.subagents is not None:
             enabled_skills = {

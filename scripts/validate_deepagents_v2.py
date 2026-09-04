@@ -19,6 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from config.config import Config
+from internal.repository import BuiltinSkillRepository
 from internal.service.skill_service import SkillService
 
 EXPECTED_HEAD = "d_v2_008_agent_trace_fields"
@@ -133,7 +134,7 @@ def check_builtin_skills(*, production: bool = False) -> ValidationCheck:
             "Production builtin Skill root must be mounted read-only",
         )
     try:
-        catalog = SkillService().list_catalog()
+        catalog = SkillService(BuiltinSkillRepository(Config())).list_catalog()
     except Exception as exc:
         return ValidationCheck(
             "builtin_skills",

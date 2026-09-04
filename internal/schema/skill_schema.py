@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from flask_wtf import FlaskForm
+from marshmallow import Schema, fields, pre_dump
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -14,7 +14,18 @@ from pydantic import (
     StrictStr,
     model_validator,
 )
-from wtforms import StringField, ValidationError
+
+from internal.entity import BuiltinSkill
+
+
+SKILL_CATEGORY_LABELS = {
+    "office": "办公效率",
+    "content": "内容创作",
+    "knowledge": "知识管理",
+    "data": "数据分析",
+    "education": "教育学习",
+    "agent": "Agent 能力",
+}
 
 
 class SkillBindingReq(BaseModel):
@@ -85,22 +96,70 @@ def normalize_manifest_string_list(value: Any) -> tuple[str, ...]:
     return tuple(value)
 
 
-class GetSkillsReq(FlaskForm):
-    """Skill 列表查询请求。"""
+class _BuiltinSkillFields(Schema):
+    """内置 Skill 响应共享字段。"""
 
-    include_versions = StringField("include_versions")
+    name = fields.String(required=True)
+    description = fields.String(required=True)
+    version = fields.String(required=True)
+    digest = fields.String(required=True)
+    category = fields.String(required=True)
+    category_name = fields.String(required=True)
+    execution_mode = fields.String(required=True)
+    requires = fields.List(fields.String(), required=True)
+    allowed_tools = fields.List(fields.String(), required=True)
+    enabled = fields.Boolean(required=True)
 
-    def validate_include_versions(self, field: StringField) -> None:
-        """将显式的 true/false 查询值规范化为布尔值。"""
-        value = (field.data or "false").lower()
-        if value not in {"true", "false"}:
-            raise ValidationError("include_versions必须是true或false")
-        field.data = value == "true"
+    @staticmethod
+    def _project(skill: BuiltinSkill) -> dict[str, Any]:
+        """只投影 HTTP 响应允许公开的 Skill 字段。"""
+        return {
+            "name": skill.name,
+            "description": skill.description,
+            "version": skill.version,
+            "digest": skill.digest,
+            "category": skill.category,
+            "category_name": SKILL_CATEGORY_LABELS[skill.category],
+            "execution_mode": skill.execution_mode,
+            "requires": list(skill.requires),
+            "allowed_tools": list(skill.allowed_tools),
+            "enabled": skill.enabled,
+        }
+
+
+class BuiltinSkillResp(_BuiltinSkillFields):
+    """内置 Skill 目录项响应。"""
+
+    @pre_dump
+    def project_skill(self, skill: BuiltinSkill, **kwargs):
+        """将领域对象显式转换为公开响应。"""
+        return self._project(skill)
+
+
+class BuiltinSkillDetailResp(_BuiltinSkillFields):
+    """包含 SKILL.md 正文的内置 Skill 详情响应。"""
+
+    content = fields.String(required=True)
+
+    @pre_dump
+    def project_skill(self, skill: BuiltinSkill, **kwargs):
+        """在目录字段基础上追加公开的 Skill 正文。"""
+        data = self._project(skill)
+        data["content"] = skill.skill_md
+        return data
+
+
+class ListBuiltinSkillsResp(Schema):
+    """内置 Skill 目录列表响应。"""
+
+    items = fields.List(fields.Nested(BuiltinSkillResp), required=True)
 
 
 __all__ = [
     "BuiltinSkillManifestReq",
-    "GetSkillsReq",
+    "BuiltinSkillDetailResp",
+    "BuiltinSkillResp",
+    "ListBuiltinSkillsResp",
     "SkillBindingListReq",
     "SkillBindingReq",
     "normalize_manifest_string_list",

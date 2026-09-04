@@ -12,6 +12,7 @@ from internal.extension.redis_extension import redis_client
 from internal.extension.weaviate_extension import weaviate
 from internal.repository import (
     AgentWorkbenchRedisRepository,
+    BuiltinSkillRepository,
     CosObjectStorageRepository,
 )
 from internal.service.agent_workbench_event_queue import AgentWorkbenchEventQueue
@@ -74,6 +75,11 @@ class ExtensionModule(Module):
         # 将 EmbeddingsService 和 FaissService 绑定为单例，确保所有地方使用同一个实例
         binder.bind(EmbeddingsService, to=EmbeddingsService, scope=singleton)
         binder.bind(FaissService, to=FaissService, scope=singleton)
+        binder.bind(
+            BuiltinSkillRepository,
+            to=BuiltinSkillRepository,
+            scope=singleton,
+        )
         binder.bind(
             CosObjectStorageRepository,
             to=CosObjectStorageRepository,

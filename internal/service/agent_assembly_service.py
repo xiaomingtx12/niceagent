@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
 from deepagents.backends.protocol import BackendProtocol
-from deepagents.middleware.filesystem import FilesystemPermission
 from flask import current_app
 from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
-from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.store.base import BaseStore
 from sqlalchemy.orm import Session, sessionmaker
 
 from config.config import Config
 from internal.core.agent_v2.assembly.context.memory_context import (
     MemoryContextAssembler,
+)
+from internal.core.agent_v2.assembly.context.runtime_resources import (
+    AgentRuntimeResources,
 )
 from internal.core.agent_v2.assembly.context.sandbox_context import (
     SandboxContextAssembler,
@@ -58,6 +58,7 @@ from internal.core.agent_v2.persistence.langgraph_store_provider import (
 from internal.core.agent_v2.protocol.internal_auth import (
     issue_internal_agent_protocol_token,
 )
+from internal.entity import BuiltinSkill
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
@@ -78,23 +79,8 @@ from .app_config_service import AppConfigService
 from .base_service import BaseService
 from .language_model_service import LanguageModelService
 from .retrieval_service import RetrievalService
-from .skill_service import BuiltinSkill, SkillService
+from .skill_service import SkillService
 from .workspace_file_storage_service import WorkspaceFileStorageService
-
-@dataclass(frozen=True, slots=True)
-class _AgentRuntimeResources:
-    """AgentAssemblyService 交给 AgentExecutor 的一次运行时资源快照。"""
-
-    checkpointer: BaseCheckpointSaver | bool
-    backend: BackendProtocol
-    permissions: list[FilesystemPermission]
-    skill_sources: list[str]
-    memory_sources: list[str]
-    subagent_skill_sources: Mapping[str, list[str]]
-    telemetry: AgentTelemetry
-    runtime_context: AgentRunContext
-    store: BaseStore | None = None
-
 
 @inject
 @dataclass
@@ -273,12 +259,10 @@ class AgentAssemblyService(BaseService):
     def _prepare_runtime(
         self,
         req: AgentRuntimePrepareReq,
-    ) -> _AgentRuntimeResources:
+    ) -> AgentRuntimeResources:
         """准备本次 Run 独占的 Workspace、Skill、Memory 和 Sandbox 资源。"""
-        skills = self.skill_service.list_enabled_latest(
-            account_id=req.account_id,
-            app_id=req.app_id,
-            bindings=list(req.skill_bindings),
+        skills = self.skill_service.resolve_enabled_skills(
+            req.skill_bindings,
         )
         settings = self.config
         runtime_session = sessionmaker(
@@ -303,7 +287,7 @@ class AgentAssemblyService(BaseService):
         req: AgentRuntimePrepareReq,
         skills: list[BuiltinSkill],
         settings: Config,
-    ) -> _AgentRuntimeResources:
+    ) -> AgentRuntimeResources:
         """在装配服务内创建 Agent Core 所需的运行时资源集合。"""
         run_context = AgentRunContext(
             account_id=req.account_id,
@@ -377,7 +361,7 @@ class AgentAssemblyService(BaseService):
                     self._close_unowned_runtime(backend_to_close)
             raise
 
-        return _AgentRuntimeResources(
+        return AgentRuntimeResources(
             checkpointer=checkpointer,
             backend=backend,
             permissions=build_filesystem_permissions(
