@@ -1,12 +1,15 @@
 import asyncio
 import base64
 import json
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Generator, Union
 from uuid import UUID
 
+import aiohttp
 import edge_tts
 from dashscope.audio.asr import Recognition
+from edge_tts.exceptions import NoAudioReceived
 from injector import inject
 from werkzeug.datastructures import FileStorage
 
@@ -21,6 +24,8 @@ from .web_app_service import WebAppService
 from ..entity.app_entity import AppStatus
 from ..entity.audio_entity import EDGE_TTS_VOICE_MAP
 from ..entity.conversation_entity import InvokeFrom
+
+EDGE_TTS_RETRY_DELAYS = (0.2, 0.5)
 
 
 @inject
@@ -226,24 +231,45 @@ class AudioService(BaseService):
     def _edge_tts_synthesize(text: str, voice: str) -> bytes:
         """调用Edge-TTS合成语音，返回mp3字节数据"""
 
-        async def _synthesize() -> bytes:
+        async def _synthesize_once() -> bytes:
+            """执行一次合成，并拒绝没有音频数据的成功响应。"""
             communicate = edge_tts.Communicate(text, voice)
-            audio_chunks = []
+            audio_chunks: list[bytes] = []
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     audio_chunks.append(chunk["data"])
-            return b"".join(audio_chunks)
+            audio_data = b"".join(audio_chunks)
+            if not audio_data:
+                raise NoAudioReceived("Edge-TTS 未返回音频数据")
+            return audio_data
 
-        # 在同步上下文中运行异步函数
+        async def _synthesize() -> bytes:
+            """仅对上游空响应、超时和临时网络错误进行有限重试。"""
+            for attempt in range(len(EDGE_TTS_RETRY_DELAYS) + 1):
+                try:
+                    return await _synthesize_once()
+                except (NoAudioReceived, TimeoutError, aiohttp.ClientError) as error:
+                    if attempt >= len(EDGE_TTS_RETRY_DELAYS):
+                        raise
+                    logger.warning(
+                        "Edge-TTS 合成暂时失败，准备第 %s 次重试: %s",
+                        attempt + 1,
+                        error,
+                    )
+                    await asyncio.sleep(EDGE_TTS_RETRY_DELAYS[attempt])
+            raise RuntimeError("Edge-TTS retry loop exited unexpectedly")
+
+        # Flask 同步线程直接创建独立事件循环；若未来从异步上下文调用，
+        # 则放到独立线程执行，避免嵌套运行当前事件循环。
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(asyncio.run, _synthesize())
-                    return future.result(timeout=30)
-            else:
-                return loop.run_until_complete(_synthesize())
+            asyncio.get_running_loop()
         except RuntimeError:
+            has_running_loop = False
+        else:
+            has_running_loop = True
+
+        if not has_running_loop:
             return asyncio.run(_synthesize())
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _synthesize()).result()
