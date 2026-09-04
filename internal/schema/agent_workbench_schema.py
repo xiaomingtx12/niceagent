@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -222,6 +223,16 @@ class WorkbenchEvent(BaseModel):
     params: WorkbenchEventParams
 
 
+@dataclass(frozen=True)
+class WorkbenchLocalEventBatchResp:
+    """一次本地工作台事件队列读取结果。"""
+
+    events: tuple[WorkbenchEvent, ...]
+    oldest_event_sequence: int | None
+    timed_out: bool
+    finished: bool
+
+
 class WorkbenchSubscriptionReq(BaseModel):
     """SSE 订阅过滤条件。
 
@@ -376,6 +387,7 @@ __all__ = [
     "WorkbenchCommandErrorResp",
     "WorkbenchEvent",
     "WorkbenchEventParams",
+    "WorkbenchLocalEventBatchResp",
     "WorkbenchToolEventData",
     "WorkbenchToolErrorData",
     "WorkbenchToolFinishedData",

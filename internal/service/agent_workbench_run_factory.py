@@ -9,7 +9,11 @@ from uuid import UUID, uuid4
 from injector import inject
 
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
-from internal.entity import WorkbenchRun, WorkbenchRunInput
+from internal.entity import (
+    AuthorizedWorkbenchContext,
+    WorkbenchRun,
+    WorkbenchRunInput,
+)
 from internal.exception import ForbiddenException
 from internal.model import Account, Conversation, EndUser, Message
 from internal.schema.agent_attachment_schema import (
@@ -21,7 +25,6 @@ from internal.schema.app_config_schema import AgentAppConfigReq
 from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_attachment_service import AgentAttachmentService
-from .agent_workbench_access_service import AuthorizedWorkbenchContext
 from .assistant_agent_service import AssistantAgentService
 from .base_service import BaseService
 

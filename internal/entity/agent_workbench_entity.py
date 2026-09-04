@@ -12,6 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 if TYPE_CHECKING:
+    from internal.model import App, Conversation, EndUser
     from internal.schema.agent_workbench_schema import WorkbenchEvent
 
 _InvocationReqT = TypeVar("_InvocationReqT")
@@ -50,6 +51,15 @@ class WorkbenchRunStartReservation:
     input_message_id: str | None
 
 
+@dataclass(frozen=True)
+class AuthorizedWorkbenchContext:
+    """一次 Run 启动已校验、可直接交给 Factory 复用的业务对象。"""
+
+    app: App | None
+    conversation: Conversation | None
+    end_user: EndUser | None = None
+
+
 class WorkbenchRunInput(BaseModel):
     """从 Agent Protocol 命令中提取出的可信运行输入。"""
 
@@ -86,6 +96,7 @@ class WorkbenchRun(Generic[_InvocationReqT]):
 
 
 __all__ = [
+    "AuthorizedWorkbenchContext",
     "WORKBENCH_ACTIVE_STATUSES",
     "WORKBENCH_TERMINAL_STATUSES",
     "WorkbenchRun",

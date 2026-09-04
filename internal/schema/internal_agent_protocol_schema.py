@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -67,6 +68,14 @@ class InternalRunResp(BaseModel):
     error: StrictStr | None = None
 
 
+@dataclass(frozen=True)
+class InternalRunLaunchResp:
+    """内部 SDK 创建 Run 的业务结果。"""
+
+    run: InternalRunResp | None = None
+    conflict_message: str | None = None
+
+
 def new_thread_id(value: UUID | None) -> UUID:
     """保留 SDK 指定的线程标识，否则创建新的 UUID。"""
     return value or uuid4()
@@ -74,6 +83,7 @@ def new_thread_id(value: UUID | None) -> UUID:
 
 __all__ = [
     "InternalRunCreateReq",
+    "InternalRunLaunchResp",
     "InternalRunResp",
     "InternalThreadCreateReq",
     "InternalThreadResp",

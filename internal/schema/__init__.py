@@ -1,5 +1,11 @@
 from .schema import DictField, JsonBoolean, JsonString, ListField
 from .agent_attachment_schema import AgentAttachmentResolveReq, AgentAttachmentResp
+from .agent_tool_schema import (
+    AppWithWorkflowGeneratorToolReq,
+    CreateAppToolReq,
+    DatasetRetrievalToolReq,
+    WorkflowGeneratorToolReq,
+)
 from .agent_runtime_schema import (
     AgentAppCleanupReq,
     AgentConversationCleanupReq,
@@ -19,6 +25,7 @@ from .agent_workbench_schema import (
     WorkbenchCommandErrorResp,
     WorkbenchEvent,
     WorkbenchEventParams,
+    WorkbenchLocalEventBatchResp,
     WorkbenchToolEventData,
     WorkbenchToolErrorData,
     WorkbenchToolFinishedData,
@@ -52,6 +59,7 @@ from .memory_file_schema import (
 )
 from .internal_agent_protocol_schema import (
     InternalRunCreateReq,
+    InternalRunLaunchResp,
     InternalRunResp,
     InternalThreadCreateReq,
     InternalThreadResp,
@@ -64,6 +72,10 @@ __all__ = [
     "JsonString",
     "AgentAttachmentResolveReq",
     "AgentAttachmentResp",
+    "AppWithWorkflowGeneratorToolReq",
+    "CreateAppToolReq",
+    "DatasetRetrievalToolReq",
+    "WorkflowGeneratorToolReq",
     "AgentAppCleanupReq",
     "AgentConversationCleanupReq",
     "AgentInvocation",
@@ -81,6 +93,7 @@ __all__ = [
     "WorkbenchCommandErrorResp",
     "WorkbenchEvent",
     "WorkbenchEventParams",
+    "WorkbenchLocalEventBatchResp",
     "WorkbenchToolEventData",
     "WorkbenchToolErrorData",
     "WorkbenchToolFinishedData",
@@ -108,6 +121,7 @@ __all__ = [
     "ReadMemoryFileReq",
     "WriteMemoryFileReq",
     "InternalRunCreateReq",
+    "InternalRunLaunchResp",
     "InternalRunResp",
     "InternalThreadCreateReq",
     "InternalThreadResp",

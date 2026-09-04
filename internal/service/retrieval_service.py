@@ -6,13 +6,13 @@ from injector import inject
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_core.documents import Document as LCDocument
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, Field
 from sqlalchemy import update
 
 from internal.core.agent_v2.entity.tool import DATASET_RETRIEVAL_TOOL_NAME
 from internal.entity.dataset_entity import RetrievalStrategy, RetrievalSource
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.model import Dataset, DatasetQuery, Segment
+from internal.schema.agent_tool_schema import DatasetRetrievalToolReq
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .jieba_service import JiebaService
@@ -144,12 +144,7 @@ class RetrievalService(BaseService):
     ) -> BaseTool:
         """把一次已确定范围的知识库检索能力包装成 LangChain Tool。"""
 
-        class DatasetRetrievalInput(BaseModel):
-            """知识库检索工具输入结构"""
-
-            query: str = Field(description="知识库搜索query语句，类型为字符串")
-
-        @tool(DATASET_RETRIEVAL_TOOL_NAME, args_schema=DatasetRetrievalInput)
+        @tool(DATASET_RETRIEVAL_TOOL_NAME, args_schema=DatasetRetrievalToolReq)
         def dataset_retrieval(query: str) -> str:
             """如果需要搜索扩展的知识库内容，当你觉得用户的提问超过你的知识范围时，可以尝试调用该工具，输入为搜索query语句，返回数据为检索内容字符串"""
             # 1.调用search_in_datasets检索得到LangChain文档列表

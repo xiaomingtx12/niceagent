@@ -7,17 +7,10 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from internal.entity import WorkbenchRun, WorkbenchRunStatus
-from internal.schema.agent_workbench_schema import WorkbenchEvent
-
-
-@dataclass(frozen=True)
-class WorkbenchLocalEventBatch:
-    """一次本地队列读取的结果。"""
-
-    events: tuple[WorkbenchEvent, ...]
-    oldest_event_sequence: int | None
-    timed_out: bool
-    finished: bool
+from internal.schema.agent_workbench_schema import (
+    WorkbenchEvent,
+    WorkbenchLocalEventBatchResp,
+)
 
 
 @dataclass
@@ -88,7 +81,7 @@ class AgentWorkbenchEventQueue:
         *,
         cursor: int,
         timeout: float | None,
-    ) -> WorkbenchLocalEventBatch:
+    ) -> WorkbenchLocalEventBatchResp:
         """等待并读取游标之后的本地事件，同时判断队列是否已结束。"""
         with self._condition:
             ready = self._condition.wait_for(
@@ -98,7 +91,7 @@ class AgentWorkbenchEventQueue:
             )
             oldest_event_sequence = run.events[0].seq if run.events else None
             pending = tuple(event for event in run.events if event.seq > cursor)
-            return WorkbenchLocalEventBatch(
+            return WorkbenchLocalEventBatchResp(
                 events=pending,
                 oldest_event_sequence=oldest_event_sequence,
                 timed_out=not ready,
@@ -106,4 +99,4 @@ class AgentWorkbenchEventQueue:
             )
 
 
-__all__ = ["AgentWorkbenchEventQueue", "WorkbenchLocalEventBatch"]
+__all__ = ["AgentWorkbenchEventQueue"]

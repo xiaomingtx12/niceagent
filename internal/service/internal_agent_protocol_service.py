@@ -23,6 +23,7 @@ from internal.model import Account, AgentRun, App
 from internal.schema.agent_workbench_schema import WorkbenchCommandReq
 from internal.schema.internal_agent_protocol_schema import (
     InternalRunCreateReq,
+    InternalRunLaunchResp,
     InternalRunResp,
     InternalThreadResp,
 )
@@ -31,14 +32,6 @@ from pkg.sqlalchemy import SQLAlchemy
 from .agent_workbench_run_service import AgentWorkbenchRunService
 from .agent_workbench_service import AgentWorkbenchService
 from .base_service import BaseService
-
-
-@dataclass(frozen=True)
-class InternalRunLaunchResult:
-    """内部 SDK 创建 Run 的业务结果。"""
-
-    run: InternalRunResp | None = None
-    conflict_message: str | None = None
 
 
 @inject
@@ -82,7 +75,7 @@ class InternalAgentProtocolService(BaseService):
         claims: InternalAgentProtocolClaims,
         thread_id: UUID,
         request: InternalRunCreateReq,
-    ) -> InternalRunLaunchResult:
+    ) -> InternalRunLaunchResp:
         """校验 graph、可选中断前序 Run，并经 Workbench 入队后台任务。"""
         account = self._get_authorized_account(claims)
         expected_graph_id = build_published_graph_id(claims.target_app_id)
@@ -115,12 +108,12 @@ class InternalAgentProtocolService(BaseService):
             command=command,
         )
         if started.type == "error":
-            return InternalRunLaunchResult(conflict_message=started.message)
+            return InternalRunLaunchResp(conflict_message=started.message)
 
         run_id = started.result.run_id
         row = self.run_service.get_run(run_id)
         try:
-            return InternalRunLaunchResult(
+            return InternalRunLaunchResp(
                 run=self._to_run_response(
                     row=row,
                     thread_id=thread_id,
@@ -307,4 +300,4 @@ def _extract_run_input(request: InternalRunCreateReq) -> dict[str, Any] | None:
     return update if isinstance(update, dict) else None
 
 
-__all__ = ["InternalAgentProtocolService", "InternalRunLaunchResult"]
+__all__ = ["InternalAgentProtocolService"]

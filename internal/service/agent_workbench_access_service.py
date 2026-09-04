@@ -5,6 +5,7 @@ from uuid import UUID
 
 from injector import inject
 
+from internal.entity import AuthorizedWorkbenchContext
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import ForbiddenException, NotFoundException
@@ -13,15 +14,6 @@ from pkg.sqlalchemy import SQLAlchemy
 
 from .base_service import BaseService
 from .web_app_service import WebAppService
-
-
-@dataclass(frozen=True)
-class AuthorizedWorkbenchContext:
-    """一次 Run 启动已校验、可直接交给 Factory 复用的业务对象。"""
-
-    app: App | None
-    conversation: Conversation | None
-    end_user: EndUser | None = None
 
 
 @inject
@@ -373,4 +365,4 @@ class AgentWorkbenchAccessService(BaseService):
         raise ForbiddenException("工作台 Run 来源无效")
 
 
-__all__ = ["AgentWorkbenchAccessService", "AuthorizedWorkbenchContext"]
+__all__ = ["AgentWorkbenchAccessService"]

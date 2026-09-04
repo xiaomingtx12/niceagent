@@ -1,17 +1,17 @@
 import asyncio
 import base64
 import json
-import threading
 from dataclasses import dataclass
 from typing import Generator, Union
 from uuid import UUID
 
 import edge_tts
-from dashscope.audio.asr import Recognition, RecognitionCallback, RecognitionResult
+from dashscope.audio.asr import Recognition
 from injector import inject
 from werkzeug.datastructures import FileStorage
 
 from internal.exception import ForbiddenException, NotFoundException, FailException
+from internal.extension.dashscope_audio_extension import DashScopeRecognitionCallback
 from internal.extension.logging_extension import logger
 from internal.lib.api_key_helper import get_api_key_for_provider
 from internal.model import Account, Message, App, AppConfig, AppConfigVersion
@@ -21,34 +21,6 @@ from .web_app_service import WebAppService
 from ..entity.app_entity import AppStatus
 from ..entity.audio_entity import EDGE_TTS_VOICE_MAP
 from ..entity.conversation_entity import InvokeFrom
-
-
-class _RecognitionCallback(RecognitionCallback):
-    """DashScope实时语音识别回调，用于收集识别结果"""
-
-    def __init__(self):
-        self.texts = []
-        self.error = None
-        self.done = threading.Event()
-
-    def on_complete(self) -> None:
-        self.done.set()
-
-    def on_error(self, result: RecognitionResult) -> None:
-        self.error = result
-        self.done.set()
-
-    def on_event(self, result: RecognitionResult) -> None:
-        sentence = result.get_sentence()
-        if (
-            sentence
-            and sentence.get("text")
-            and RecognitionResult.is_sentence_end(sentence)
-        ):
-            self.texts.append(sentence["text"])
-
-    def on_close(self) -> None:
-        self.done.set()
 
 
 @inject
@@ -72,7 +44,7 @@ class AudioService(BaseService):
 
         # 3.使用Recognition实时识别（通过callback收集结果）
         try:
-            callback = _RecognitionCallback()
+            callback = DashScopeRecognitionCallback()
             recognition = Recognition(
                 model="paraformer-realtime-v2",
                 format="wav",

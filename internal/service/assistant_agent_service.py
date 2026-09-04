@@ -4,9 +4,13 @@ from uuid import UUID
 
 from injector import inject
 from langchain_core.tools import BaseTool, tool
-from pydantic import BaseModel, Field
 
 from internal.model import Account
+from internal.schema.agent_tool_schema import (
+    AppWithWorkflowGeneratorToolReq,
+    CreateAppToolReq,
+    WorkflowGeneratorToolReq,
+)
 from internal.task.app_task import auto_create_app
 from internal.task.workflow_task import (
     auto_generate_workflow,
@@ -63,17 +67,7 @@ class AssistantAgentService(BaseService):
     def convert_create_app_to_tool(cls, account_id: UUID) -> BaseTool:
         """定义自动创建Agent应用LangChain工具"""
 
-        class CreateAppInput(BaseModel):
-            """创建Agent/应用输入结构"""
-
-            name: str = Field(
-                description="需要创建的Agent/应用名称，长度不超过50个字符"
-            )
-            description: str = Field(
-                description="需要创建的Agent/应用描述，请详细概括该应用的功能"
-            )
-
-        @tool("create_app", args_schema=CreateAppInput)
+        @tool("create_app", args_schema=CreateAppToolReq)
         def create_app(name: str, description: str) -> str:
             """如果用户提出了需要创建一个Agent/应用，你可以调用此工具，参数的输入是应用的名称+描述，返回的数据是创建后的成功提示"""
             # 1.调用celery异步任务在后端创建应用
@@ -91,20 +85,7 @@ class AssistantAgentService(BaseService):
         # 提前获取account_id字符串，避免在闭包中访问account对象
         account_id_str = str(account.id)
 
-        class WorkflowGeneratorInput(BaseModel):
-            """工作流生成输入结构"""
-
-            name: str = Field(description="工作流名称，简洁明了，不超过50个字符")
-            description: str = Field(description="工作流描述，概括工作流的功能")
-            requirements: str = Field(
-                description="详细的工作流需求说明，包括需要的功能、处理流程、节点类型等"
-            )
-            node_types: str = Field(
-                default="",
-                description="可选，指定需要使用的节点类型，多个类型用逗号分隔，如：start,llm,template_transform,end。留空则自动选择",
-            )
-
-        @tool("workflow_generator", args_schema=WorkflowGeneratorInput)
+        @tool("workflow_generator", args_schema=WorkflowGeneratorToolReq)
         def workflow_generator(
             name: str, description: str, requirements: str, node_types: str = ""
         ) -> str:
@@ -139,23 +120,10 @@ class AssistantAgentService(BaseService):
         # 提前获取account_id字符串，避免在闭包中访问account对象
         account_id_str = str(account.id)
 
-        class AppWithWorkflowGeneratorInput(BaseModel):
-            """Agent应用+工作流生成输入结构"""
-
-            app_name: str = Field(description="Agent应用名称，简洁明了，不超过50个字符")
-            app_description: str = Field(description="Agent应用描述，概括应用的功能")
-            preset_prompt: str = Field(
-                description="Agent的预设提示词，定义Agent的人设、角色和回复逻辑"
-            )
-            workflow_requirements: str = Field(
-                description="需要生成的工作流的详细需求说明，包括功能、处理流程等"
-            )
-            auto_publish: bool = Field(
-                default=False,
-                description="是否自动发布应用和工作流，默认为False（保存为草稿）",
-            )
-
-        @tool("app_with_workflow_generator", args_schema=AppWithWorkflowGeneratorInput)
+        @tool(
+            "app_with_workflow_generator",
+            args_schema=AppWithWorkflowGeneratorToolReq,
+        )
         def app_with_workflow_generator(
             app_name: str,
             app_description: str,
