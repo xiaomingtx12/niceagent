@@ -4,15 +4,55 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="fix(audio): refine permission validation for different invoke sources">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/audio_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/audio_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/deep_agent_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/deep_agent_factory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/deep_agent_harness_profile.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/subagent_spec_adapter.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/subagent_spec_adapter.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/backends/composition/composite_backend_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/backends/composition/composite_backend_factory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/run_resource_manager.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/run_resources.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/tool_validator.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/middleware/filesystem_input_middleware.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/language_model/entities/provider_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/language_model/entities/provider_entity.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/api_key_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/api_key_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/app_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/app_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/auth_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/auth_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/creator_task_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/creator_task_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/language_model_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/language_model_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/oauth_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/oauth_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/provider_api_key_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/provider_api_key_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/skill_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/skill_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/wechat_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/wechat_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/provider_api_key_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/provider_api_key_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/schema/skill_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/skill_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/server/http.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/server/http.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/account_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/account_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/agent_assembly_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_assembly_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/api_tool_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/api_tool_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_config_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/app_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/oauth_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/oauth_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/provider_api_key_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/provider_api_key_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/wechat_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/wechat_service.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
     <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="ChangesViewManager">
+    <option name="groupingKeys">
+      <option value="directory" />
+      <option value="repository" />
+    </option>
   </component>
   <component name="DatabaseLocalColorSettings">
     <colors>
@@ -446,7 +486,14 @@
       <workItem from="1787746051037" duration="11116000" />
       <workItem from="1787816484093" duration="26136000" />
       <workItem from="1787897860404" duration="6893000" />
-      <workItem from="1787992309833" duration="33748000" />
+      <workItem from="1787992309833" duration="40029000" />
+      <workItem from="1788158195894" duration="20075000" />
+      <workItem from="1788241117505" duration="21031000" />
+      <workItem from="1788329946301" duration="25609000" />
+      <workItem from="1788412766326" duration="4194000" />
+      <workItem from="1788428753570" duration="880000" />
+      <workItem from="1788430183322" duration="11937000" />
+      <workItem from="1788500338163" duration="1050000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -784,7 +831,15 @@
       <option name="project" value="LOCAL" />
       <updated>1787999561377</updated>
     </task>
-    <option name="localTasksCounter" value="43" />
+    <task id="LOCAL-00043" summary="fix(audio): refine permission validation for different invoke sources">
+      <option name="closed" value="true" />
+      <created>1788093620410</created>
+      <option name="number" value="00043" />
+      <option name="presentableId" value="LOCAL-00043" />
+      <option name="project" value="LOCAL" />
+      <updated>1788093620410</updated>
+    </task>
+    <option name="localTasksCounter" value="44" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -795,26 +850,13 @@
       <map>
         <entry key="MAIN">
           <value>
-            <State>
-              <option name="FILTERS">
-                <map>
-                  <entry key="branch">
-                    <value>
-                      <list>
-                        <option value="deepagents-integration" />
-                      </list>
-                    </value>
-                  </entry>
-                </map>
-              </option>
-            </State>
+            <State />
           </value>
         </entry>
       </map>
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(core): 切换辅助Agent模型为tongyi并优化默认LLM加载&#10;&#10;- internal/service/assistant_agent_service.py中引入os模块，使用tongyi的Chat替代原gpt-4o-mini模型&#10;- 设置tongyi模型的api_key环境变量支持&#10;- internal/service/language_model_service.py修改load_default_language_model方法，使用自定义模型类实例化，替代原langchain封装的ChatOpenAI，支持模型特性识别&#10;- internal/core/language_model/entities/model_entity.py添加获取价格信息方法get_pricing&#10;- 新增convert_to_human_message方法支持多模态输入，处理文本与图片URL组合消息&#10;- internal/router/router.py调整接口路由，将/apps/&lt;app_id&gt;/completions改为/apps/&lt;app_id&gt;/conversations，修改路由绑定方式&#10;- internal/core/tools/builtin_tools/providers/searx新增Searx搜索工具及相关配置和图标文件&#10;- 优化权限验证比较方式，统一移除多处id对比时的不必要str转换&#10;- internal/extension/logging_extension.py针对Windows平台改用RotatingFileHandler避免文件锁定问题&#10;- internal/schema/openapi_schema.py扩展OpenAPIChatReq校验图片URL数量及格式的功能，支持多图上传&#10;- internal/service/openapi_service.py重构openapi聊天服务，调整agent实例化逻辑，支持多agent类型及去除异步线程保存改为同步&#10;- internal/service/conversation_service.py、internal/service/api_tool_service.py、internal/service/dataset_service.py等多处服务内权限验证逻辑精简&#10;- internal/service/document_service.py和segment_service.py统一权限判断逻辑，修正账户ID比较方式&#10;- internal/core/agent/agents/base_agent.py优化invoke函数格式及线程创建方式改善代码风格&#10;- internal/service/app_service.py中auto_create_app方法替换默认llm模型，使用tongyi的Chat及新增环境变量支持&#10;- internal/core/model/app.py新增App模型属性wechat_config，实现微信发布配置状态自动管理及同步&#10;- 调整agent停止相关调用方法名称，修正AgentQueueManager的stop标识相关调用&#10;- 移除部分冗余注释及改进注释说明，以增强代码可读性和维护性" />
     <MESSAGE value="feat(nltk_data): 添加多语言缩略词类型词典文件&#10;&#10;- 新增捷克语缩略词类型文件，包含118条缩略词&#10;- 新增丹麦语缩略词类型文件，包含211条缩略词&#10;- 新增荷兰语缩略词类型文件，包含99条缩略词&#10;- 新增英语缩略词类型文件，包含156条缩略词&#10;- 新增爱沙尼亚语缩略词类型文件，包含48条缩略词&#10;- 新增芬兰语缩略词类型文件，包含81条缩略词&#10;- 新增法语缩略词类型文件，包含61条缩略词&#10;- 新增德语缩略词类型文件，包含71条缩略词&#10;- 新增希腊语缩略词类型文件，包含100条缩略词&#10;- 新增意大利语缩略词类型文件，包含125条缩略词&#10;- 新增挪威语缩略词类型文件，包含106条缩略词&#10;- 新增波兰语缩略词类型文件，包含225条缩略词&#10;- 新增葡萄牙语缩略词类型文件，包含72条缩略词&#10;- 新增俄语缩略词类型文件，包含1989条缩略词" />
     <MESSAGE value="feat(app): 替换icon生成模型为通义千问&#10;&#10;- 修改icon描述提示词模板，适配通义千问AI绘画&#10;- 替换app_service.py中DallEAPIWrapper为qwen_image_generation接口&#10;- 更新生成icon链调用方法，使用qwen_image_wrapper._run&#10;- 新增dashscope依赖至requirements.txt&#10;- 在providers.yaml中新增dashscope提供者配置&#10;- 配置文件新增Celery和Redis连接重试及连接池参数&#10;- 调整.idea/workspace.xml，新增Python测试配置和部分环境设置" />
     <MESSAGE value="feat(dashscope): 新增通义千问图像生成工具&#10;&#10;- 添加QwenImageGenerationTool类，实现基于DashScope API的图像生成功能&#10;- 支持输入文本提示，调用qwen-image-max模型生成指定尺寸的图像&#10;- 提供参数模型QwenImageGenerationArgsSchema，定义输入参数格式&#10;- 实现API调用错误处理及响应结果解析，返回生成图像URL或错误信息&#10;- 添加工具注册配置文件positions.yaml及工具描述配置文件qwen_image_generation.yaml&#10;- 支持多种图片尺寸选择，默认1664x928，支持环境变量API密钥配置" />
@@ -839,7 +881,8 @@
     <MESSAGE value="fix(agent): 调整智能体历史消息处理与会话请求结构&#10;&#10;- 从 AgentState 中移除 messages 字段，改用独立的 history 字段存储短期记忆&#10;- 调整 debug_chat 和辅助 Agent 会话接口，统一传递请求对象参数&#10;- 新增 image_urls 校验，限制上传图片数量及格式&#10;- 优化 FunctionCallAgent 和 ReACTAgent 处理历史消息逻辑，确保历史消息成对校验&#10;- 调整智能体消息流处理，改用 state 中的 history 字段支持历史消息拼接&#10;- 移除消息列表中多余的删除和重排序逻辑，简化消息顺序处理&#10;- 修正流式输出中生成内容类型判断和消息事件发布逻辑&#10;- 统一 Agent 调用处消息结构，支持图片参数传递及历史消息维护" />
     <MESSAGE value="feat(mcp): 集成并支持 MCP 插件系统&#10;&#10;- 删除无用的 system_model_config 数据库表&#10;- 引入 MCPHandler 并添加至处理器集合&#10;- 扩充模型模块，加入 MCPServer 和 MCPTool 类&#10;- 支持 schema 模块中 DictField 导入&#10;- 实现 MCPService 服务，并加入服务集合&#10;- app_config_service 中集成 MCPRuntimeManager 的工具获取&#10;- 扩展 app_service，支持 MCP 工具参数校验与查询&#10;- 注册 MCPHandler 的路由接口，支持 MCP 服务及工具相关操作&#10;- workflow_service 支持 MCP 工具类型的流程节点元数据填充&#10;- workflow_nodes 中支持 MCP 工具节点的创建及调用逻辑&#10;- 添加依赖 langchain-mcp-adapters 和 mcp，更新requirements.txt&#10;- 更新运行配置，添加 mcp_demo_server 调试环境&#10;- 优化项目配置和排除文件，提升开发体验" />
     <MESSAGE value="test(agent-v2): remove deprecated test files" />
-    <option name="LAST_COMMIT_MESSAGE" value="test(agent-v2): remove deprecated test files" />
+    <MESSAGE value="fix(audio): refine permission validation for different invoke sources" />
+    <option name="LAST_COMMIT_MESSAGE" value="fix(audio): refine permission validation for different invoke sources" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -858,7 +901,7 @@
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$mcp_demo_server.coverage" NAME="mcp_demo_server 覆盖结果" MODIFIED="1773473881642" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$check_checkpoint_data.coverage" NAME="check_checkpoint_data 覆盖结果" MODIFIED="1772276469901" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1788083669263" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1788330060756" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>

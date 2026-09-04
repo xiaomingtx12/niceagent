@@ -2,7 +2,7 @@ from typing import Optional, Type
 
 from pydantic import BaseModel, Field
 
-from internal.exception import NotFoundException
+from internal.core.language_model.exceptions import UnsupportedModelError
 from internal.lib.helper import dynamic_import
 from .model_entity import (
     BaseLanguageModel,
@@ -58,9 +58,9 @@ class Provider(BaseModel):
     ) -> Optional[Type[BaseLanguageModel]]:
         """动态模型统一使用 OpenAI-compatible LangChain 适配器。"""
         if model_entity is None or not model_entity.is_dynamic:
-            raise NotFoundException("仅支持通过模型目录发现并激活的动态模型")
+            raise UnsupportedModelError("仅支持通过模型目录发现并激活的动态模型")
         if model_type not in {ModelType.CHAT, ModelType.COMPLETION}:
-            raise NotFoundException("该模型不是 Agent 可调用的对话模型")
+            raise UnsupportedModelError("该模型不是 Agent 可调用的对话模型")
         module_name = "chat" if model_type == ModelType.CHAT else "completion"
         return dynamic_import(
             f"internal.core.language_model.providers.openai.{module_name}",

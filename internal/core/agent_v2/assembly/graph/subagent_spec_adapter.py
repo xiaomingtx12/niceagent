@@ -9,7 +9,22 @@ from deepagents.middleware.filesystem import FilesystemPermission
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
-from internal.exception import SubAgentConfigError
+from internal.exception import FailException, SubAgentConfigError
+
+
+_DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
+    {
+        "task",
+        "write_todos",
+        "ls",
+        "read_file",
+        "write_file",
+        "edit_file",
+        "glob",
+        "grep",
+        "execute",
+    }
+)
 
 
 _STATELESS_CONTRACT = (
@@ -17,6 +32,38 @@ _STATELESS_CONTRACT = (
     "获准工具和可见文件。不要猜测未提供的上下文；信息不足时在最终回复中明确指出。"
     "只把完整最终结果返回给主 Agent，由主 Agent负责综合并回复用户。"
 )
+
+
+def validate_agent_tools(
+    tools: Sequence[BaseTool],
+    *,
+    context: str = "Agent",
+) -> list[BaseTool]:
+    """复制并校验一组工具，防止名称冲突或覆盖 DeepAgents 内置工具。"""
+    resolved = list(tools)
+    names = [tool.name for tool in resolved]
+    if len(names) != len(set(names)):
+        raise FailException(f"{context} 工具名称冲突，无法安全装配运行时工具")
+
+    reserved = sorted(set(names) & _DEEPAGENTS_RESERVED_TOOL_NAMES)
+    if reserved:
+        raise FailException(
+            f"{context} 工具名称与 DeepAgents 内置工具冲突: "
+            + ", ".join(reserved)
+        )
+    return resolved
+
+
+def _validate_subagent_tools(
+    tools: Sequence[BaseTool],
+    *,
+    name: str,
+) -> list[BaseTool]:
+    """把公共工具规则转换为 SubAgent 配置异常。"""
+    try:
+        return validate_agent_tools(tools, context=f"subagent {name!r}")
+    except FailException as exc:
+        raise SubAgentConfigError(str(exc)) from exc
 
 
 def build_subagent_specs(
@@ -44,17 +91,20 @@ def build_subagent_specs(
         # 2.解析每个 SubAgent 被授权的工具和 Skill 路径。
         requested_tools = config.get("tools", [])
         if name in tool_overrides:
-            resolved_tools = list(tool_overrides[name])
-            resolved_names = [tool.name for tool in resolved_tools]
-            if len(resolved_names) != len(set(resolved_names)):
-                raise SubAgentConfigError(f"subagent {name!r} 运行时工具名称重复")
+            resolved_tools = _validate_subagent_tools(
+                tool_overrides[name],
+                name=name,
+            )
         else:
             missing_tools = sorted(set(requested_tools) - set(base_tool_map))
             if missing_tools:
                 raise SubAgentConfigError(
                     f"subagent {name!r} 引用了未授权工具: {', '.join(missing_tools)}"
                 )
-            resolved_tools = [base_tool_map[item] for item in requested_tools]
+            resolved_tools = _validate_subagent_tools(
+                [base_tool_map[item] for item in requested_tools],
+                name=name,
+            )
         sources = list(scoped_skills.get(name, ()))
         if config.get("skills", []) and not sources:
             raise SubAgentConfigError(f"subagent {name!r} 的 Skills 尚未完成运行时授权")
@@ -170,4 +220,5 @@ def _build_subagent_permissions(
 __all__ = [
     "build_async_subagent_specs",
     "build_subagent_specs",
+    "validate_agent_tools",
 ]

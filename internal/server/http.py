@@ -112,17 +112,20 @@ class Http(Flask):
                     data=error.data if error.data is not None else {},
                 )
             )
-        # 2.如果不是我们的自定义异常，则有可能是程序、数据库抛出的异常，也可以提取信息，设置为FAIL状态码
+        # 2.未知异常仅在服务端保留详情，避免向客户端泄露内部信息。
         if self.debug or os.getenv("FLASK_ENV") == "development":
             raise error
-        else:
-            return json(
-                Response(
-                    code=HttpCode.FAIL,
-                    message=str(error),
-                    data={},
-                )
+        logging.error(
+            "Unhandled application exception",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        return json(
+            Response(
+                code=HttpCode.FAIL,
+                message="服务器内部错误，请稍后重试",
+                data={},
             )
+        )
 
     def _handle_not_found_error(self, error):
         """处理404 Not Found错误"""

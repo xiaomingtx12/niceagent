@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from flask import request
 from injector import inject
 
 from internal.schema.oauth_schema import AuthorizeReq, AuthorizeResp
@@ -32,6 +33,10 @@ class OAuthHandler:
             return validate_error_json(req.errors)
 
         # 2.调用服务登录账号
-        credential = self.oauth_service.oauth_login(provider_name, req.code.data)
+        credential = self.oauth_service.oauth_login(
+            provider_name,
+            req.code.data,
+            client_ip=request.remote_addr,
+        )
 
         return success_json(AuthorizeResp().dump(credential))

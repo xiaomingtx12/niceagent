@@ -1,17 +1,16 @@
 from dataclasses import dataclass
+from collections.abc import Mapping
 from threading import Thread
 from typing import Any
 from uuid import UUID
 
-from flask import request, current_app, Flask
+from flask import Flask
 from injector import inject
 from sqlalchemy import desc
-from wechatpy import parse_message
 from wechatpy.exceptions import InvalidSignatureException
 from wechatpy.replies import TextReply
 from wechatpy.utils import check_signature
 
-from internal.core.language_model.entities.model_entity import ModelFeature
 from internal.entity.app_entity import AppStatus
 from internal.schema.agent_runtime_schema import AgentInvocation
 from internal.entity.conversation_entity import MessageStatus, InvokeFrom
@@ -43,14 +42,22 @@ class WechatService(BaseService):
     language_model_service: LanguageModelService
     agent_workbench_service: AgentWorkbenchService
 
-    def wechat(self, app_id: UUID):
+    def wechat(
+        self,
+        app_id: UUID,
+        *,
+        method: str,
+        message: Any,
+        query: Mapping[str, str | None],
+        flask_app: Flask,
+    ):
         """微信公众号(订阅号/服务号)校验与消息推送, 运行逻辑参考`Agent对接微信公众号思路.drawio`"""
         # 1.根据传递的app_id获取应用信息，并校验应用是否已发布
         app = self.get(App, app_id)
-        msg = parse_message(request.data)
+        msg = message
         if not app or app.status != AppStatus.PUBLISHED:
             # 2.根据不同的请求方法返回不同的数据，GET请求抛出错误、POST请求返回提示信息
-            if request.method == "GET":
+            if method == "GET":
                 raise FailException("该应用未发布或不存在，无法使用，请核实后重试")
             else:
                 reply = TextReply(
@@ -61,7 +68,7 @@ class WechatService(BaseService):
         # 3.获取应用的Wechat发布配置信息，并根据GET/POST返回不同的数据
         wechat_config = app.wechat_config
         if wechat_config.status != WechatConfigStatus.CONFIGURED:
-            if request.method == "GET":
+            if method == "GET":
                 raise FailException("该应用未发布到微信公众号，无法使用，请核实后重试")
             else:
                 reply = TextReply(
@@ -71,12 +78,12 @@ class WechatService(BaseService):
                 return reply.render()
 
         # 4.校验通过，根据不同的方法执行不同的操作，GET方法校验权限，POST方法推送数据
-        if request.method == "GET":
+        if method == "GET":
             # 5.从query中提取推送的签名、时间戳、nonce、echostr等数据
-            signature = request.args.get("signature")
-            timestamp = request.args.get("timestamp")
-            nonce = request.args.get("nonce")
-            echostr = request.args.get("echostr")
+            signature = query.get("signature")
+            timestamp = query.get("timestamp")
+            nonce = query.get("nonce")
+            echostr = query.get("echostr")
 
             # 6.校验签名信息，如果成功则原样返回echostr，否则抛出异常
             try:
@@ -185,7 +192,7 @@ class WechatService(BaseService):
             thread = Thread(
                 target=self._thread_chat,
                 kwargs={
-                    "flask_app": current_app._get_current_object(),
+                    "flask_app": flask_app,
                     "app_id": app.id,
                     "app_config": app_config,
                     "conversation_id": conversation.id,

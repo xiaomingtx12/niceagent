@@ -1,10 +1,11 @@
 from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
-from wtforms import BooleanField, StringField
+from wtforms import BooleanField, StringField, ValidationError
 from wtforms.validators import Length, DataRequired, Optional, URL
 
 from internal.lib.helper import datetime_to_timestamp
 from internal.model.provider_api_key import ProviderApiKey
+from .schema import JsonBoolean, JsonString, ListField
 
 
 class CreateProviderApiKeyReq(FlaskForm):
@@ -13,6 +14,7 @@ class CreateProviderApiKeyReq(FlaskForm):
     provider_name = StringField(
         "provider_name",
         validators=[
+            JsonString("提供商名称必须是字符串"),
             DataRequired(message="提供商名称不能为空"),
             Length(max=255, message="提供商名称不能超过255个字符"),
         ],
@@ -20,6 +22,7 @@ class CreateProviderApiKeyReq(FlaskForm):
     api_key = StringField(
         "api_key",
         validators=[
+            JsonString("API密钥必须是字符串"),
             DataRequired(message="API密钥不能为空"),
             Length(max=500, message="API密钥不能超过500个字符"),
         ],
@@ -27,35 +30,97 @@ class CreateProviderApiKeyReq(FlaskForm):
     base_url = StringField(
         "base_url",
         validators=[
+            JsonString("模型服务地址必须是字符串"),
             Optional(),
             URL(message="模型服务地址必须是 http 或 https URL"),
             Length(max=1000, message="模型服务地址不能超过1000个字符"),
         ],
     )
-    is_active = BooleanField("is_active", default=True)
-    remark = StringField(
-        "remark", validators=[Length(max=255, message="备注不能超过255个字符")]
+    is_active = BooleanField(
+        "is_active",
+        default=True,
+        validators=[JsonBoolean("启用状态必须是布尔值")],
     )
+    remark = StringField(
+        "remark",
+        validators=[
+            JsonString("备注必须是字符串"),
+            Length(max=255, message="备注不能超过255个字符"),
+        ],
+    )
+    discovered_models = ListField("discovered_models")
+    enabled_models = ListField("enabled_models")
+
+    def validate_discovered_models(self, field: ListField) -> None:
+        """发现模型必须是对象数组，未提供时使用空数组。"""
+        if field.data is None:
+            field.data = []
+        if not isinstance(field.data, list) or not all(
+            isinstance(model, dict) for model in field.data
+        ):
+            raise ValidationError("发现模型必须是对象数组")
+
+    def validate_enabled_models(self, field: ListField) -> None:
+        """激活模型可省略，提供时必须是字符串数组。"""
+        if field.data is not None and (
+            not isinstance(field.data, list)
+            or not all(isinstance(model_name, str) for model_name in field.data)
+        ):
+            raise ValidationError("激活模型必须是字符串数组")
 
 
 class UpdateProviderApiKeyReq(FlaskForm):
     """更新提供商API密钥请求"""
 
     api_key = StringField(
-        "api_key", validators=[Length(max=500, message="API密钥不能超过500个字符")]
+        "api_key",
+        validators=[
+            JsonString("API密钥必须是字符串"),
+            Length(max=500, message="API密钥不能超过500个字符"),
+        ],
     )
     base_url = StringField(
         "base_url",
         validators=[
+            JsonString("模型服务地址必须是字符串"),
             Optional(),
             URL(message="模型服务地址必须是 http 或 https URL"),
             Length(max=1000, message="模型服务地址不能超过1000个字符"),
         ],
     )
-    is_active = BooleanField("is_active")
-    remark = StringField(
-        "remark", validators=[Length(max=255, message="备注不能超过255个字符")]
+    is_active = BooleanField(
+        "is_active",
+        validators=[JsonBoolean("启用状态必须是布尔值", allow_none=True)],
     )
+    remark = StringField(
+        "remark",
+        validators=[
+            JsonString("备注必须是字符串"),
+            Length(max=255, message="备注不能超过255个字符"),
+        ],
+    )
+
+
+class UpdateProviderApiKeyModelsReq(FlaskForm):
+    """更新供应商动态模型激活状态请求。"""
+
+    enabled_models = ListField("enabled_models")
+    discovered_models = ListField("discovered_models")
+
+    def validate_enabled_models(self, field: ListField) -> None:
+        """激活模型必须显式提供字符串数组，空数组表示全部停用。"""
+        if not isinstance(field.data, list) or not all(
+            isinstance(model_name, str) for model_name in field.data
+        ):
+            raise ValidationError("已激活模型必须是字符串数组")
+
+    def validate_discovered_models(self, field: ListField) -> None:
+        """发现模型可省略，提供时必须是对象数组。"""
+        if field.data is not None and (
+            not isinstance(field.data, list)
+            or not all(isinstance(model, dict) for model in field.data)
+        ):
+            raise ValidationError("发现模型必须是对象数组")
 
 
 class GetProviderApiKeysResp(Schema):

@@ -3,6 +3,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from injector import inject
+from pydantic import ValidationError
 from sqlalchemy import desc
 
 from internal.exception import ForbiddenException, NotFoundException
@@ -168,7 +169,7 @@ class ProviderApiKeyService(BaseService):
                     {**model_payload, "is_dynamic": True},
                     by_alias=True,
                 )
-            except Exception:
+            except (ValidationError, TypeError, ValueError):
                 continue
             normalized.append(model.model_dump(mode="json", by_alias=True))
             seen.add(model_name)

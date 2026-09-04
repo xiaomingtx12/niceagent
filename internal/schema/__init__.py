@@ -1,4 +1,4 @@
-from .schema import DictField, ListField
+from .schema import DictField, JsonBoolean, JsonString, ListField
 from .agent_attachment_schema import AgentAttachmentResolveReq, AgentAttachmentResp
 from .agent_runtime_schema import (
     AgentAppCleanupReq,
@@ -60,6 +60,8 @@ from .internal_agent_protocol_schema import (
 __all__ = [
     "ListField",
     "DictField",
+    "JsonBoolean",
+    "JsonString",
     "AgentAttachmentResolveReq",
     "AgentAttachmentResp",
     "AgentAppCleanupReq",

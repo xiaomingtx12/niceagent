@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from flask import request
 from injector import inject
 
 from internal.exception import FailException
@@ -79,7 +78,13 @@ class AccountService(BaseService):
         self.update(account, **kwargs)
         return account
 
-    def password_login(self, email: str, password: str) -> dict[str, Any]:
+    def password_login(
+        self,
+        email: str,
+        password: str,
+        *,
+        client_ip: str | None = None,
+    ) -> dict[str, Any]:
         """根据传递的密码+邮箱登录特定的账号"""
         # 1.根据传递的邮箱查询账号是否存在
         account = self.get_account_by_email(email)
@@ -107,7 +112,7 @@ class AccountService(BaseService):
         self.update(
             account,
             last_login_at=datetime.now(),
-            last_login_ip=request.remote_addr,
+            last_login_ip=client_ip,
         )
 
         return {

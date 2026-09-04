@@ -30,9 +30,6 @@ from internal.core.agent_v2.middleware.trace_middleware import TraceMiddleware
 from internal.core.agent_v2.middleware.reloading_memory_middleware import (
     ReloadingMemoryMiddleware,
 )
-from internal.core.agent_v2.assembly.graph.deep_agent_harness_profile import (
-    register_platform_harness_profile,
-)
 from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
     build_async_subagent_specs,
     build_subagent_specs,
@@ -94,16 +91,7 @@ def build_deep_agent(
             )
         )
 
-    # 2.为主模型和 SubAgent 模型注册平台 Harness Profile。
-    # execute 由原生 FilesystemMiddleware 按本次 Backend 动态过滤。
-    # DeepAgents 会分别解析主 Agent 和每个预构建子 Agent 的 Harness
-    # Profile；遗漏子模型会让它回退到默认 Profile 并输出误导性警告。
-    register_platform_harness_profile(llm)
-    for subagent_model in (subagent_models_by_name or {}).values():
-        if isinstance(subagent_model, BaseChatModel):
-            register_platform_harness_profile(subagent_model)
-
-    # 3.将已授权的同步、异步 SubAgent 配置转换为原生规格。
+    # 2.将已授权的同步、异步 SubAgent 配置转换为原生规格。
     # 持久化记录仅作业务适配，其余运行时能力由 DeepAgents 负责。
     subagent_specs = [
         *build_subagent_specs(
@@ -118,7 +106,7 @@ def build_deep_agent(
         *build_async_subagent_specs(subagents),
     ]
 
-    # 4.把模型、工具、权限、持久化和上下文边界编译成运行图。
+    # 3.把模型、工具、权限、持久化和上下文边界编译成运行图。
     return create_deep_agent(
         model=llm,
         tools=list(tools),

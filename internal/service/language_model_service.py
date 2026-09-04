@@ -11,6 +11,7 @@ from flask import current_app
 from injector import inject
 
 from internal.core.language_model import LanguageModelManager
+from internal.core.language_model.exceptions import UnsupportedModelError
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
     ModelEntity,
@@ -243,10 +244,13 @@ class LanguageModelService(BaseService):
             api_key = get_api_key_for_provider(provider_name, account_id)
         parameters[self._get_api_key_param_name(provider_name)] = api_key
 
-        model_class = provider.get_model_class(
-            model_entity.model_type,
-            model_entity=model_entity,
-        )
+        try:
+            model_class = provider.get_model_class(
+                model_entity.model_type,
+                model_entity=model_entity,
+            )
+        except UnsupportedModelError as exc:
+            raise ValidateErrorException(str(exc)) from exc
         model_attributes = {
             key: value
             for key, value in model_entity.attributes.items()

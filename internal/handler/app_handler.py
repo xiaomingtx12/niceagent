@@ -117,7 +117,11 @@ class AppHandler(object):
     @login_required
     def get_draft_app_config(self, app_id: UUID):
         """根据传递的应用id获取应用的最新草稿配置"""
-        draft_config = self.app_service.get_draft_app_config(app_id, current_user)
+        draft_config = self.app_service.get_draft_app_config(
+            app_id,
+            current_user,
+            request_base_url=request.url_root.rstrip("/"),
+        )
         return success_json(draft_config)
 
     @rate_limit(config_key="user")

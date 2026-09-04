@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
 from deepagents.backends.protocol import BackendProtocol
+from deepagents.middleware.filesystem import FilesystemPermission
 from flask import current_app
 from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.store.base import BaseStore
 from sqlalchemy.orm import Session, sessionmaker
 
 from config.config import Config
@@ -35,6 +38,7 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
 )
 from internal.core.agent_v2.backends.composition.composite_backend_factory import (
     build_composite_backend,
+    close_runtime_backends,
 )
 from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
     build_stable_sandbox_name,
@@ -46,11 +50,6 @@ from internal.core.agent_v2.entity.subagent_config import (
     build_published_graph_id,
 )
 from internal.core.agent_v2.execution.agent_executor import AgentExecutor
-from internal.core.agent_v2.execution.run_resource_manager import close_runtime_backends
-from internal.core.agent_v2.execution.run_resources import AgentRuntimeResources
-from internal.core.agent_v2.execution.tool_validator import (
-    DEEPAGENTS_RESERVED_TOOL_NAMES,
-)
 from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
     get_configured_checkpointer,
 )
@@ -63,9 +62,15 @@ from internal.core.agent_v2.protocol.internal_auth import (
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
-from internal.exception import AgentInvocationException, ValidateErrorException
+from internal.exception import (
+    AgentInvocationException,
+    ValidateErrorException,
+)
 from internal.model import App
-from internal.schema.agent_runtime_schema import AgentInvocation, AgentRuntimePrepareReq
+from internal.schema.agent_runtime_schema import (
+    AgentInvocation,
+    AgentRuntimePrepareReq,
+)
 from internal.schema.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_attachment_service import AgentAttachmentService
@@ -77,6 +82,21 @@ from .skill_service import BuiltinSkill, SkillService
 from .workspace_file_storage_service import WorkspaceFileStorageService
 
 _logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _AgentRuntimeResources:
+    """AgentAssemblyService 交给 AgentExecutor 的一次运行时资源快照。"""
+
+    checkpointer: BaseCheckpointSaver | bool
+    backend: BackendProtocol
+    permissions: list[FilesystemPermission]
+    skill_sources: list[str]
+    memory_sources: list[str]
+    subagent_skill_sources: Mapping[str, list[str]]
+    telemetry: AgentTelemetry
+    runtime_context: AgentRunContext
+    store: BaseStore | None = None
 
 
 @inject
@@ -250,7 +270,7 @@ class AgentAssemblyService(BaseService):
     def _prepare_runtime(
         self,
         req: AgentRuntimePrepareReq,
-    ) -> AgentRuntimeResources:
+    ) -> _AgentRuntimeResources:
         """准备本次 Run 独占的 Workspace、Skill、Memory 和 Sandbox 资源。"""
         skills = self.skill_service.list_enabled_latest(
             account_id=req.account_id,
@@ -280,7 +300,7 @@ class AgentAssemblyService(BaseService):
         req: AgentRuntimePrepareReq,
         skills: list[BuiltinSkill],
         settings: Config,
-    ) -> AgentRuntimeResources:
+    ) -> _AgentRuntimeResources:
         """在装配服务内创建 Agent Core 所需的运行时资源集合。"""
         run_context = AgentRunContext(
             account_id=req.account_id,
@@ -350,15 +370,11 @@ class AgentAssemblyService(BaseService):
                     else None
                 ),
             ):
-                if backend_to_close is None:
-                    continue
-                try:
-                    backend_to_close.close()
-                except Exception:
-                    _logger.exception("关闭装配中的 Agent Backend 失败")
+                if backend_to_close is not None:
+                    self._close_unowned_runtime(backend_to_close)
             raise
 
-        return AgentRuntimeResources(
+        return _AgentRuntimeResources(
             checkpointer=checkpointer,
             backend=backend,
             permissions=build_filesystem_permissions(
@@ -514,16 +530,10 @@ class AgentAssemblyService(BaseService):
                 app_id=target_id,
             )
 
-            # 5.拒绝工具冲突，并把发布应用转换为同步 SubAgent 配置。
+            # 5.把发布应用转换为同步 SubAgent 配置。
+            # 工具名称冲突和 DeepAgents 保留名称由 Core 的
+            # ``build_subagent_specs`` 统一校验；Service 只负责加载工具。
             tool_names = [tool.name for tool in target_tools]
-            if len(tool_names) != len(set(tool_names)):
-                raise AgentInvocationException(
-                    f"发布 Agent {target_app.name!r} 的工具名称存在冲突"
-                )
-            if not DEEPAGENTS_RESERVED_TOOL_NAMES.isdisjoint(tool_names):
-                raise AgentInvocationException(
-                    f"发布 Agent {target_app.name!r} 的工具名称与 DeepAgents 内置工具冲突"
-                )
 
             if target_config.model_config_data is None:
                 raise AgentInvocationException(

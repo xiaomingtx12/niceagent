@@ -6,9 +6,14 @@ from uuid import UUID
 from flask import request
 from flask_login import current_user, login_required
 from injector import inject
+from werkzeug.datastructures import MultiDict
 
+from internal.schema.creator_task_schema import (
+    GetCreatorTaskConversationsReq,
+    UpdateCreatorTaskConversationNameReq,
+    UpdateCreatorTaskConversationPinnedReq,
+)
 from internal.service import CreatorTaskService
-from pkg.paginator import CursorPaginatorReq
 from pkg.response import success_json, success_message, validate_error_json
 
 
@@ -27,23 +32,17 @@ class CreatorTaskHandler:
 
     @login_required
     def get_conversations(self):
-        query = CursorPaginatorReq(request.args)
-        if not query.validate():
-            return validate_error_json(query.errors)
-        app_id = request.args.get("app_id")
-        parsed_app_id = None
-        if app_id:
-            try:
-                parsed_app_id = UUID(app_id)
-            except ValueError:
-                return validate_error_json({"app_id": ["app_id必须是合法的UUID"]})
+        """获取经过筛选和游标分页的任务会话。"""
+        req = GetCreatorTaskConversationsReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
         return success_json(
             self.service.get_conversations(
                 current_user,
-                app_id=parsed_app_id,
-                before=query.before_uuid,
-                page_size=query.page_size.data,
-                search=request.args.get("search", ""),
+                app_id=UUID(req.app_id.data) if req.app_id.data else None,
+                before=req.before_uuid,
+                page_size=req.page_size.data,
+                search=req.search.data or "",
             )
         )
 
@@ -53,25 +52,34 @@ class CreatorTaskHandler:
 
     @login_required
     def update_conversation_name(self, conversation_id: UUID):
-        body = request.get_json(silent=True)
-        name = str(body.get("name", "")).strip() if isinstance(body, dict) else ""
-        if not name:
-            return validate_error_json({"name": ["会话名称不能为空"]})
-        if len(name) > 255:
-            return validate_error_json({"name": ["会话名称不能超过255个字符"]})
+        """更新任务会话名称。"""
+        payload = request.get_json(silent=True)
+        req = UpdateCreatorTaskConversationNameReq(
+            formdata=MultiDict(payload if isinstance(payload, dict) else {})
+        )
+        if not req.validate():
+            return validate_error_json(req.errors)
         return success_json(
-            self.service.update_conversation(conversation_id, current_user, name=name)
+            self.service.update_conversation(
+                conversation_id,
+                current_user,
+                name=req.name.data.strip(),
+            )
         )
 
     @login_required
     def update_conversation_is_pinned(self, conversation_id: UUID):
-        body = request.get_json(silent=True)
-        is_pinned = body.get("is_pinned") if isinstance(body, dict) else None
-        if not isinstance(is_pinned, bool):
-            return validate_error_json({"is_pinned": ["is_pinned必须是布尔值"]})
+        """更新任务会话置顶状态。"""
+        payload = request.get_json(silent=True)
+        formdata = MultiDict(payload if isinstance(payload, dict) else {})
+        req = UpdateCreatorTaskConversationPinnedReq(formdata=formdata)
+        if not req.validate():
+            return validate_error_json(req.errors)
         return success_json(
             self.service.update_conversation(
-                conversation_id, current_user, is_pinned=is_pinned
+                conversation_id,
+                current_user,
+                is_pinned=req.is_pinned.data,
             )
         )
 

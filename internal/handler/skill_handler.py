@@ -7,8 +7,9 @@ from flask import request
 from flask_login import current_user, login_required
 from injector import inject
 
+from internal.schema.skill_schema import GetSkillsReq
 from internal.service import AppService, SkillService
-from pkg.response import success_json
+from pkg.response import success_json, validate_error_json
 
 
 @inject
@@ -37,12 +38,16 @@ class SkillHandler:
 
     @login_required
     def list_skills(self, app_id: UUID):
+        req = GetSkillsReq(request.args)
+        if not req.validate():
+            return validate_error_json(req.errors)
+
         app = self.app_service.get_app(app_id, current_user)
         rows = self.skill_service.list_skills(
             account_id=app.account_id,
             app_id=app.id,
             bindings=app.draft_app_config.skills,
-            include_versions=request.args.get("include_versions") == "true",
+            include_versions=req.include_versions.data,
         )
         return success_json({"items": rows})
 

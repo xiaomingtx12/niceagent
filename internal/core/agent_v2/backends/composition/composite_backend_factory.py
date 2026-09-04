@@ -43,3 +43,28 @@ def build_composite_backend(
         routes=dict(routes),
         artifacts_root="/workspace",
     )
+
+
+def close_runtime_backends(backend: BackendProtocol | None) -> None:
+    """关闭 CompositeBackend 及其路由 Backend，并避免共享实例重复关闭。"""
+    if backend is None:
+        return
+    candidates = [backend, getattr(backend, "default", None)]
+    routes = getattr(backend, "routes", {}) or {}
+    candidates.extend(routes.values())
+    seen: set[int] = set()
+    errors: list[Exception] = []
+    for candidate in candidates:
+        if candidate is None or id(candidate) in seen:
+            continue
+        seen.add(id(candidate))
+        close = getattr(candidate, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+    if errors:
+        raise RuntimeError(
+            f"failed to close {len(errors)} runtime backend(s)"
+        ) from errors[0]

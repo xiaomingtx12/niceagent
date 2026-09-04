@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from typing import Any, cast, Union
 from uuid import UUID
 
-from flask import request
 from injector import inject
 from langchain_core.tools import BaseTool
 from pydantic import ValidationError
@@ -430,7 +429,12 @@ class AppConfigService(BaseService):
         visible = {str(record.id) for record in records}
         return [dataset_id for dataset_id in normalized if dataset_id in visible]
 
-    def get_draft_app_config(self, app: App) -> dict[str, Any]:
+    def get_draft_app_config(
+        self,
+        app: App,
+        *,
+        request_base_url: str = "",
+    ) -> dict[str, Any]:
         """获取应用草稿配置，并清理已失效的关联数据。"""
         # 1.读取应用草稿配置。
         draft_app_config = app.draft_app_config
@@ -456,6 +460,7 @@ class AppConfigService(BaseService):
         tools, validate_tools = self._process_and_validate_tools(
             draft_app_config.tools,
             account_id=app.account_id,
+            request_base_url=request_base_url,
         )
 
         # 4.有变化时更新草稿配置中的工具列表。
@@ -770,6 +775,7 @@ class AppConfigService(BaseService):
         origin_tools: list[dict],
         *,
         account_id: UUID,
+        request_base_url: str = "",
     ) -> tuple[list[dict], list[dict]]:
         """处理并校验原始工具配置，返回展示数据和有效配置。"""
         # 1.遍历工具列表并移除已删除的工具。
@@ -811,7 +817,7 @@ class AppConfigService(BaseService):
                             "id": provider_entity.name,
                             "name": provider_entity.name,
                             "label": provider_entity.label,
-                            "icon": f"{request.scheme}://{request.host}/builtin-tools/{provider_entity.name}/icon",
+                            "icon": f"{request_base_url}/builtin-tools/{provider_entity.name}/icon",
                             "description": provider_entity.description,
                         },
                         "tool": {

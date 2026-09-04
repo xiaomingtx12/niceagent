@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from flask import request
 from flask_login import logout_user, login_required
 from injector import inject
 
@@ -24,7 +25,9 @@ class AuthHandler:
 
         # 2.调用服务登录账号
         credential = self.account_service.password_login(
-            req.email.data, req.password.data
+            req.email.data,
+            req.password.data,
+            client_ip=request.remote_addr,
         )
 
         # 3.创建响应结构并返回

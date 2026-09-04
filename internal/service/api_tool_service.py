@@ -4,6 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
+from pydantic import ValidationError
 from sqlalchemy import desc
 
 from internal.core.tools.api_tools.entities import OpenAPISchema
@@ -226,11 +227,18 @@ class ApiToolService(BaseService):
         try:
             data = json.loads(openapi_schema_str.strip())
             if not isinstance(data, dict):
-                raise
-        except Exception as e:
-            raise ValidateErrorException("传递数据必须符合OpenAPI规范的JSON字符串")
-
-        return OpenAPISchema(**data)
+                raise ValueError("OpenAPI 根节点必须是对象")
+            return OpenAPISchema(**data)
+        except (
+            AttributeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValidationError,
+            ValueError,
+        ) as exc:
+            raise ValidateErrorException(
+                "传递数据必须符合OpenAPI规范的JSON字符串"
+            ) from exc
 
     def debug_api_tool(
         self,

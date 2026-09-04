@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from flask import request
 from injector import inject
 
 from internal.exception import NotFoundException
@@ -56,7 +55,13 @@ class OAuthService(BaseService):
 
         return oauth
 
-    def oauth_login(self, provider_name: str, code: str) -> dict[str, Any]:
+    def oauth_login(
+        self,
+        provider_name: str,
+        code: str,
+        *,
+        client_ip: str | None = None,
+    ) -> dict[str, Any]:
         """第三方OAuth授权认证登录，返回授权凭证以及过期时间"""
         # 1.根据传递的provider_name获取oauth
         oauth = self.get_oauth_by_provider_name(provider_name)
@@ -99,7 +104,7 @@ class OAuthService(BaseService):
         self.update(
             account,
             last_login_at=datetime.now(),
-            last_login_ip=request.remote_addr,
+            last_login_ip=client_ip,
         )
         self.update(
             account_oauth,

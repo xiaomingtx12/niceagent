@@ -51,7 +51,6 @@ class ApiKeyHandler:
         """根据传递的信息更新API秘钥"""
         # 1.提取请求并校验
         req = UpdateApiKeyReq()
-        print(req.data)
         if not req.validate():
             return validate_error_json(req.errors)
 

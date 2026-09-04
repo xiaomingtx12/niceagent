@@ -331,10 +331,19 @@ class AppService(BaseService):
             )
         return candidates
 
-    def get_draft_app_config(self, app_id: UUID, account: Account) -> dict[str, Any]:
+    def get_draft_app_config(
+        self,
+        app_id: UUID,
+        account: Account,
+        *,
+        request_base_url: str = "",
+    ) -> dict[str, Any]:
         """根据传递的应用id，获取指定的应用草稿配置信息"""
         app = self.get_app(app_id, account)
-        return self.app_config_service.get_draft_app_config(app)
+        return self.app_config_service.get_draft_app_config(
+            app,
+            request_base_url=request_base_url,
+        )
 
     def update_draft_app_config(
         self,

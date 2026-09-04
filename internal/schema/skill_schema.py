@@ -1,9 +1,10 @@
-"""Skill 清单和应用绑定的结构化校验。"""
+"""Skill 清单、应用绑定和查询参数的结构化校验。"""
 
 from __future__ import annotations
 
 from typing import Any, Literal
 
+from flask_wtf import FlaskForm
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -13,6 +14,7 @@ from pydantic import (
     StrictStr,
     model_validator,
 )
+from wtforms import StringField, ValidationError
 
 
 class SkillBindingReq(BaseModel):
@@ -83,8 +85,22 @@ def normalize_manifest_string_list(value: Any) -> tuple[str, ...]:
     return tuple(value)
 
 
+class GetSkillsReq(FlaskForm):
+    """Skill 列表查询请求。"""
+
+    include_versions = StringField("include_versions")
+
+    def validate_include_versions(self, field: StringField) -> None:
+        """将显式的 true/false 查询值规范化为布尔值。"""
+        value = (field.data or "false").lower()
+        if value not in {"true", "false"}:
+            raise ValidationError("include_versions必须是true或false")
+        field.data = value == "true"
+
+
 __all__ = [
     "BuiltinSkillManifestReq",
+    "GetSkillsReq",
     "SkillBindingListReq",
     "SkillBindingReq",
     "normalize_manifest_string_list",
