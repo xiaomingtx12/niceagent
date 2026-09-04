@@ -28,28 +28,25 @@ from sqlalchemy.orm import Session
 from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
+    build_path_digest,
 )
 from internal.core.agent_v2.entity.workspace_path import (
     AgentWorkspacePathPolicy,
     WorkspacePathError,
-    build_workspace_path_digest,
 )
 from internal.core.agent_v2.entity.workspace_quota import (
-    DEFAULT_AGENT_WORKSPACE_LIMITS,
     AgentWorkspaceLimits,
     WorkspaceQuotaExceeded,
 )
-from internal.core.agent_v2.persistence.workspace_file_repository import (
+from internal.model import WorkspaceFile
+from internal.repository.workspace_file_repository import (
     WorkspaceFileRepository,
     WorkspaceFileRevisionConflict,
     WorkspaceStorageError,
 )
-from internal.model import WorkspaceFile
 
 if TYPE_CHECKING:
-    from internal.service.workspace_file_storage_service import (
-        WorkspaceFileStorageService,
-    )
+    from internal.repository import WorkspaceFileStore
 
 
 _WRITE_ERRORS = (
@@ -71,23 +68,23 @@ class AgentWorkspaceBackend(BackendProtocol):
         session: Session,
         account_id: UUID,
         app_id: UUID,
-        conversation_id: UUID,
-        storage_service: WorkspaceFileStorageService,
+        workspace_scope_id: UUID,
+        file_store: WorkspaceFileStore,
+        limits: AgentWorkspaceLimits,
         created_by: UUID | None = None,
-        limits: AgentWorkspaceLimits = DEFAULT_AGENT_WORKSPACE_LIMITS,
         telemetry: AgentTelemetry | None = None,
     ) -> None:
         """绑定存储适配器、数据库仓储和当前 Workspace 作用域。"""
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
-        self._storage_service = storage_service
+        self._file_store = file_store
         self._paths = AgentWorkspacePathPolicy(
-            conversation_id=conversation_id,
+            scope_id=workspace_scope_id,
         )
         self._repository = WorkspaceFileRepository(
             session=session,
             account_id=account_id,
             app_id=app_id,
-            conversation_id=conversation_id,
+            scope_id=workspace_scope_id,
             created_by=created_by,
             limits=limits,
         )
@@ -96,19 +93,29 @@ class AgentWorkspaceBackend(BackendProtocol):
         """释放 Backend 独立数据库会话。"""
         self._repository.close()
 
-    def _resolve(self, path: str) -> str:
-        """把 CompositeBackend 传入的路由相对路径解析为存储路径。"""
+    def _resolve_file(self, path: str) -> str:
+        """把路由相对文件路径解析为当前作用域内的存储路径。"""
+        return self._resolve(path, is_prefix=False)
+
+    def _resolve_prefix(self, path: str) -> str:
+        """把路由相对目录路径解析为当前作用域内的查询前缀。"""
+        return self._resolve(path, is_prefix=True)
+
+    def _resolve(self, path: str, *, is_prefix: bool) -> str:
+        """规范 CompositeBackend 路径并记录被拒绝的输入。"""
         normalized = "/" + (path or "/").lstrip("/")
         if normalized != "/workspace" and not normalized.startswith("/workspace/"):
             normalized = f"/workspace{normalized}"
         try:
-            return self._paths.resolve(normalized)
+            if is_prefix:
+                return self._paths.resolve_prefix(normalized)
+            return self._paths.resolve_file(normalized)
         except WorkspacePathError as exc:
             self._telemetry.emit(
                 "workspace.path_rejected",
                 attributes={
                     "reason": "invalid",
-                    "path_digest": build_workspace_path_digest(str(path)),
+                    "path_digest": build_path_digest(str(path)),
                 },
             )
             raise
@@ -118,17 +125,13 @@ class AgentWorkspaceBackend(BackendProtocol):
         full_path = self._paths.virtual_path(storage_path)
         return full_path.removeprefix("/workspace") or "/"
 
-    def _visible_prefixes(self) -> tuple[str, ...]:
-        """返回当前 Backend 可见前缀。"""
-        return self._paths.visible_prefixes()
-
     def _list_paths(self, prefix: str | None) -> list[WorkspaceFile]:
         """列出路径下的最新记录。"""
-        prefixes = (prefix,) if prefix is not None else self._visible_prefixes()
+        prefixes = (prefix,) if prefix is not None else None
         rows = [
             row
             for row in self._repository.list(prefixes)
-            if self._paths.is_visible_storage_path(row.path)
+            if self._paths.contains(row.path)
         ]
         return sorted(rows, key=lambda row: row.path)
 
@@ -144,8 +147,8 @@ class AgentWorkspaceBackend(BackendProtocol):
         errors: list[str] = []
         for path in paths:
             try:
-                rest = self._resolve(path)
-                self._storage_service.delete(self._repository, rest)
+                rest = self._resolve_file(path)
+                self._file_store.delete(self._repository, rest)
             except (WorkspaceStorageError, WorkspacePathError) as exc:
                 errors.append(f"{path}: {exc}")
         return errors
@@ -155,14 +158,14 @@ class AgentWorkspaceBackend(BackendProtocol):
         if offset < 0 or limit < 0:
             return ReadResult(error="offset and limit must be non-negative")
         try:
-            rest = self._resolve(file_path)
+            rest = self._resolve_file(file_path)
         except WorkspacePathError as exc:
             return ReadResult(error=str(exc))
         row = self._repository.fetch(rest)
         if row is None:
             return ReadResult(error=f"file not found: {file_path}")
         try:
-            content_bytes = self._storage_service.read_bytes(row)
+            content_bytes = self._file_store.read_bytes(row)
         except WorkspaceStorageError as exc:
             return ReadResult(error=f"failed to read file '{file_path}': {exc}")
         if self._is_binary(row):
@@ -207,7 +210,7 @@ class AgentWorkspaceBackend(BackendProtocol):
     def write(self, file_path: str, content: str) -> WriteResult:
         """为已校验路径写入文本快照。"""
         try:
-            rest = self._resolve(file_path)
+            rest = self._resolve_file(file_path)
         except WorkspacePathError as exc:
             return WriteResult(error=str(exc))
         error = self._write_text(rest, content)
@@ -224,7 +227,7 @@ class AgentWorkspaceBackend(BackendProtocol):
     ) -> EditResult:
         """替换文件中的一个或全部精确文本。"""
         try:
-            rest = self._resolve(file_path)
+            rest = self._resolve_file(file_path)
         except WorkspacePathError as exc:
             return EditResult(error=str(exc))
         row = self._repository.fetch(rest)
@@ -233,7 +236,7 @@ class AgentWorkspaceBackend(BackendProtocol):
         if self._is_binary(row):
             return EditResult(error=f"cannot edit binary file: {file_path}")
         try:
-            existing = self._storage_service.read_bytes(row).decode("utf-8")
+            existing = self._file_store.read_bytes(row).decode("utf-8")
         except WorkspaceStorageError as exc:
             return EditResult(error=f"failed to read file '{file_path}': {exc}")
         except UnicodeDecodeError:
@@ -263,7 +266,7 @@ class AgentWorkspaceBackend(BackendProtocol):
     def ls(self, path: str = "/") -> LsResult:
         """列出可见 Workspace 路径下的文件。"""
         try:
-            rest = self._resolve(path) if path and path != "/" else None
+            rest = self._resolve_prefix(path) if path and path != "/" else None
         except WorkspacePathError as exc:
             return LsResult(error=str(exc))
         entries: list[FileInfo] = [
@@ -274,7 +277,7 @@ class AgentWorkspaceBackend(BackendProtocol):
     def glob(self, pattern: str, path: str | None = "/") -> GlobResult:
         """按相对路径或文件名匹配文件。"""
         try:
-            rest = self._resolve(path) if path and path != "/" else None
+            rest = self._resolve_prefix(path) if path and path != "/" else None
         except WorkspacePathError as exc:
             return GlobResult(error=str(exc))
         matches: list[FileInfo] = []
@@ -298,7 +301,7 @@ class AgentWorkspaceBackend(BackendProtocol):
     ) -> GrepResult:
         """在可见 UTF-8 文件中查找文本。"""
         try:
-            rest = self._resolve(path) if path and path != "/" else None
+            rest = self._resolve_prefix(path) if path and path != "/" else None
         except WorkspacePathError as exc:
             return GrepResult(error=str(exc))
         matches: list[GrepMatch] = []
@@ -308,7 +311,7 @@ class AgentWorkspaceBackend(BackendProtocol):
             if glob and not fnmatch.fnmatch(row.path.split("/")[-1], glob):
                 continue
             try:
-                content = self._storage_service.read_bytes(row)
+                content = self._file_store.read_bytes(row)
             except WorkspaceStorageError as exc:
                 return GrepResult(
                     error=(
@@ -341,13 +344,13 @@ class AgentWorkspaceBackend(BackendProtocol):
         responses: list[FileUploadResponse] = []
         for path, content in files:
             try:
-                rest = self._resolve(path)
+                rest = self._resolve_file(path)
             except WorkspacePathError as exc:
                 responses.append(FileUploadResponse(path=path, error=str(exc)))
                 continue
             mime_type = mimetypes.guess_type(path)[0] or "application/octet-stream"
             try:
-                self._storage_service.write_bytes(
+                self._file_store.write_bytes(
                     self._repository,
                     rest,
                     content,
@@ -370,7 +373,7 @@ class AgentWorkspaceBackend(BackendProtocol):
         responses: list[FileDownloadResponse] = []
         for path in paths:
             try:
-                rest = self._resolve(path)
+                rest = self._resolve_file(path)
             except WorkspacePathError as exc:
                 responses.append(FileDownloadResponse(path=path, error=str(exc)))
                 continue
@@ -379,7 +382,7 @@ class AgentWorkspaceBackend(BackendProtocol):
                 responses.append(FileDownloadResponse(path=path, error="not found"))
                 continue
             try:
-                content = self._storage_service.read_bytes(row)
+                content = self._file_store.read_bytes(row)
             except WorkspaceStorageError as exc:
                 responses.append(
                     FileDownloadResponse(
@@ -399,7 +402,7 @@ class AgentWorkspaceBackend(BackendProtocol):
     def _write_text(self, storage_path: str, content: str) -> str | None:
         """写入文本并把可预期失败转换为稳定错误；其他异常继续抛出。"""
         try:
-            self._storage_service.write_text(
+            self._file_store.write_text(
                 self._repository,
                 storage_path,
                 content,

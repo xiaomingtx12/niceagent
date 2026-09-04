@@ -3,116 +3,112 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 from uuid import UUID
 
 
+WORKSPACE_VIRTUAL_ROOT = "/workspace"
+MAX_WORKSPACE_VIRTUAL_PATH_LENGTH = 512
+MAX_WORKSPACE_STORAGE_PATH_LENGTH = 512
+
+
 class WorkspacePathError(ValueError):
-    """虚拟路径越过允许的 Workspace 作用域。"""
+    """虚拟路径违反 Workspace 命名空间或存储约束。"""
 
 
-def build_workspace_path_digest(path: str) -> str:
-    """生成不暴露真实路径的稳定遥测标识。"""
-    return hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
-
-
-def normalize_workspace_path(path: str) -> str:
-    """规范 Deep Agents 使用的 POSIX 虚拟路径。"""
-    if not path:
-        return "/"
-    if (
-        "\x00" in path
-        or "\\" in path
-        or len(path) > 512
-        or any(ord(character) < 32 for character in path)
-    ):
-        raise WorkspacePathError("workspace paths must use POSIX separators")
-    normalized = path.rstrip("/")
-    return normalized if normalized else "/"
-
-
-def resolve_workspace_storage_path(path: str, conversation_id: UUID) -> str:
-    """把 Agent 虚拟路径映射为会话隔离的存储路径。"""
-    normalized = normalize_workspace_path(path)
-    if normalized == "/workspace":
-        return str(conversation_id)
-    if not normalized.startswith("/workspace/"):
-        raise WorkspacePathError(
-            f"path '{normalized}' is not in the /workspace/ namespace"
-        )
-
-    relative = normalized.removeprefix("/workspace/")
-    if not relative:
-        raise WorkspacePathError("workspace root is a directory")
-    relative_segments = relative.split("/")
-    if len(relative_segments) >= 2:
-        try:
-            UUID(relative_segments[0])
-            UUID(relative_segments[1])
-        except ValueError:
-            pass
-        else:
-            raise WorkspacePathError(
-                "physical tenant-scoped workspace paths are not supported"
-            )
-
-    storage_path = f"{conversation_id}/{relative}"
-    segments = storage_path.split("/")
-    for segment in segments:
-        if not segment or segment in (".", "..", "~"):
-            raise WorkspacePathError(
-                f"path '{normalized}' contains illegal segment '{segment}'"
-            )
-    if segments[0] != str(conversation_id):
-        raise WorkspacePathError("workspace path escaped the conversation scope")
-    return storage_path
-
-
-def workspace_conversation_id(
-    storage_path: str,
-    conversation_id: UUID | None,
-) -> UUID | None:
-    """返回存储路径所属的会话，无法匹配时返回空。"""
-    if conversation_id is None:
-        return None
-    first = storage_path.split("/", 1)[0]
-    return conversation_id if first == str(conversation_id) else None
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AgentWorkspacePathPolicy:
-    """解析并校验当前会话内的 Agent Workspace 路径。"""
+    """在稳定 Workspace 作用域内转换并校验虚拟路径。"""
 
-    conversation_id: UUID
+    scope_id: UUID
 
-    def resolve(self, path: str) -> str:
-        """返回当前会话允许访问的存储路径。"""
-        return resolve_workspace_storage_path(path, self.conversation_id)
+    def resolve_file(self, path: str) -> str:
+        """把文件虚拟路径转换为存储路径，并拒绝 Workspace 根目录。"""
+        relative = self._relative_path(path, allow_root=False)
+        return self._storage_path(relative)
+
+    def resolve_prefix(self, path: str) -> str:
+        """把目录虚拟路径转换为查询前缀，并允许 Workspace 根目录。"""
+        relative = self._relative_path(path, allow_root=True)
+        return self._storage_path(relative)
 
     def virtual_path(self, storage_path: str) -> str:
-        """把存储路径转换为 Agent 可见路径。"""
-        conversation_prefix = f"{self.conversation_id}/"
-        if storage_path.startswith(conversation_prefix):
-            visible = storage_path[len(conversation_prefix) :]
-            return f"/workspace/{visible}"
-        raise WorkspacePathError("workspace path escaped the conversation scope")
+        """把当前作用域内的存储路径转换为 Agent 可见路径。"""
+        if len(storage_path) > MAX_WORKSPACE_STORAGE_PATH_LENGTH:
+            raise WorkspacePathError("workspace path exceeds the storage limit")
+        storage_root = str(self.scope_id)
+        if storage_path == storage_root:
+            return WORKSPACE_VIRTUAL_ROOT
+        prefix = f"{storage_root}/"
+        if not storage_path.startswith(prefix):
+            raise WorkspacePathError("workspace path escaped its storage scope")
+        relative = storage_path[len(prefix) :]
+        self._validate_segments(relative, original=storage_path)
+        return f"{WORKSPACE_VIRTUAL_ROOT}/{relative}"
 
-    def visible_prefixes(self) -> tuple[str, ...]:
-        """返回当前会话可见的存储前缀。"""
-        return (str(self.conversation_id),)
+    def contains(self, storage_path: str) -> bool:
+        """判断存储路径是否是当前 Workspace 作用域内的合法路径。"""
+        try:
+            self.virtual_path(storage_path)
+        except WorkspacePathError:
+            return False
+        return True
 
-    def is_visible_storage_path(self, storage_path: str) -> bool:
-        """检查存储路径是否可以暴露给 Agent。"""
-        return storage_path == str(self.conversation_id) or storage_path.startswith(
-            f"{self.conversation_id}/"
-        )
+    def _relative_path(self, path: str, *, allow_root: bool) -> str:
+        """提取并校验不含 Workspace 根前缀的相对路径。"""
+        normalized = self._normalize(path)
+        if normalized == WORKSPACE_VIRTUAL_ROOT:
+            if allow_root:
+                return ""
+            raise WorkspacePathError("workspace root is a directory")
+        prefix = f"{WORKSPACE_VIRTUAL_ROOT}/"
+        if not normalized.startswith(prefix):
+            raise WorkspacePathError(
+                f"path '{normalized}' is not in the {prefix} namespace"
+            )
+        relative = normalized[len(prefix) :]
+        self._validate_segments(relative, original=normalized)
+        return relative
+
+    def _storage_path(self, relative: str) -> str:
+        """追加可信作用域，并保证结果可以完整写入持久化字段。"""
+        storage_root = str(self.scope_id)
+        storage_path = f"{storage_root}/{relative}" if relative else storage_root
+        if len(storage_path) > MAX_WORKSPACE_STORAGE_PATH_LENGTH:
+            raise WorkspacePathError("workspace path exceeds the storage limit")
+        return storage_path
+
+    @staticmethod
+    def _normalize(path: str) -> str:
+        """规范并校验 Deep Agents 使用的 POSIX 虚拟路径。"""
+        if not path:
+            return "/"
+        if (
+            "\x00" in path
+            or "\\" in path
+            or len(path) > MAX_WORKSPACE_VIRTUAL_PATH_LENGTH
+            or any(ord(character) < 32 for character in path)
+        ):
+            raise WorkspacePathError("workspace path contains invalid characters")
+        normalized = path.rstrip("/")
+        return normalized if normalized else "/"
+
+    @staticmethod
+    def _validate_segments(relative: str, *, original: str) -> None:
+        """拒绝空片段和可能改变目录语义的特殊片段。"""
+        segments = relative.split("/") if relative else ()
+        if (
+            not segments
+            or "\x00" in relative
+            or "\\" in relative
+            or any(ord(character) < 32 for character in relative)
+            or any(
+                not segment or segment in {".", "..", "~"} for segment in segments
+            )
+        ):
+            raise WorkspacePathError(f"path '{original}' contains illegal segments")
 
 
 __all__ = [
     "AgentWorkspacePathPolicy",
     "WorkspacePathError",
-    "build_workspace_path_digest",
-    "normalize_workspace_path",
-    "resolve_workspace_storage_path",
-    "workspace_conversation_id",
 ]

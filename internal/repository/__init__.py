@@ -12,6 +12,12 @@ from .cos_object_storage_repository import (
     CosObjectStorageRepository,
     ObjectStorageError,
 )
+from .workspace_file_repository import (
+    WorkspaceFileRepository,
+    WorkspaceFileRevisionConflict,
+    WorkspaceStorageError,
+)
+from .workspace_file_store import WorkspaceFileStore
 
 __all__ = [
     "AgentWorkbenchRedisRepository",
@@ -19,5 +25,9 @@ __all__ = [
     "BuiltinSkillRepositoryError",
     "CosObjectStorageRepository",
     "ObjectStorageError",
+    "WorkspaceFileRepository",
+    "WorkspaceFileRevisionConflict",
+    "WorkspaceFileStore",
+    "WorkspaceStorageError",
     "WorkbenchReplayCursorExpired",
 ]

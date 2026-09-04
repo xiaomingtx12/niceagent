@@ -46,7 +46,6 @@ from .workspace_file_schema import (
     SearchWorkspaceFilesReq,
     WorkspaceFilePreviewResp,
     WorkspaceFileResp,
-    WorkspaceFileWithConversationResp,
     WriteWorkspaceFileReq,
 )
 from .memory_file_schema import (
@@ -112,7 +111,6 @@ __all__ = [
     "SearchWorkspaceFilesReq",
     "WorkspaceFilePreviewResp",
     "WorkspaceFileResp",
-    "WorkspaceFileWithConversationResp",
     "WriteWorkspaceFileReq",
     "DeleteMemoryFileReq",
     "ListMemoryFilesResp",

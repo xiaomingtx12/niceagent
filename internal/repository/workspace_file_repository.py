@@ -1,4 +1,4 @@
-"""Agent Workspace 文件元数据仓储。"""
+"""Workspace 文件元数据仓储。"""
 
 from __future__ import annotations
 
@@ -11,9 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from internal.core.agent_v2.entity.workspace_quota import (
-    DEFAULT_AGENT_WORKSPACE_LIMITS,
     AgentWorkspaceLimits,
-    AgentWorkspaceQuotaPolicy,
 )
 from internal.model import WorkspaceFile
 
@@ -27,28 +25,24 @@ class WorkspaceStorageError(RuntimeError):
 
 
 class WorkspaceFileRepository:
-    """在一个租户应用作用域内维护当前文件元数据。
-
-    该仓储只服务 Agent Runtime 的独立 Session，封装元数据事务、配额、锁和
-    revision；HTTP Workspace Service 的展示查询可以直接使用 SQLAlchemy。
-    """
+    """维护单个账号、应用与 Workspace 作用域内的文件元数据。"""
 
     def __init__(
         self,
         session: Session,
         account_id: UUID,
         app_id: UUID,
-        conversation_id: UUID,
+        scope_id: UUID,
+        limits: AgentWorkspaceLimits,
         created_by: UUID | None = None,
-        limits: AgentWorkspaceLimits = DEFAULT_AGENT_WORKSPACE_LIMITS,
     ) -> None:
-        """绑定独立数据库会话、访问作用域和配额。"""
+        """绑定数据库会话、访问作用域和配额规则。"""
         self._session = session
         self.account_id = account_id
         self.app_id = app_id
-        self.conversation_id = conversation_id
+        self.scope_id = scope_id
         self.created_by = created_by
-        self._quota = AgentWorkspaceQuotaPolicy(limits)
+        self._limits = limits
         self._session_lock = RLock()
 
     def close(self) -> None:
@@ -57,9 +51,12 @@ class WorkspaceFileRepository:
             self._session.close()
 
     def fetch(
-        self, path: str, *, include_deleted: bool = False
+        self,
+        path: str,
+        *,
+        include_deleted: bool = False,
     ) -> WorkspaceFile | None:
-        """读取当前逻辑路径的元数据。"""
+        """读取当前作用域内指定逻辑路径的元数据。"""
         stmt = select(WorkspaceFile).where(
             *self._scope_filters(), WorkspaceFile.path == path
         )
@@ -99,7 +96,7 @@ class WorkspaceFileRepository:
         content_sha256: str,
         enforce_quota: bool = True,
     ) -> tuple[WorkspaceFile, str | None]:
-        """提交新对象的元数据，并返回被替换的旧对象 key。"""
+        """提交新对象元数据，并返回被替换的旧对象 key。"""
         with self._session_lock:
             try:
                 stmt = (
@@ -109,7 +106,11 @@ class WorkspaceFileRepository:
                 )
                 row = self._session.execute(stmt).scalar_one_or_none()
                 if enforce_quota:
-                    self._quota.check(self.list(), path=path, new_size=size_bytes)
+                    self._limits.check_write(
+                        self.list(),
+                        path=path,
+                        new_size=size_bytes,
+                    )
 
                 now = datetime.now(timezone.utc)
                 old_object_key = row.object_key if row is not None else None
@@ -118,7 +119,8 @@ class WorkspaceFileRepository:
                         id=uuid4(),
                         account_id=self.account_id,
                         app_id=self.app_id,
-                        conversation_id=self.conversation_id,
+                        # conversation_id 是既有物理字段，当前保存稳定 Workspace 作用域。
+                        conversation_id=self.scope_id,
                         path=path,
                         revision=1,
                         created_by=self.created_by,
@@ -169,11 +171,11 @@ class WorkspaceFileRepository:
                 raise
 
     def _scope_filters(self) -> tuple:
-        """返回租户、应用和会话隔离条件。"""
+        """返回账号、应用和 Workspace 作用域隔离条件。"""
         return (
             WorkspaceFile.account_id == self.account_id,
             WorkspaceFile.app_id == self.app_id,
-            WorkspaceFile.conversation_id == self.conversation_id,
+            WorkspaceFile.conversation_id == self.scope_id,
         )
 
     @staticmethod

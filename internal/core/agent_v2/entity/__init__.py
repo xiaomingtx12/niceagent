@@ -26,16 +26,11 @@ from .tool import DATASET_RETRIEVAL_TOOL_NAME
 from .workspace_path import (
     AgentWorkspacePathPolicy,
     WorkspacePathError,
-    build_workspace_path_digest,
-    normalize_workspace_path,
-    resolve_workspace_storage_path,
-    workspace_conversation_id,
 )
 from .workspace_quota import (
     AgentWorkspaceLimits,
-    AgentWorkspaceQuotaPolicy,
-    DEFAULT_AGENT_WORKSPACE_LIMITS,
     WorkspaceQuotaExceeded,
+    WorkspaceQuotaKind,
 )
 from .workspace_scope import build_workspace_scope_id
 
@@ -58,19 +53,14 @@ __all__ = [
     "AgentTelemetryEvent",
     "AgentWorkspaceLimits",
     "AgentWorkspacePathPolicy",
-    "AgentWorkspaceQuotaPolicy",
     "WorkspacePathError",
     "WorkspaceQuotaExceeded",
+    "WorkspaceQuotaKind",
     "DATASET_RETRIEVAL_TOOL_NAME",
-    "DEFAULT_AGENT_WORKSPACE_LIMITS",
     "DEFAULT_AGENT_MEMORY_LIMITS",
     "TelemetryValue",
     "memory_store_key_to_virtual_path",
     "memory_virtual_path_to_store_key",
     "normalize_agent_memory_path",
-    "build_workspace_path_digest",
-    "normalize_workspace_path",
-    "resolve_workspace_storage_path",
-    "workspace_conversation_id",
     "build_workspace_scope_id",
 ]

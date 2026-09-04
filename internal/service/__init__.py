@@ -38,7 +38,6 @@ from .vector_database_service import VectorDatabaseService
 from .web_app_service import WebAppService
 from .wechat_service import WechatService
 from .workspace_file_service import WorkspaceFileService
-from .workspace_file_storage_service import WorkspaceFileStorageService
 from .memory_file_service import MemoryFileService
 from .workflow_service import WorkflowService
 from .agent_workbench_service import AgentWorkbenchService
@@ -93,7 +92,6 @@ __all__ = [
     "PlatformService",
     "ProviderApiKeyService",
     "WorkspaceFileService",
-    "WorkspaceFileStorageService",
     "MemoryFileService",
     "CreatorTaskService",
 ]

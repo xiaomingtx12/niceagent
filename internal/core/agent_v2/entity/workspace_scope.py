@@ -12,12 +12,10 @@ def build_workspace_scope_id(
     account_id: UUID,
     app_id: UUID,
 ) -> UUID:
-    """为账号和 Agent 生成稳定的内部 Workspace 作用域 ID。
+    """为账号与应用生成跨会话稳定的 Workspace 作用域 ID。
 
-    ``WorkspaceFile`` 当前使用 ``conversation_id`` 作为既有物理作用域字段。
-    这里生成一个稳定 UUID 作为兼容层键值，使不同会话和入口仍能复用同一
-    账号级 Workspace。命名格式保留 v1，并把账号作为历史第三段值，兼容
-    原先 Creator 入口已经生成的账号级作用域。
+    v1 名称中的末尾账号段属于已持久化的兼容契约；修改名称格式前必须迁移
+    既有 Workspace 数据。
     """
     return uuid5(
         NAMESPACE_URL,

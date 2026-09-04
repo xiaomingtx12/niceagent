@@ -15,7 +15,6 @@ from internal.schema.workspace_file_schema import (
     SearchWorkspaceFilesReq,
     WorkspaceFilePreviewResp,
     WorkspaceFileResp,
-    WorkspaceFileWithConversationResp,
     WriteWorkspaceFileReq,
 )
 from internal.service import AppService, WebAppService, WorkspaceFileService
@@ -38,7 +37,7 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.app_service.get_app(app_id, current_user)
-        rows = self.workspace_file_service.list_creator_files(
+        rows = self.workspace_file_service.list_files(
             account_id=app.account_id,
             app_id=app.id,
             prefix=req.path_prefix.data,
@@ -69,12 +68,11 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.app_service.get_app(app_id, current_user)
-        row = self.workspace_file_service.read_owned(
+        preview = self.workspace_file_service.preview(
             account_id=app.account_id,
             app_id=app.id,
             path=req.path.data,
         )
-        preview = self.workspace_file_service.preview(row)
         return success_json(WorkspaceFilePreviewResp().dump(preview))
 
     @login_required
@@ -84,12 +82,12 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.app_service.get_app(app_id, current_user)
-        row = self.workspace_file_service.read_owned(
+        url = self.workspace_file_service.get_download_url(
             account_id=app.account_id,
             app_id=app.id,
             path=req.path.data,
         )
-        return redirect(self.workspace_file_service.get_download_url(row), code=302)
+        return redirect(url, code=302)
 
     @login_required
     def delete_app_file(self, app_id: UUID):
@@ -98,7 +96,7 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.app_service.get_app(app_id, current_user)
-        self.workspace_file_service.soft_delete(
+        self.workspace_file_service.delete(
             account_id=app.account_id,
             app_id=app.id,
             path=req.path.data,
@@ -112,21 +110,12 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.web_app_service.get_web_app(token)
-        rows = self.workspace_file_service.list_shared_files(
+        rows = self.workspace_file_service.search_files(
             account_id=current_user.id,
             app_id=app.id,
             query=req.query.data,
         )
-        items = WorkspaceFileWithConversationResp(many=True).dump(
-            [
-                (
-                    row,
-                    "统一工作区",
-                )
-                for row in rows
-            ]
-        )
-        return success_json({"items": items})
+        return success_json({"items": WorkspaceFileResp(many=True).dump(rows)})
 
     @login_required
     def read_web_app_file(self, token: str):
@@ -135,14 +124,12 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.web_app_service.get_web_app(token)
-        row = self.workspace_file_service.read_owned(
+        preview = self.workspace_file_service.preview(
             account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
         )
-        return success_json(
-            WorkspaceFilePreviewResp().dump(self.workspace_file_service.preview(row))
-        )
+        return success_json(WorkspaceFilePreviewResp().dump(preview))
 
     @login_required
     def download_web_app_file(self, token: str):
@@ -151,12 +138,12 @@ class WorkspaceFileHandler:
         if not req.validate():
             return validate_error_json(req.errors)
         app = self.web_app_service.get_web_app(token)
-        row = self.workspace_file_service.read_owned(
+        url = self.workspace_file_service.get_download_url(
             account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
         )
-        return redirect(self.workspace_file_service.get_download_url(row), code=302)
+        return redirect(url, code=302)
 
     @login_required
     def read_conversation_file(self, token: str, conversation_id: UUID):
@@ -169,14 +156,12 @@ class WorkspaceFileHandler:
             conversation_id=conversation_id,
             account=current_user,
         )
-        row = self.workspace_file_service.read_owned(
+        preview = self.workspace_file_service.preview(
             account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
         )
-        return success_json(
-            WorkspaceFilePreviewResp().dump(self.workspace_file_service.preview(row))
-        )
+        return success_json(WorkspaceFilePreviewResp().dump(preview))
 
     @login_required
     def download_conversation_file(self, token: str, conversation_id: UUID):
@@ -189,12 +174,12 @@ class WorkspaceFileHandler:
             conversation_id=conversation_id,
             account=current_user,
         )
-        row = self.workspace_file_service.read_owned(
+        url = self.workspace_file_service.get_download_url(
             account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
         )
-        return redirect(self.workspace_file_service.get_download_url(row), code=302)
+        return redirect(url, code=302)
 
 
 __all__ = ["WorkspaceFileHandler"]

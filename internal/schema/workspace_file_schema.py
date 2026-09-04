@@ -3,7 +3,7 @@
 from marshmallow import Schema, fields, pre_dump
 from flask import request
 from wtforms import StringField
-from wtforms.validators import DataRequired, Length, Optional, UUID, ValidationError
+from wtforms.validators import DataRequired, Length, Optional, ValidationError
 
 from flask_wtf import FlaskForm
 
@@ -14,10 +14,6 @@ from internal.model import WorkspaceFile
 class ListWorkspaceFilesReq(FlaskForm):
     """列出当前用户 Agent Workspace 文件请求。"""
 
-    conversation_id = StringField(
-        "conversation_id",
-        validators=[Optional(), UUID()],
-    )
     path_prefix = StringField("path_prefix", validators=[Optional(), Length(max=512)])
 
 
@@ -30,10 +26,6 @@ class SearchWorkspaceFilesReq(FlaskForm):
 class ReadWorkspaceFileReq(FlaskForm):
     """读取当前用户 Agent Workspace 文件请求。"""
 
-    conversation_id = StringField(
-        "conversation_id",
-        validators=[Optional(), UUID()],
-    )
     path = StringField(
         "path",
         validators=[DataRequired("path 不能为空"), Length(max=512)],
@@ -122,20 +114,6 @@ class WorkspaceFilePreviewResp(WorkspaceFileResp):
         return data
 
 
-class WorkspaceFileWithConversationResp(WorkspaceFileResp):
-    """附带会话名称的 Workspace 文件元数据响应。"""
-
-    conversation_name = fields.String(required=True)
-
-    @pre_dump
-    def project_file(self, item: tuple[WorkspaceFile, str], **kwargs):
-        """把文件与 Service 查询出的会话名称合并。"""
-        row, conversation_name = item
-        data = WorkspaceFileResp.project_file(self, row, **kwargs)
-        data["conversation_name"] = conversation_name
-        return data
-
-
 __all__ = [
     "ConversationWorkspaceFileReq",
     "DeleteWorkspaceFileReq",
@@ -144,6 +122,5 @@ __all__ = [
     "SearchWorkspaceFilesReq",
     "WorkspaceFilePreviewResp",
     "WorkspaceFileResp",
-    "WorkspaceFileWithConversationResp",
     "WriteWorkspaceFileReq",
 ]

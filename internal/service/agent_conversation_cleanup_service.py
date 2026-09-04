@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from uuid import UUID
 
 from injector import inject
@@ -20,14 +19,14 @@ from internal.core.agent_v2.persistence.agent_memory_repository import (
     AgentMemoryRepository,
 )
 from internal.extension.logging_extension import logger
-from internal.model import App, Conversation, WorkspaceFile
+from internal.model import App, Conversation
+from internal.repository import WorkspaceFileStore
 from internal.schema.agent_runtime_schema import (
     AgentAppCleanupReq,
     AgentConversationCleanupReq,
     AgentMessageCleanupReq,
 )
 from pkg.sqlalchemy import SQLAlchemy
-from .workspace_file_storage_service import WorkspaceFileStorageService
 
 @inject
 @dataclass
@@ -35,7 +34,7 @@ class AgentConversationCleanupService:
     """清理 checkpoint、Workspace 和会话级 Sandbox。"""
 
     db: SQLAlchemy
-    workspace_file_storage_service: WorkspaceFileStorageService
+    workspace_file_store: WorkspaceFileStore
     agent_memory_repository: AgentMemoryRepository
 
     def cleanup_conversation(
@@ -79,7 +78,8 @@ class AgentConversationCleanupService:
             self._delete_checkpoint(req.account_id, req.app_id, conversation_id)
 
         # 2.批量软删除应用下全部用户 Workspace 文件并提交事务。
-        self._soft_delete_workspace_files(
+        self.workspace_file_store.delete_app_files(
+            self.db.session,
             account_id=req.account_id,
             app_id=req.app_id,
         )
@@ -95,36 +95,6 @@ class AgentConversationCleanupService:
             account_id=str(req.account_id),
             app_id=str(req.app_id),
         )
-
-    def _soft_delete_workspace_files(
-        self,
-        *,
-        account_id: UUID,
-        app_id: UUID,
-        conversation_id: UUID | None = None,
-    ) -> None:
-        """提交文件删除状态后清理对应 COS 对象。"""
-        query = self.db.session.query(WorkspaceFile).filter(
-            WorkspaceFile.account_id == account_id,
-            WorkspaceFile.app_id == app_id,
-        )
-        if conversation_id is not None:
-            query = query.filter(WorkspaceFile.conversation_id == conversation_id)
-        rows = query.filter(WorkspaceFile.is_deleted.is_(False)).all()
-        if not rows:
-            return
-        try:
-            now = datetime.now(timezone.utc)
-            for row in rows:
-                row.is_deleted = True
-                row.revision += 1
-                row.updated_at = now
-            self.db.session.commit()
-        except Exception:
-            # 仅负责恢复本方法拥有的事务边界，原异常继续交给统一处理器。
-            self.db.session.rollback()
-            raise
-        self.workspace_file_storage_service.delete_objects(rows)
 
     @staticmethod
     def _delete_checkpoint(

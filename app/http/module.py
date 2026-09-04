@@ -14,6 +14,7 @@ from internal.repository import (
     AgentWorkbenchRedisRepository,
     BuiltinSkillRepository,
     CosObjectStorageRepository,
+    WorkspaceFileStore,
 )
 from internal.service.agent_workbench_event_queue import AgentWorkbenchEventQueue
 from internal.service.agent_workbench_execution_service import (
@@ -27,7 +28,6 @@ from internal.service.agent_workbench_service import AgentWorkbenchService
 from internal.service.agent_workbench_stream_service import AgentWorkbenchStreamService
 from internal.service.embeddings_service import EmbeddingsService
 from internal.service.faiss_service import FaissService
-from internal.service.workspace_file_storage_service import WorkspaceFileStorageService
 from pkg.sqlalchemy import SQLAlchemy
 
 
@@ -86,8 +86,8 @@ class ExtensionModule(Module):
             scope=singleton,
         )
         binder.bind(
-            WorkspaceFileStorageService,
-            to=WorkspaceFileStorageService,
+            WorkspaceFileStore,
+            to=WorkspaceFileStore,
             scope=singleton,
         )
 

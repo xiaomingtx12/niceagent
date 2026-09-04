@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from logging import Logger
 from typing import Mapping, Protocol
@@ -11,6 +12,11 @@ from internal.core.agent_v2.entity.telemetry import (
     TelemetryValue,
 )
 from internal.extension.logging_extension import logger as application_logger
+
+
+def build_path_digest(path: str) -> str:
+    """生成不暴露原始路径的稳定遥测标识。"""
+    return hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]
 
 
 class AgentTelemetrySink(Protocol):
@@ -124,6 +130,7 @@ NOOP_AGENT_TELEMETRY = AgentTelemetry()
 __all__ = [
     "AgentTelemetry",
     "AgentTelemetrySink",
+    "build_path_digest",
     "LoggingAgentTelemetrySink",
     "NOOP_AGENT_TELEMETRY",
     "NullAgentTelemetrySink",

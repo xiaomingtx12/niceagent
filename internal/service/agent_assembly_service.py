@@ -68,6 +68,7 @@ from internal.exception import (
 )
 from internal.extension.logging_extension import logger
 from internal.model import App
+from internal.repository import WorkspaceFileStore
 from internal.schema.agent_runtime_schema import (
     AgentInvocation,
     AgentRuntimePrepareReq,
@@ -80,7 +81,6 @@ from .base_service import BaseService
 from .language_model_service import LanguageModelService
 from .retrieval_service import RetrievalService
 from .skill_service import SkillService
-from .workspace_file_storage_service import WorkspaceFileStorageService
 
 @inject
 @dataclass
@@ -98,7 +98,7 @@ class AgentAssemblyService(BaseService):
     language_model_service: LanguageModelService
     agent_attachment_service: AgentAttachmentService
     skill_service: SkillService
-    workspace_file_storage_service: WorkspaceFileStorageService
+    workspace_file_store: WorkspaceFileStore
     config: Config
 
     def build_agent(
@@ -309,7 +309,7 @@ class AgentAssemblyService(BaseService):
                 run_context=run_context,
                 settings=settings,
                 telemetry=telemetry,
-                storage_service=self.workspace_file_storage_service,
+                file_store=self.workspace_file_store,
             )
             skill_projection = SkillContextAssembler().build(
                 skills=skills,

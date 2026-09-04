@@ -16,9 +16,7 @@ from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
 
 if TYPE_CHECKING:
-    from internal.service.workspace_file_storage_service import (
-        WorkspaceFileStorageService,
-    )
+    from internal.repository import WorkspaceFileStore
 
 
 @dataclass
@@ -39,7 +37,7 @@ class WorkspaceContextAssembler:
         run_context: AgentRunContext,
         settings: Any,
         telemetry: AgentTelemetry,
-        storage_service: WorkspaceFileStorageService,
+        file_store: WorkspaceFileStore,
     ) -> WorkspaceProjection:
         """创建本次运行连接到稳定用户 Workspace 的 Backend。"""
         workspace = AgentWorkspaceBackend(
@@ -48,8 +46,8 @@ class WorkspaceContextAssembler:
             app_id=run_context.app_id,
             # Workspace 跨会话共享；conversation_id 仅用于线程状态，不能
             # 继续作为文件存储作用域。
-            conversation_id=run_context.workspace_scope_id,
-            storage_service=storage_service,
+            workspace_scope_id=run_context.workspace_scope_id,
+            file_store=file_store,
             created_by=run_context.created_by,
             limits=AgentWorkspaceLimits(
                 max_bytes=settings.WORKSPACE_MAX_BYTES,

@@ -1,221 +1,131 @@
-"""Workspace 文件管理、授权和展示服务。"""
+"""Workspace 文件业务服务。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import or_
 
 from config import Config
 from internal.core.agent_v2.entity.workspace_path import (
+    AgentWorkspacePathPolicy,
     WorkspacePathError,
-    normalize_workspace_path,
 )
-from internal.core.agent_v2.entity.workspace_scope import build_workspace_scope_id
 from internal.core.agent_v2.entity.workspace_quota import (
     AgentWorkspaceLimits,
     WorkspaceQuotaExceeded,
+    WorkspaceQuotaKind,
 )
-from internal.core.agent_v2.persistence.workspace_file_repository import (
-    WorkspaceFileRepository,
-    WorkspaceFileRevisionConflict,
-    WorkspaceStorageError,
-)
+from internal.core.agent_v2.entity.workspace_scope import build_workspace_scope_id
 from internal.entity.workspace_file_entity import (
     WorkspaceFilePreview,
     supports_text_preview,
 )
-from internal.exception import (
-    FailException,
-    NotFoundException,
-    ValidateErrorException,
-)
+from internal.exception import FailException, NotFoundException, ValidateErrorException
 from internal.model import WorkspaceFile
+from internal.repository import (
+    WorkspaceFileRepository,
+    WorkspaceFileRevisionConflict,
+    WorkspaceFileStore,
+    WorkspaceStorageError,
+)
 from pkg.sqlalchemy import SQLAlchemy
-
-from .base_service import BaseService
-from .workspace_file_storage_service import WorkspaceFileStorageService
-
-MAX_WORKSPACE_PATH_LENGTH = 512
-
-
-def _uuid(value: object, field: str) -> UUID:
-    """把边界值规范为 UUID。"""
-    try:
-        return value if isinstance(value, UUID) else UUID(str(value))
-    except (TypeError, ValueError) as exc:
-        raise ValidateErrorException(f"{field} 不是合法 UUID") from exc
-
-
-def _escape_like(value: str) -> str:
-    """转义 SQL LIKE 元字符。"""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def _workspace_storage_path(path: str, scope_id: UUID) -> str:
-    """把前端虚拟路径转换为稳定 Workspace 作用域下的物理路径。"""
-    try:
-        normalized = normalize_workspace_path(path)
-    except WorkspacePathError as exc:
-        raise ValidateErrorException("Workspace 路径不合法") from exc
-    if not normalized.startswith("/workspace/"):
-        raise ValidateErrorException("Workspace 路径必须以 /workspace/ 开头")
-    relative = normalized.removeprefix("/workspace/")
-    segments = relative.split("/")
-    if (
-        not relative
-        or len(normalized) > MAX_WORKSPACE_PATH_LENGTH
-        or any(part in {"", ".", "..", "~"} for part in segments)
-    ):
-        raise ValidateErrorException("Workspace 路径不合法")
-    return f"{scope_id}/{relative}"
 
 
 @inject
 @dataclass
-class WorkspaceFileService(BaseService):
-    """协调 Workspace 元数据、COS 内容和调用方访问权限。"""
+class WorkspaceFileService:
+    """处理 Workspace 文件用例并转换可预期的业务失败。"""
 
     db: SQLAlchemy
     config: Config
-    storage_service: WorkspaceFileStorageService
+    file_store: WorkspaceFileStore
 
-    def list_creator_files(
+    def list_files(
         self,
         *,
-        account_id: str | UUID,
-        app_id: str | UUID,
+        account_id: UUID,
+        app_id: UUID,
         prefix: str | None = None,
     ) -> list[WorkspaceFile]:
-        """列出当前用户在 Agent 下共享 Workspace 的文件元数据。"""
-        scope_id = self._resolve_workspace_scope(
-            account_id=account_id,
-            app_id=app_id,
+        """列出当前账号在 Agent 共享 Workspace 中的文件。"""
+        repository, paths = self._workspace(account_id=account_id, app_id=app_id)
+        storage_prefix = self._resolve_prefix(paths, prefix)
+        prefixes = (storage_prefix,) if storage_prefix is not None else None
+        return sorted(
+            repository.list(prefixes),
+            key=self._updated_at,
+            reverse=True,
         )
-        query = self.db.session.query(WorkspaceFile).filter(
-            WorkspaceFile.account_id == _uuid(account_id, "account_id"),
-            WorkspaceFile.app_id == _uuid(app_id, "app_id"),
-            WorkspaceFile.conversation_id == scope_id,
-            WorkspaceFile.is_deleted.is_(False),
-        )
-        if prefix:
-            normalized_prefix = prefix.strip()
-            if normalized_prefix not in {"/workspace", "/workspace/"}:
-                if not normalized_prefix.startswith("/workspace/"):
-                    normalized_prefix = f"/workspace/{normalized_prefix.lstrip('/')}"
-                storage_prefix = _workspace_storage_path(
-                    normalized_prefix,
-                    scope_id,
-                )
-                escaped = _escape_like(storage_prefix)
-                query = query.filter(
-                    or_(
-                        WorkspaceFile.path == storage_prefix,
-                        WorkspaceFile.path.like(f"{escaped}/%", escape="\\"),
-                    )
-                )
-        return query.order_by(WorkspaceFile.updated_at.desc()).all()
 
-    def list_shared_files(
+    def search_files(
         self,
         *,
-        account_id: str | UUID,
-        app_id: str | UUID,
+        account_id: UUID,
+        app_id: UUID,
         query: str | None = None,
     ) -> list[WorkspaceFile]:
-        """列出账号在 Agent 下共享 Workspace 的文件。"""
-        app_uuid = _uuid(app_id, "app_id")
-        scope_id = self._resolve_workspace_scope(
-            account_id=account_id,
-            app_id=app_uuid,
-        )
-        file_query = self.db.session.query(WorkspaceFile).filter(
-            WorkspaceFile.account_id == _uuid(account_id, "account_id"),
-            WorkspaceFile.app_id == app_uuid,
-            WorkspaceFile.conversation_id == scope_id,
-            WorkspaceFile.is_deleted.is_(False),
-        )
-        query_text = (query or "").strip()
+        """按虚拟路径搜索当前账号的共享 Workspace 文件。"""
+        repository, _ = self._workspace(account_id=account_id, app_id=app_id)
+        rows = repository.list()
+        query_text = (query or "").strip().casefold()
         if query_text:
-            pattern = f"%{_escape_like(query_text)}%"
-            file_query = file_query.filter(WorkspaceFile.path.ilike(pattern, escape="\\"))
-        return file_query.order_by(WorkspaceFile.updated_at.desc()).all()
+            rows = [row for row in rows if query_text in row.virtual_path.casefold()]
+        return sorted(rows, key=self._updated_at, reverse=True)
 
     def write_text(
         self,
         *,
-        account_id: str | UUID,
-        app_id: str | UUID,
+        account_id: UUID,
+        app_id: UUID,
         path: str,
         content: str,
-        created_by: str | UUID,
+        created_by: UUID,
         mime_type: str = "text/plain",
     ) -> WorkspaceFile:
-        """解析用户 Workspace 作用域并把文本内容写入 COS。"""
-        app_uuid = _uuid(app_id, "app_id")
-        scope_id = self._resolve_workspace_scope(
+        """把文本写入当前账号的共享 Workspace。"""
+        repository, paths = self._workspace(
             account_id=account_id,
-            app_id=app_uuid,
+            app_id=app_id,
+            created_by=created_by,
         )
-        repository = self._repository(
-            account_id=_uuid(account_id, "account_id"),
-            app_id=app_uuid,
-            conversation_id=scope_id,
-            created_by=_uuid(created_by, "created_by"),
-        )
+        storage_path = self._resolve_path(paths, path)
         try:
-            return self.storage_service.write_text(
+            return self.file_store.write_text(
                 repository,
-                _workspace_storage_path(path, scope_id),
+                storage_path,
                 content,
                 mime_type=mime_type or "text/plain",
             )
         except WorkspaceQuotaExceeded as exc:
             message = {
-                "file": f"Workspace 文件数量不能超过 {exc.maximum}",
-                "byte": f"Workspace 总容量不能超过 {exc.maximum} 字节",
-            }.get(exc.limit, "Workspace 容量超出限制")
+                WorkspaceQuotaKind.FILES: (
+                    f"Workspace 文件数量不能超过 {exc.maximum}"
+                ),
+                WorkspaceQuotaKind.BYTES: (
+                    f"Workspace 总容量不能超过 {exc.maximum} 字节"
+                ),
+            }.get(exc.kind, "Workspace 容量超出限制")
             raise ValidateErrorException(message) from exc
         except WorkspaceStorageError as exc:
             raise FailException("Workspace 文件存储失败，请稍后重试") from exc
         except WorkspaceFileRevisionConflict as exc:
             raise FailException("Workspace 文件正在被修改，请重试") from exc
 
-    def read_owned(
+    def preview(
         self,
         *,
-        account_id: str | UUID,
-        app_id: str | UUID,
+        account_id: UUID,
+        app_id: UUID,
         path: str,
-    ) -> WorkspaceFile:
-        """读取当前用户在 Agent 共享 Workspace 中的文件元数据。"""
-        scope_id = self._resolve_workspace_scope(
-            account_id=account_id,
-            app_id=app_id,
-        )
-        storage_path = _workspace_storage_path(path, scope_id)
-        row = (
-            self.db.session.query(WorkspaceFile)
-            .filter(
-                WorkspaceFile.account_id == _uuid(account_id, "account_id"),
-                WorkspaceFile.app_id == _uuid(app_id, "app_id"),
-                WorkspaceFile.conversation_id == scope_id,
-                WorkspaceFile.path == storage_path,
-                WorkspaceFile.is_deleted.is_(False),
-            )
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("Workspace 文件不存在")
-        return row
-
-    def preview(self, row: WorkspaceFile) -> WorkspaceFilePreview:
-        """返回受限文本内容或适合媒体展示的短期地址。"""
+    ) -> WorkspaceFilePreview:
+        """读取授权文件并返回受限文本内容或短期地址。"""
+        row = self._get_file(account_id=account_id, app_id=app_id, path=path)
         try:
             if supports_text_preview(row):
-                content = self.storage_service.read_bytes(
+                content = self.file_store.read_bytes(
                     row,
                     max_bytes=self.config.WORKSPACE_PREVIEW_MAX_BYTES,
                 )
@@ -226,72 +136,113 @@ class WorkspaceFileService(BaseService):
                 )
             return WorkspaceFilePreview(
                 file=row,
-                download_url=self.get_download_url(row),
+                download_url=self._get_download_url(row),
             )
         except WorkspaceStorageError as exc:
             raise FailException("Workspace 文件读取失败，请稍后重试") from exc
 
-    def get_download_url(self, row: WorkspaceFile) -> str:
-        """生成当前授权文件的短期 COS 下载地址。"""
-        try:
-            return self.storage_service.get_download_url(
-                row,
-                expires_seconds=self.config.WORKSPACE_DOWNLOAD_URL_TTL_SECONDS,
-            )
-        except WorkspaceStorageError as exc:
-            raise FailException("Workspace 下载地址生成失败，请稍后重试") from exc
-
-    def soft_delete(
-        self,
-        *,
-        account_id: str | UUID,
-        app_id: str | UUID,
-        path: str,
-    ) -> None:
-        """提交删除状态并清理 COS 对象。"""
-        row = self.read_owned(
-            account_id=account_id,
-            app_id=app_id,
-            path=path,
-        )
-        repository = self._repository(
-            account_id=_uuid(account_id, "account_id"),
-            app_id=_uuid(app_id, "app_id"),
-            conversation_id=row.conversation_id,
-        )
-        self.storage_service.delete(repository, row.path)
-
-    def _repository(
+    def get_download_url(
         self,
         *,
         account_id: UUID,
         app_id: UUID,
-        conversation_id: UUID,
+        path: str,
+    ) -> str:
+        """读取授权文件并生成短期下载地址。"""
+        row = self._get_file(account_id=account_id, app_id=app_id, path=path)
+        try:
+            return self._get_download_url(row)
+        except WorkspaceStorageError as exc:
+            raise FailException("Workspace 下载地址生成失败，请稍后重试") from exc
+
+    def delete(
+        self,
+        *,
+        account_id: UUID,
+        app_id: UUID,
+        path: str,
+    ) -> None:
+        """删除当前账号共享 Workspace 中的文件。"""
+        row = self._get_file(account_id=account_id, app_id=app_id, path=path)
+        repository, _ = self._workspace(account_id=account_id, app_id=app_id)
+        try:
+            self.file_store.delete(repository, row.path)
+        except WorkspaceStorageError as exc:
+            raise FailException("Workspace 文件删除失败，请稍后重试") from exc
+
+    def _get_file(
+        self,
+        *,
+        account_id: UUID,
+        app_id: UUID,
+        path: str,
+    ) -> WorkspaceFile:
+        """按授权作用域读取文件，不向调用方暴露物理路径。"""
+        repository, paths = self._workspace(account_id=account_id, app_id=app_id)
+        row = repository.fetch(self._resolve_path(paths, path))
+        if row is None:
+            raise NotFoundException("Workspace 文件不存在")
+        return row
+
+    def _get_download_url(self, row: WorkspaceFile) -> str:
+        """为已经过授权的文件生成短期下载地址。"""
+        return self.file_store.get_download_url(
+            row,
+            expires_seconds=self.config.WORKSPACE_DOWNLOAD_URL_TTL_SECONDS,
+        )
+
+    def _workspace(
+        self,
+        *,
+        account_id: UUID,
+        app_id: UUID,
         created_by: UUID | None = None,
-    ) -> WorkspaceFileRepository:
-        """构造绑定稳定 Workspace 作用域的元数据仓储。"""
-        return WorkspaceFileRepository(
-            session=self.db.session,
-            account_id=account_id,
-            app_id=app_id,
-            conversation_id=conversation_id,
-            created_by=created_by,
-            limits=AgentWorkspaceLimits(
-                max_bytes=self.config.WORKSPACE_MAX_BYTES,
-                max_files=self.config.WORKSPACE_MAX_FILES,
+    ) -> tuple[WorkspaceFileRepository, AgentWorkspacePathPolicy]:
+        """创建绑定稳定 Workspace 作用域的仓储和路径策略。"""
+        scope_id = build_workspace_scope_id(account_id, app_id)
+        return (
+            WorkspaceFileRepository(
+                session=self.db.session,
+                account_id=account_id,
+                app_id=app_id,
+                scope_id=scope_id,
+                created_by=created_by,
+                limits=AgentWorkspaceLimits(
+                    max_bytes=self.config.WORKSPACE_MAX_BYTES,
+                    max_files=self.config.WORKSPACE_MAX_FILES,
+                ),
             ),
+            AgentWorkspacePathPolicy(scope_id=scope_id),
         )
 
     @staticmethod
-    def _resolve_workspace_scope(
-        *,
-        account_id: str | UUID,
-        app_id: str | UUID,
-    ) -> UUID:
-        """解析账号级 Workspace 作用域；会话只负责线程状态。"""
-        return build_workspace_scope_id(
-            _uuid(account_id, "account_id"),
-            _uuid(app_id, "app_id"),
-        )
+    def _resolve_path(paths: AgentWorkspacePathPolicy, path: str) -> str:
+        """把领域路径错误转换为接口可识别的校验异常。"""
+        try:
+            return paths.resolve_file(path)
+        except WorkspacePathError as exc:
+            raise ValidateErrorException("Workspace 路径不合法") from exc
+
+    @staticmethod
+    def _resolve_prefix(
+        paths: AgentWorkspacePathPolicy,
+        prefix: str | None,
+    ) -> str | None:
+        """把可选虚拟目录前缀转换为物理存储前缀。"""
+        normalized = (prefix or "").strip()
+        if normalized in {"", "/workspace", "/workspace/"}:
+            return None
+        if not normalized.startswith("/workspace/"):
+            normalized = f"/workspace/{normalized.lstrip('/')}"
+        try:
+            return paths.resolve_prefix(normalized)
+        except WorkspacePathError as exc:
+            raise ValidateErrorException("Workspace 路径不合法") from exc
+
+    @staticmethod
+    def _updated_at(row: WorkspaceFile) -> datetime:
+        """为展示排序提供稳定的更新时间键。"""
+        return row.updated_at or row.created_at
+
 
 __all__ = ["WorkspaceFileService"]

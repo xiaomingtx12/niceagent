@@ -1,4 +1,4 @@
-"""LangGraph 状态持久化与 Workspace 文件仓储。"""
+"""Agent Core 的状态持久化实现。"""
 
 from .agent_memory_repository import AgentMemoryRepository, AgentMemoryStorageError
 
