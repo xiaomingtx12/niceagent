@@ -31,19 +31,17 @@ from internal.core.agent_v2.assembly.observability.telemetry import (
 )
 from internal.core.agent_v2.entity.workspace_path import (
     AgentWorkspacePathPolicy,
+    WorkspacePathError,
     build_workspace_path_digest,
 )
 from internal.core.agent_v2.entity.workspace_quota import (
     DEFAULT_AGENT_WORKSPACE_LIMITS,
     AgentWorkspaceLimits,
+    WorkspaceQuotaExceeded,
 )
 from internal.core.agent_v2.persistence.workspace_file_repository import (
     WorkspaceFileRepository,
     WorkspaceFileRevisionConflict,
-)
-from internal.exception import (
-    WorkspacePathError,
-    WorkspaceQuotaExceeded,
     WorkspaceStorageError,
 )
 from internal.model import WorkspaceFile
@@ -412,7 +410,4 @@ class AgentWorkspaceBackend(BackendProtocol):
         return None
 
 
-__all__ = [
-    "AgentWorkspaceBackend",
-    "WorkspacePathError",
-]
+__all__ = ["AgentWorkspaceBackend"]

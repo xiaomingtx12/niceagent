@@ -10,9 +10,6 @@ from typing import Any
 from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
-from internal.exception import SubAgentConfigError
-
-
 @dataclass
 class SkillProjection:
     """主 Agent 和 SubAgent 可见的 Skill 投影。"""
@@ -55,7 +52,7 @@ class SkillContextAssembler:
             requested = subagent_config["skills"]
             missing = sorted(set(requested) - set(skill_map))
             if missing:
-                raise SubAgentConfigError(
+                raise ValueError(
                     f"subagent {subagent_config['name']!r} 引用了未启用的 Skills: "
                     f"{', '.join(missing)}"
                 )

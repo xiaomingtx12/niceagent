@@ -7,7 +7,15 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from internal.exception.agent_workspace_exception import WorkspaceQuotaExceeded
+
+class WorkspaceQuotaExceeded(ValueError):
+    """写入超过 Workspace 文件数量或总容量限制。"""
+
+    def __init__(self, limit: str, maximum: int) -> None:
+        """保存超限维度和上限，供业务边界生成稳定提示。"""
+        self.limit = limit
+        self.maximum = maximum
+        super().__init__(f"Workspace {limit} quota exceeded ({maximum})")
 
 
 class WorkspaceFileUsage(Protocol):
@@ -66,5 +74,6 @@ __all__ = [
     "AgentWorkspaceLimits",
     "AgentWorkspaceQuotaPolicy",
     "DEFAULT_AGENT_WORKSPACE_LIMITS",
+    "WorkspaceQuotaExceeded",
     "WorkspaceFileUsage",
 ]

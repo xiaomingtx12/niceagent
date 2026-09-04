@@ -62,7 +62,7 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import (
-    AgentInvocationException,
+    NotFoundException,
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
@@ -134,7 +134,7 @@ class AgentAssemblyService(BaseService):
         llm = req.llm
         if llm is None:
             if req.app_config.model_config_data is None:
-                raise AgentInvocationException("Agent 运行配置缺少模型")
+                raise ValidateErrorException("Agent 运行配置缺少模型")
             llm = self.language_model_service.load_language_model(
                 req.app_config.model_config_data,
                 account_id=req.configuration_account_id,
@@ -164,19 +164,22 @@ class AgentAssemblyService(BaseService):
         phase_started_at = time.monotonic()
 
         # 4.按用户和会话作用域装配 Workspace、Skill、Memory、Sandbox 等资源。
-        runtime = self._prepare_runtime(
-            AgentRuntimePrepareReq(
-                account_id=req.account_id,
-                app_id=req.app_id,
-                conversation_id=req.conversation_id,
-                created_by=req.created_by,
-                principal_id=(req.end_user_id or req.user_id or req.created_by),
-                memory_enabled=req.app_config.long_term_memory.enable,
-                skill_bindings=req.app_config.skills,
-                selected_skills=selected_skills,
-                subagents=runtime_subagents,
+        try:
+            runtime = self._prepare_runtime(
+                AgentRuntimePrepareReq(
+                    account_id=req.account_id,
+                    app_id=req.app_id,
+                    conversation_id=req.conversation_id,
+                    created_by=req.created_by,
+                    principal_id=(req.end_user_id or req.user_id or req.created_by),
+                    memory_enabled=req.app_config.long_term_memory.enable,
+                    skill_bindings=req.app_config.skills,
+                    selected_skills=selected_skills,
+                    subagents=runtime_subagents,
+                )
             )
-        )
+        except ValueError as exc:
+            raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
         self._log_build_timing(req, "runtime", phase_started_at)
         phase_started_at = time.monotonic()
 
@@ -194,31 +197,34 @@ class AgentAssemblyService(BaseService):
         phase_started_at = time.monotonic()
 
         # AgentExecutor 构造失败时会自行关闭 Backend，避免这里重复释放。
-        agent = AgentExecutor(
-            llm=llm,
-            checkpointer=runtime.checkpointer,
-            backend=runtime.backend,
-            store=runtime.store,
-            permissions=runtime.permissions,
-            skill_sources=runtime.skill_sources,
-            memory_sources=runtime.memory_sources,
-            subagent_skill_sources=runtime.subagent_skill_sources,
-            subagent_tools_by_name=subagent_tools,
-            subagent_models_by_name=subagent_models,
-            telemetry=runtime.telemetry,
-            runtime_context=runtime.runtime_context,
-            agent_config=self._build_agent_config(
-                user_id=req.user_id,
-                invoke_from=req.invoke_from,
-                app_name=req.app_name,
-                app_description=req.app_description,
-                app_config=req.app_config,
-                subagents=runtime_subagents,
-                tools=tools,
-                opening_statement=req.opening_statement,
-                selected_skills=selected_skills,
-            ),
-        )
+        try:
+            agent = AgentExecutor(
+                llm=llm,
+                checkpointer=runtime.checkpointer,
+                backend=runtime.backend,
+                store=runtime.store,
+                permissions=runtime.permissions,
+                skill_sources=runtime.skill_sources,
+                memory_sources=runtime.memory_sources,
+                subagent_skill_sources=runtime.subagent_skill_sources,
+                subagent_tools_by_name=subagent_tools,
+                subagent_models_by_name=subagent_models,
+                telemetry=runtime.telemetry,
+                runtime_context=runtime.runtime_context,
+                agent_config=self._build_agent_config(
+                    user_id=req.user_id,
+                    invoke_from=req.invoke_from,
+                    app_name=req.app_name,
+                    app_description=req.app_description,
+                    app_config=req.app_config,
+                    subagents=runtime_subagents,
+                    tools=tools,
+                    opening_statement=req.opening_statement,
+                    selected_skills=selected_skills,
+                ),
+            )
+        except ValueError as exc:
+            raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
         self._log_build_timing(req, "graph", phase_started_at)
         self._log_build_timing(req, "total", build_started_at)
         return agent, llm
@@ -478,7 +484,7 @@ class AgentAssemblyService(BaseService):
             # 3.校验发布应用属于当前租户且仍处于发布状态。
             target_id = config.published_app_id
             if target_id is None:
-                raise AgentInvocationException(f"子 Agent {name!r} 缺少发布应用标识")
+                raise ValidateErrorException(f"子 Agent {name!r} 缺少发布应用标识")
             target_app = (
                 self.db.session.query(App)
                 .filter(
@@ -489,7 +495,7 @@ class AgentAssemblyService(BaseService):
                 .one_or_none()
             )
             if target_app is None:
-                raise AgentInvocationException(
+                raise NotFoundException(
                     f"子 Agent 引用的发布应用 {target_id} 不存在或已取消发布"
                 )
 
@@ -518,7 +524,7 @@ class AgentAssemblyService(BaseService):
                     target_app
                 )
             except ValidateErrorException as exc:
-                raise AgentInvocationException(
+                raise ValidateErrorException(
                     f"发布 Agent {target_app.name!r} 的运行配置无效: {exc}"
                 ) from exc
             target_tools = self._build_configured_tools(
@@ -533,7 +539,7 @@ class AgentAssemblyService(BaseService):
             tool_names = [tool.name for tool in target_tools]
 
             if target_config.model_config_data is None:
-                raise AgentInvocationException(
+                raise ValidateErrorException(
                     f"发布 Agent {target_app.name!r} 缺少模型配置"
                 )
             target_model = self.language_model_service.load_language_model(

@@ -22,6 +22,10 @@ class WorkspaceFileRevisionConflict(RuntimeError):
     """并发写入同一逻辑路径冲突时抛出。"""
 
 
+class WorkspaceStorageError(RuntimeError):
+    """Workspace 内容存储不可用或返回无效数据。"""
+
+
 class WorkspaceFileRepository:
     """在一个租户应用作用域内维护当前文件元数据。
 
@@ -178,4 +182,8 @@ class WorkspaceFileRepository:
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-__all__ = ["WorkspaceFileRepository", "WorkspaceFileRevisionConflict"]
+__all__ = [
+    "WorkspaceFileRepository",
+    "WorkspaceFileRevisionConflict",
+    "WorkspaceStorageError",
+]

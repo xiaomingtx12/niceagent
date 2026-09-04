@@ -9,12 +9,19 @@ from injector import inject
 from sqlalchemy import or_
 
 from config import Config
-from internal.core.agent_v2.entity.workspace_path import normalize_workspace_path
+from internal.core.agent_v2.entity.workspace_path import (
+    WorkspacePathError,
+    normalize_workspace_path,
+)
 from internal.core.agent_v2.entity.workspace_scope import build_workspace_scope_id
-from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
+from internal.core.agent_v2.entity.workspace_quota import (
+    AgentWorkspaceLimits,
+    WorkspaceQuotaExceeded,
+)
 from internal.core.agent_v2.persistence.workspace_file_repository import (
     WorkspaceFileRepository,
     WorkspaceFileRevisionConflict,
+    WorkspaceStorageError,
 )
 from internal.entity.workspace_file_entity import (
     WorkspaceFilePreview,
@@ -22,9 +29,8 @@ from internal.entity.workspace_file_entity import (
 )
 from internal.exception import (
     FailException,
-    WorkspacePathError,
-    WorkspaceQuotaExceeded,
-    WorkspaceStorageError,
+    NotFoundException,
+    ValidateErrorException,
 )
 from internal.model import WorkspaceFile
 from pkg.sqlalchemy import SQLAlchemy
@@ -40,7 +46,7 @@ def _uuid(value: object, field: str) -> UUID:
     try:
         return value if isinstance(value, UUID) else UUID(str(value))
     except (TypeError, ValueError) as exc:
-        raise FailException(f"{field} 不是合法 UUID") from exc
+        raise ValidateErrorException(f"{field} 不是合法 UUID") from exc
 
 
 def _escape_like(value: str) -> str:
@@ -53,9 +59,9 @@ def _workspace_storage_path(path: str, scope_id: UUID) -> str:
     try:
         normalized = normalize_workspace_path(path)
     except WorkspacePathError as exc:
-        raise FailException("Workspace 路径不合法") from exc
+        raise ValidateErrorException("Workspace 路径不合法") from exc
     if not normalized.startswith("/workspace/"):
-        raise FailException("Workspace 路径必须以 /workspace/ 开头")
+        raise ValidateErrorException("Workspace 路径必须以 /workspace/ 开头")
     relative = normalized.removeprefix("/workspace/")
     segments = relative.split("/")
     if (
@@ -63,7 +69,7 @@ def _workspace_storage_path(path: str, scope_id: UUID) -> str:
         or len(normalized) > MAX_WORKSPACE_PATH_LENGTH
         or any(part in {"", ".", "..", "~"} for part in segments)
     ):
-        raise FailException("Workspace 路径不合法")
+        raise ValidateErrorException("Workspace 路径不合法")
     return f"{scope_id}/{relative}"
 
 
@@ -166,8 +172,14 @@ class WorkspaceFileService(BaseService):
                 content,
                 mime_type=mime_type or "text/plain",
             )
-        except (WorkspaceStorageError, WorkspaceQuotaExceeded) as exc:
-            raise FailException(str(exc)) from exc
+        except WorkspaceQuotaExceeded as exc:
+            message = {
+                "file": f"Workspace 文件数量不能超过 {exc.maximum}",
+                "byte": f"Workspace 总容量不能超过 {exc.maximum} 字节",
+            }.get(exc.limit, "Workspace 容量超出限制")
+            raise ValidateErrorException(message) from exc
+        except WorkspaceStorageError as exc:
+            raise FailException("Workspace 文件存储失败，请稍后重试") from exc
         except WorkspaceFileRevisionConflict as exc:
             raise FailException("Workspace 文件正在被修改，请重试") from exc
 
@@ -196,7 +208,7 @@ class WorkspaceFileService(BaseService):
             .one_or_none()
         )
         if row is None:
-            raise FailException("Workspace 文件不存在")
+            raise NotFoundException("Workspace 文件不存在")
         return row
 
     def preview(self, row: WorkspaceFile) -> WorkspaceFilePreview:
@@ -217,7 +229,7 @@ class WorkspaceFileService(BaseService):
                 download_url=self.get_download_url(row),
             )
         except WorkspaceStorageError as exc:
-            raise FailException(str(exc)) from exc
+            raise FailException("Workspace 文件读取失败，请稍后重试") from exc
 
     def get_download_url(self, row: WorkspaceFile) -> str:
         """生成当前授权文件的短期 COS 下载地址。"""
@@ -227,7 +239,7 @@ class WorkspaceFileService(BaseService):
                 expires_seconds=self.config.WORKSPACE_DOWNLOAD_URL_TTL_SECONDS,
             )
         except WorkspaceStorageError as exc:
-            raise FailException(str(exc)) from exc
+            raise FailException("Workspace 下载地址生成失败，请稍后重试") from exc
 
     def soft_delete(
         self,

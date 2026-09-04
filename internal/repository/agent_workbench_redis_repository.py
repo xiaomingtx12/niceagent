@@ -14,7 +14,6 @@ from redis.exceptions import RedisError
 from internal.core.agent_v2.protocol.event_projector import (
     AgentProtocolEventProjector,
 )
-from internal.exception import WorkbenchReplayCursorExpired
 from internal.schema import WorkbenchEvent, WorkbenchReplayBatchResp
 
 
@@ -26,6 +25,17 @@ DEFAULT_MAX_LENGTH = 2000
 MIN_TTL_SECONDS = 60
 MIN_MAX_LENGTH = 100
 MIN_CANCEL_TTL_SECONDS = 30
+
+
+class WorkbenchReplayCursorExpired(Exception):
+    """Redis Stream 已裁剪掉请求游标之前的事件。"""
+
+    def __init__(self, oldest_event_sequence: int) -> None:
+        self.oldest_event_sequence = oldest_event_sequence
+        super().__init__(
+            "workbench replay cursor expired before sequence "
+            f"{oldest_event_sequence}"
+        )
 
 
 class AgentWorkbenchRedisRepository:
@@ -219,4 +229,4 @@ class AgentWorkbenchRedisRepository:
             return None
 
 
-__all__ = ["AgentWorkbenchRedisRepository"]
+__all__ = ["AgentWorkbenchRedisRepository", "WorkbenchReplayCursorExpired"]

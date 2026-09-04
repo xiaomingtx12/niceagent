@@ -12,13 +12,13 @@ from injector import inject
 from internal.core.agent_v2.entity.workspace_path import build_workspace_path_digest
 from internal.core.agent_v2.persistence.workspace_file_repository import (
     WorkspaceFileRepository,
+    WorkspaceStorageError,
 )
 from internal.core.agent_v2.assembly.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
 from internal.model import WorkspaceFile
-from internal.exception import WorkspaceStorageError
 from internal.extension.logging_extension import logger
 from internal.repository import CosObjectStorageRepository, ObjectStorageError
 

@@ -6,7 +6,9 @@ from dataclasses import dataclass
 import hashlib
 from uuid import UUID
 
-from internal.exception.agent_workspace_exception import WorkspacePathError
+
+class WorkspacePathError(ValueError):
+    """虚拟路径越过允许的 Workspace 作用域。"""
 
 
 def build_workspace_path_digest(path: str) -> str:
@@ -108,6 +110,7 @@ class AgentWorkspacePathPolicy:
 
 __all__ = [
     "AgentWorkspacePathPolicy",
+    "WorkspacePathError",
     "build_workspace_path_digest",
     "normalize_workspace_path",
     "resolve_workspace_storage_path",

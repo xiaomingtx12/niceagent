@@ -9,9 +9,6 @@ from deepagents.middleware.filesystem import FilesystemPermission
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
-from internal.exception import FailException, SubAgentConfigError
-
-
 _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
     {
         "task",
@@ -43,11 +40,11 @@ def validate_agent_tools(
     resolved = list(tools)
     names = [tool.name for tool in resolved]
     if len(names) != len(set(names)):
-        raise FailException(f"{context} 工具名称冲突，无法安全装配运行时工具")
+        raise ValueError(f"{context} 工具名称冲突，无法安全装配运行时工具")
 
     reserved = sorted(set(names) & _DEEPAGENTS_RESERVED_TOOL_NAMES)
     if reserved:
-        raise FailException(
+        raise ValueError(
             f"{context} 工具名称与 DeepAgents 内置工具冲突: "
             + ", ".join(reserved)
         )
@@ -59,11 +56,8 @@ def _validate_subagent_tools(
     *,
     name: str,
 ) -> list[BaseTool]:
-    """把公共工具规则转换为 SubAgent 配置异常。"""
-    try:
-        return validate_agent_tools(tools, context=f"subagent {name!r}")
-    except FailException as exc:
-        raise SubAgentConfigError(str(exc)) from exc
+    """校验 SubAgent 工具名称及保留名称冲突。"""
+    return validate_agent_tools(tools, context=f"subagent {name!r}")
 
 
 def build_subagent_specs(
@@ -98,7 +92,7 @@ def build_subagent_specs(
         else:
             missing_tools = sorted(set(requested_tools) - set(base_tool_map))
             if missing_tools:
-                raise SubAgentConfigError(
+                raise ValueError(
                     f"subagent {name!r} 引用了未授权工具: {', '.join(missing_tools)}"
                 )
             resolved_tools = _validate_subagent_tools(
@@ -107,7 +101,7 @@ def build_subagent_specs(
             )
         sources = list(scoped_skills.get(name, ()))
         if config.get("skills", []) and not sources:
-            raise SubAgentConfigError(f"subagent {name!r} 的 Skills 尚未完成运行时授权")
+            raise ValueError(f"subagent {name!r} 的 Skills 尚未完成运行时授权")
 
         spec: dict[str, Any] = {
             "name": name,
@@ -149,7 +143,7 @@ def build_async_subagent_specs(
         # url 仅在跨部署 HTTP 调用时提供，省略时由 SDK 使用 ASGI transport。
         graph_id = config.get("graph_id")
         if not isinstance(graph_id, str) or not graph_id.strip():
-            raise SubAgentConfigError(
+            raise ValueError(
                 f"subagent {config.get('name', '<unknown>')!r} 缺少 graph_id"
             )
         spec: dict[str, Any] = {

@@ -10,7 +10,7 @@ from deepagents.backends.protocol import BackendProtocol
 from injector import inject
 
 from internal.entity.agent_attachment_entity import AgentAttachment
-from internal.exception import AgentAttachmentException, ForbiddenException
+from internal.exception import FailException, ForbiddenException
 from internal.model import UploadFile
 from internal.schema.agent_attachment_schema import AgentAttachmentResolveReq
 from pkg.sqlalchemy import SQLAlchemy
@@ -89,7 +89,7 @@ class AgentAttachmentService:
         if len(responses) != len(files) or any(
             response.error for response in responses
         ):
-            raise AgentAttachmentException("附件写入 Agent Workspace 失败")
+            raise FailException("附件写入 Agent Workspace 失败")
 
 
 __all__ = ["AgentAttachmentService"]

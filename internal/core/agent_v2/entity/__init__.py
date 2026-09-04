@@ -25,6 +25,7 @@ from .telemetry import AgentTelemetryEvent, TelemetryValue
 from .tool import DATASET_RETRIEVAL_TOOL_NAME
 from .workspace_path import (
     AgentWorkspacePathPolicy,
+    WorkspacePathError,
     build_workspace_path_digest,
     normalize_workspace_path,
     resolve_workspace_storage_path,
@@ -34,6 +35,7 @@ from .workspace_quota import (
     AgentWorkspaceLimits,
     AgentWorkspaceQuotaPolicy,
     DEFAULT_AGENT_WORKSPACE_LIMITS,
+    WorkspaceQuotaExceeded,
 )
 from .workspace_scope import build_workspace_scope_id
 
@@ -57,6 +59,8 @@ __all__ = [
     "AgentWorkspaceLimits",
     "AgentWorkspacePathPolicy",
     "AgentWorkspaceQuotaPolicy",
+    "WorkspacePathError",
+    "WorkspaceQuotaExceeded",
     "DATASET_RETRIEVAL_TOOL_NAME",
     "DEFAULT_AGENT_WORKSPACE_LIMITS",
     "DEFAULT_AGENT_MEMORY_LIMITS",

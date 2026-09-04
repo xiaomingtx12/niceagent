@@ -19,9 +19,11 @@ from internal.entity import (
     WorkbenchRun,
 )
 from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import WorkbenchReplayCursorExpired
 from internal.model import AgentRun
-from internal.repository import AgentWorkbenchRedisRepository
+from internal.repository import (
+    AgentWorkbenchRedisRepository,
+    WorkbenchReplayCursorExpired,
+)
 from internal.schema.agent_workbench_schema import (
     WorkbenchEvent,
     WorkbenchSubscriptionReq,

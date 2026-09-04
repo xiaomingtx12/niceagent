@@ -26,7 +26,7 @@ from internal.core.agent_v2.persistence.postgres_connection import (
 from internal.entity import WorkbenchRun, WorkbenchRunStatus
 from internal.entity.conversation_entity import InvokeFrom, MessageStatus
 from internal.exception import (
-    AgentInvocationException,
+    CustomException,
     NotFoundException,
     ValidateErrorException,
 )
@@ -36,6 +36,7 @@ from internal.repository import AgentWorkbenchRedisRepository
 from internal.schema.agent_attachment_schema import dump_agent_attachments
 from internal.schema.agent_workbench_schema import WorkbenchEvent
 from internal.schema.app_config_schema import AgentAppConfigReq
+from pkg.response import HttpCode
 from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_assembly_service import AgentAssemblyService
@@ -145,7 +146,7 @@ class AgentWorkbenchRunExecutionService(BaseService):
                     else self.app_config_service.get_agent_runtime_config(app)
                 )
             except (ValidationError, ValidateErrorException) as exc:
-                raise AgentInvocationException(f"应用运行配置无效: {exc}") from exc
+                raise ValidateErrorException(f"应用运行配置无效: {exc}") from exc
             run.spec = run.spec.model_copy(
                 update={
                     "app_config": app_config,
@@ -421,6 +422,12 @@ class AgentWorkbenchRunExecutionService(BaseService):
     ) -> None:
         """收敛失败 Run，保留消息流结束和错误状态。"""
         run.error_message = str(exc)
+        if isinstance(exc, CustomException):
+            error_code = exc.code.value
+            public_error = exc.message or "Agent 运行失败"
+        else:
+            error_code = HttpCode.FAIL.value
+            public_error = "Agent 运行失败"
         for skill_event in projector.finish_pending_skill_events(
             status="failed",
             reason="run_failed",
@@ -439,7 +446,7 @@ class AgentWorkbenchRunExecutionService(BaseService):
             error_message=str(exc),
             message_updates={
                 "status": MessageStatus.ERROR,
-                "error": "Agent 运行失败",
+                "error": public_error,
             },
         )
         self._publish_event(
@@ -449,7 +456,8 @@ class AgentWorkbenchRunExecutionService(BaseService):
                 {
                     "event": "failed",
                     "status": "failed",
-                    "error": "Agent 运行失败",
+                    "code": error_code,
+                    "error": public_error,
                 },
             ),
         )
