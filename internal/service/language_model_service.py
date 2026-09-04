@@ -10,7 +10,6 @@ from flask import current_app
 from injector import inject
 
 from internal.core.language_model import LanguageModelManager
-from internal.core.language_model.exceptions import UnsupportedModelError
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
     ModelEntity,
@@ -248,7 +247,7 @@ class LanguageModelService(BaseService):
                 model_entity.model_type,
                 model_entity=model_entity,
             )
-        except UnsupportedModelError as exc:
+        except ValueError as exc:
             raise ValidateErrorException(str(exc)) from exc
         model_attributes = {
             key: value
