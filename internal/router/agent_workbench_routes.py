@@ -16,77 +16,82 @@ def register_agent_workbench_routes(
 ) -> None:
     """注册创建者、发布态和 Run 控制路由。"""
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/threads/<uuid:thread_id>/commands",
+        "/agent-runs/<uuid:run_id>/observability",
+        methods=["GET"],
+        view_func=handler.run_observability,
+    )
+    blueprint.add_url_rule(
+        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/commands",
         methods=["POST"],
         view_func=handler.debug_command,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/threads/<uuid:thread_id>/stream",
+        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/stream",
         methods=["POST"],
         view_func=handler.debug_stream,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/threads/<uuid:thread_id>/state",
+        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/state",
         methods=["GET"],
         view_func=handler.debug_state,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/threads/<uuid:thread_id>/messages",
+        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/messages",
         methods=["GET"],
         view_func=handler.debug_messages,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/threads/<uuid:thread_id>/commands",
+        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/commands",
         methods=["POST"],
         view_func=handler.web_app_command,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/threads/<uuid:thread_id>/stream",
+        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/stream",
         methods=["POST"],
         view_func=handler.web_app_stream,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/threads/<uuid:thread_id>/state",
+        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/state",
         methods=["GET"],
         view_func=handler.web_app_state,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/threads/<uuid:thread_id>/messages",
+        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/messages",
         methods=["GET"],
         view_func=handler.web_app_messages,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
         methods=["POST"],
         view_func=handler.debug_cancel_run,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
         methods=["POST"],
         view_func=handler.web_app_cancel_run,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/commands",
+        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/commands",
         methods=["POST"],
         view_func=handler.creator_task_command,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/stream",
+        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/stream",
         methods=["POST"],
         view_func=handler.creator_task_stream,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/state",
+        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/state",
         methods=["GET"],
         view_func=handler.creator_task_state,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/messages",
+        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/messages",
         methods=["GET"],
         view_func=handler.creator_task_messages,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
         methods=["POST"],
         view_func=handler.creator_task_cancel_run,
     )
@@ -97,7 +102,13 @@ def register_assistant_agent_protocol_routes(
     handler: AssistantAgentProtocolHandler,
 ) -> None:
     """注册 Creator 辅助 Agent 的 Agent Protocol 路由。"""
-    prefix = "/assistant-agent/threads/<uuid:thread_id>"
+    blueprint.add_url_rule(
+        "/assistant-agent/conversations",
+        methods=["POST"],
+        endpoint="assistant_agent_conversation_create",
+        view_func=handler.create_conversation,
+    )
+    prefix = "/assistant-agent/conversations/<uuid:conversation_id>"
     blueprint.add_url_rule(
         f"{prefix}/commands", methods=["POST"], view_func=handler.command
     )
@@ -121,7 +132,12 @@ def register_openapi_agent_protocol_routes(
     handler: OpenAPIAgentProtocolHandler,
 ) -> None:
     """注册服务 API 的 Agent Protocol 路由。"""
-    prefix = "/openapi/apps/<uuid:app_id>/threads/<uuid:thread_id>"
+    prefix = "/openapi/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(
+        "/openapi/apps/<uuid:app_id>/conversations",
+        methods=["POST"],
+        view_func=handler.create_conversation,
+    )
     blueprint.add_url_rule(
         f"{prefix}/commands",
         methods=["POST"],
@@ -162,22 +178,22 @@ def register_internal_agent_protocol_routes(
         view_func=handler.create_thread,
     )
     blueprint.add_url_rule(
-        f"{prefix}/threads/<uuid:thread_id>",
+        f"{prefix}/threads/<uuid:conversation_id>",
         methods=["GET"],
         view_func=handler.get_thread,
     )
     blueprint.add_url_rule(
-        f"{prefix}/threads/<uuid:thread_id>/runs",
+        f"{prefix}/threads/<uuid:conversation_id>/runs",
         methods=["POST"],
         view_func=handler.create_run,
     )
     blueprint.add_url_rule(
-        f"{prefix}/threads/<uuid:thread_id>/runs/<uuid:run_id>",
+        f"{prefix}/threads/<uuid:conversation_id>/runs/<uuid:run_id>",
         methods=["GET"],
         view_func=handler.get_run,
     )
     blueprint.add_url_rule(
-        f"{prefix}/threads/<uuid:thread_id>/runs/<uuid:run_id>/cancel",
+        f"{prefix}/threads/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
         methods=["POST"],
         endpoint="internal_agent_protocol_cancel_run",
         view_func=handler.cancel_run,

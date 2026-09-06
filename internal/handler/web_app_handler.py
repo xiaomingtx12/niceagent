@@ -26,6 +26,12 @@ class WebAppHandler:
 
     web_app_service: WebAppService
 
+    @rate_limit(config_key="user")
+    @login_required
+    def create_conversation(self, token: str):
+        conversation = self.web_app_service.create_conversation(token, current_user)
+        return success_json({"conversation_id": str(conversation.id)})
+
     @rate_limit(config_key="lightweight")
     @login_required
     def get_web_app(self, token: str):

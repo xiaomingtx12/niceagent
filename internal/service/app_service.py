@@ -21,7 +21,6 @@ from internal.entity.app_entity import (
     DEFAULT_APP_CONFIG,
     GENERATE_ICON_PROMPT_TEMPLATE,
 )
-from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import (
     NotFoundException,
     ForbiddenException,
@@ -31,7 +30,6 @@ from internal.exception import (
 from internal.model import (
     App,
     Account,
-    Conversation,
 )
 from internal.model.app import AppConfigVersion, AppDatasetJoin, AppConfig
 from internal.schema.app_schema import (
@@ -41,7 +39,6 @@ from internal.schema.app_schema import (
 )
 from internal.schema.agent_runtime_schema import (
     AgentAppCleanupReq,
-    AgentConversationCleanupReq,
 )
 from internal.schema.app_config_schema import DraftAppConfigPatchReq
 from pkg.paginator import Paginator
@@ -50,6 +47,7 @@ from .app_config_service import AppConfigService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .base_service import BaseService
 from .cos_service import CosService
+from .conversation_service import ConversationService
 from ..core.language_model import LanguageModelManager
 from ..entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
 from ..lib.helper import remove_fields, generate_random_string
@@ -68,6 +66,7 @@ class AppService(BaseService):
     language_model_manager: LanguageModelManager
     language_model_service: LanguageModelService
     agent_cleanup_service: AgentConversationCleanupService
+    conversation_service: ConversationService
 
     def auto_create_app(self, name: str, description: str, account_id: UUID) -> None:
         """根据传递的应用名称、描述、账号id利用AI创建一个Agent智能体"""
@@ -229,7 +228,6 @@ class AppService(BaseService):
             "id",
             "app_config_id",
             "draft_app_config_id",
-            "debug_conversation_id",
             "status",
             "updated_at",
             "created_at",
@@ -266,6 +264,27 @@ class AppService(BaseService):
 
         # 8.返回创建好的新应用
         return new_app
+
+    def get_app_with_debug_conversation(
+        self,
+        app_id: UUID,
+        account: Account,
+    ) -> tuple[App, UUID]:
+        """获取应用详情，并在首次打开调试工作台时创建会话。"""
+        app = self.get_app(app_id, account)
+        with self.db.auto_commit():
+            app = (
+                self.db.session.query(App)
+                .populate_existing()
+                .with_for_update()
+                .filter(App.id == app.id)
+                .one()
+            )
+            conversation = self.conversation_service.get_or_create_debug_conversation(
+                app=app,
+                account_id=account.id,
+            )
+        return app, conversation.id
 
     def get_apps_with_page(
         self, req: GetAppsWithPageReq, account: Account
@@ -554,40 +573,6 @@ class AppService(BaseService):
         )
 
         return draft_app_config_record
-
-    def delete_debug_conversation(self, app_id: UUID, account: Account) -> App:
-        """根据传递的应用id，删除指定的应用调试会话"""
-        # 1.获取应用信息并校验权限
-        app = self.get_app(app_id, account)
-
-        # 2.判断是否存在debug_conversation_id这个数据，如果不存在表示没有会话，无需执行任何操作
-        if not app.debug_conversation_id:
-            return app
-
-        conversation = (
-            self.db.session.query(Conversation)
-            .filter(
-                Conversation.id == app.debug_conversation_id,
-                Conversation.app_id == app.id,
-                Conversation.invoke_from == InvokeFrom.DEBUGGER,
-                Conversation.created_by == account.id,
-            )
-            .one_or_none()
-        )
-        if conversation is not None and not conversation.is_deleted:
-            self.agent_cleanup_service.cleanup_conversation(
-                AgentConversationCleanupReq(
-                    account_id=account.id,
-                    app_id=app.id,
-                    conversation_id=conversation.id,
-                )
-            )
-            self.update(conversation, is_deleted=True)
-
-        # 3.清理会话派生状态后再重置指针
-        self.update(app, debug_conversation_id=None)
-
-        return app
 
     def get_published_config(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """根据传递的应用id+账号，获取应用的发布配置"""

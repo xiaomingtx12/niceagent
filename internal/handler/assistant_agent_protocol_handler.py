@@ -15,7 +15,8 @@ from internal.schema import (
     WorkbenchStateResp,
     WorkbenchSubscriptionReq,
 )
-from internal.service import AgentWorkbenchService
+from internal.service import AgentWorkbenchService, AssistantAgentService
+from internal.middleware.rate_limit_middleware import rate_limit
 from pkg.paginator import CursorPaginatorReq
 from pkg.response import json_response, sse_response, validate_error_json
 
@@ -26,60 +27,62 @@ class AssistantAgentProtocolHandler:
     """辅助 Agent command、stream、state 和 messages 适配器。"""
 
     service: AgentWorkbenchService
+    assistant_agent_service: AssistantAgentService
+
+    @rate_limit(config_key="user")
+    @login_required
+    def create_conversation(self) -> Response:
+        """创建或复用当前账号的辅助 Agent 会话。"""
+        conversation = self.assistant_agent_service.get_or_create_conversation(
+            current_user
+        )
+        return json_response({"conversation_id": str(conversation.id)})
 
     @login_required
-    def command(self, thread_id: UUID) -> Response:
+    def command(self, conversation_id: UUID) -> Response:
         """提交辅助 Agent 协议命令。"""
         body = request.get_json(silent=True)
-        command = WorkbenchCommandReq.from_mapping(
-            body if isinstance(body, dict) else {}
-        )
+        command = WorkbenchCommandReq.from_mapping(body)
         result = self.service.start_run(
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             access_value="assistant-agent",
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             account=current_user,
-            command=command,
+            run_input=command.to_run_input(),
+            command_id=command.command_id,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
     @login_required
-    def stream(self, thread_id: UUID) -> Response:
+    def stream(self, conversation_id: UUID) -> Response:
         """订阅辅助 Agent 协议事件。"""
-        body = request.get_json(silent=True)
-        if not isinstance(body, dict):
-            body = {}
-        if "since" not in body:
-            last_event_id = request.headers.get("Last-Event-ID")
-            if last_event_id:
-                try:
-                    body["since"] = max(0, int(last_event_id.rsplit(":", 1)[-1]))
-                except ValueError:
-                    pass
-        subscription = WorkbenchSubscriptionReq.from_mapping(body)
+        subscription = WorkbenchSubscriptionReq.from_mapping(
+            request.get_json(silent=True),
+            last_event_id=request.headers.get("Last-Event-ID"),
+        )
         events = self.service.subscribe(
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             access_value="assistant-agent",
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             account=current_user,
             subscription=subscription,
         )
         return sse_response(events)
 
     @login_required
-    def state(self, thread_id: UUID) -> Response:
+    def state(self, conversation_id: UUID) -> Response:
         """读取辅助 Agent 状态。"""
         result = self.service.get_state(
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             access_value="assistant-agent",
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             account=current_user,
         )
         response = WorkbenchStateResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
 
     @login_required
-    def messages(self, thread_id: UUID) -> Response:
+    def messages(self, conversation_id: UUID) -> Response:
         """读取辅助 Agent 历史消息。"""
         query = CursorPaginatorReq(request.args)
         if not query.validate():
@@ -87,7 +90,7 @@ class AssistantAgentProtocolHandler:
         result = self.service.get_message_page(
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             access_value="assistant-agent",
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             account=current_user,
             before=query.before_uuid,
             page_size=query.page_size.data,
@@ -96,12 +99,12 @@ class AssistantAgentProtocolHandler:
         return json_response(response.model_dump(mode="json"))
 
     @login_required
-    def cancel_run(self, thread_id: UUID, run_id: UUID) -> Response:
+    def cancel_run(self, conversation_id: UUID, run_id: UUID) -> Response:
         """取消辅助 Agent 的指定 Run。"""
         result = self.service.cancel_run(
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             access_value="assistant-agent",
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             run_id=run_id,
             account=current_user,
         )

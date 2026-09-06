@@ -45,7 +45,7 @@ WORKBENCH_TERMINAL_STATUSES = frozenset(
 
 @dataclass(frozen=True)
 class WorkbenchRunStartReservation:
-    """command 入库期间用于阻止同一线程重复启动的占位记录。"""
+    """command 入库期间用于阻止同一会话重复启动的占位记录。"""
 
     run_id: UUID
     input_message_id: str | None
@@ -70,7 +70,6 @@ class WorkbenchRunInput(BaseModel):
     file_ids: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=5)
     selected_skills: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=20)
     input_message_id: StrictStr | None = None
-    end_user_id: UUID | None = None
 
 
 @dataclass
@@ -78,21 +77,18 @@ class WorkbenchRun(Generic[_InvocationReqT]):
     """当前进程内正在排队或执行的工作台 Run。"""
 
     run_id: UUID
-    thread_id: UUID
+    conversation_id: UUID
     spec: _InvocationReqT
     status: WorkbenchRunStatus = WorkbenchRunStatus.QUEUED
     initial_event_sequence: int = 0
     last_event_sequence: int = 0
     state_snapshot: dict[str, Any] | None = None
     error_message: str = ""
-    events: deque[WorkbenchEvent] = field(
-        default_factory=lambda: deque(maxlen=2000)
-    )
+    events: deque[WorkbenchEvent] = field(default_factory=lambda: deque(maxlen=2000))
     done: threading.Event = field(default_factory=threading.Event)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
     last_cancel_signal_check: float = 0.0
     last_cancel_status_check: float = 0.0
-    include_opening_statement: bool = False
 
 
 __all__ = [

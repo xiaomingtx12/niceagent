@@ -4,22 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
 
 
-class InternalThreadCreateReq(BaseModel):
-    """LangGraph SDK threads.create 的最小请求。"""
-
-    model_config = ConfigDict(extra="ignore")
-
-    thread_id: UUID | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class InternalThreadResp(BaseModel):
-    """SDK 可消费的线程状态。"""
+    """将平台会话投影为 SDK 固定的 thread 状态。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -53,7 +44,7 @@ class InternalRunCreateReq(BaseModel):
 
 
 class InternalRunResp(BaseModel):
-    """SDK 可消费的后台 Run 摘要。"""
+    """SDK 可消费的后台 Run 摘要；thread_id 的值就是会话 ID。"""
 
     run_id: UUID
     thread_id: UUID
@@ -76,16 +67,9 @@ class InternalRunLaunchResp:
     conflict_message: str | None = None
 
 
-def new_thread_id(value: UUID | None) -> UUID:
-    """保留 SDK 指定的线程标识，否则创建新的 UUID。"""
-    return value or uuid4()
-
-
 __all__ = [
     "InternalRunCreateReq",
     "InternalRunLaunchResp",
     "InternalRunResp",
-    "InternalThreadCreateReq",
     "InternalThreadResp",
-    "new_thread_id",
 ]

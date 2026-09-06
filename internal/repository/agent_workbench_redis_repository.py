@@ -8,7 +8,6 @@ from typing import Any, TypeAlias
 from uuid import UUID
 
 from redis import Redis
-from redis.client import PubSub
 from redis.exceptions import RedisError
 
 from internal.core.agent_v2.protocol.event_projector import (
@@ -39,7 +38,7 @@ class WorkbenchReplayCursorExpired(Exception):
 
 
 class AgentWorkbenchRedisRepository:
-    """为工作台提供短期事件重放、Run 通知和跨进程取消。"""
+    """为工作台提供短期事件重放和跨进程取消信号。"""
 
     def __init__(
         self,
@@ -64,10 +63,6 @@ class AgentWorkbenchRedisRepository:
         """生成单个 Run 的取消信号 key。"""
         return f"{self.key_prefix}:cancel:{run_id}"
 
-    def _thread_channel(self, thread_id: UUID | str) -> str:
-        """生成线程级 Run 启动通知频道。"""
-        return f"{self.key_prefix}:thread:{thread_id}"
-
     def request_cancel(self, run_id: UUID | str, *, ttl_seconds: int = 300) -> bool:
         """写入跨进程取消信号；Redis 不可用时由数据库状态兜底。"""
         try:
@@ -85,34 +80,6 @@ class AgentWorkbenchRedisRepository:
         try:
             return bool(self.redis_client.exists(self._cancel_signal_key(run_id)))
         except (RedisError, OSError):
-            return None
-
-    def publish_run_started(
-        self,
-        *,
-        thread_id: UUID | str,
-        run_id: UUID | str,
-    ) -> bool:
-        """通知订阅者线程出现新 Run。"""
-        try:
-            self.redis_client.publish(self._thread_channel(thread_id), str(run_id))
-            return True
-        except (RedisError, OSError):
-            return False
-
-    def subscribe_thread(self, thread_id: UUID | str) -> PubSub | None:
-        """订阅线程通知；失败时返回 None 触发数据库降级。"""
-        pubsub: PubSub | None = None
-        try:
-            pubsub = self.redis_client.pubsub(ignore_subscribe_messages=True)
-            pubsub.subscribe(self._thread_channel(thread_id))
-            return pubsub
-        except (RedisError, OSError):
-            if pubsub is not None:
-                try:
-                    pubsub.close()
-                except (RedisError, OSError):
-                    pass
             return None
 
     def append_event(self, run_id: UUID | str, event: WorkbenchEvent) -> bool:

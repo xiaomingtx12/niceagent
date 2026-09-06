@@ -577,6 +577,12 @@ class Router:
             view_func=self.creator_task_handler.get_conversations,
         )
         bp.add_url_rule(
+            "/tasks/apps/<uuid:app_id>/conversations",
+            methods=["POST"],
+            endpoint="creator_task_conversation_create",
+            view_func=self.creator_task_handler.create_conversation,
+        )
+        bp.add_url_rule(
             "/tasks/conversations/<uuid:conversation_id>",
             endpoint="creator_task_conversation",
             view_func=self.creator_task_handler.get_conversation,

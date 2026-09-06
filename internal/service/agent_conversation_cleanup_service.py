@@ -12,7 +12,6 @@ from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
     build_stable_sandbox_name,
 )
 from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
-    build_thread_id,
     get_configured_checkpointer,
 )
 from internal.core.agent_v2.persistence.agent_memory_repository import (
@@ -43,7 +42,7 @@ class AgentConversationCleanupService:
     ) -> None:
         """清理整个会话的派生状态。"""
         # 1.删除 LangGraph checkpoint，阻止会话继续恢复旧状态。
-        self._delete_checkpoint(req.account_id, req.app_id, req.conversation_id)
+        self._delete_checkpoint(req.conversation_id)
         # Workspace 按账号、Agent 和用户共享，删除一段会话不能删除共享文件。
         # 2.数据库状态处理后再尽力释放当前会话的远程运行资源。
         self._delete_sandbox(
@@ -59,11 +58,11 @@ class AgentConversationCleanupService:
         """清理单条消息所在会话的可恢复状态。"""
         # 1.消息删除后清理对应会话 checkpoint，避免恢复到已删除输入。
         logger.debug("清理消息关联的 Agent checkpoint: message_id=%s", req.message_id)
-        self._delete_checkpoint(req.account_id, req.app_id, req.conversation_id)
+        self._delete_checkpoint(req.conversation_id)
 
     def cleanup_app(self, req: AgentAppCleanupReq) -> None:
         """清理应用下全部 Agent 派生状态。"""
-        # 1.查询应用下的会话，逐个删除线程 checkpoint。
+        # 1.查询应用下的会话，逐个删除 checkpoint。
         conversation_ids = [
             row[0]
             for row in self.db.session.query(Conversation.id)
@@ -75,7 +74,7 @@ class AgentConversationCleanupService:
             .all()
         ]
         for conversation_id in conversation_ids:
-            self._delete_checkpoint(req.account_id, req.app_id, conversation_id)
+            self._delete_checkpoint(conversation_id)
 
         # 2.批量软删除应用下全部用户 Workspace 文件并提交事务。
         self.workspace_file_store.delete_app_files(
@@ -97,12 +96,8 @@ class AgentConversationCleanupService:
         )
 
     @staticmethod
-    def _delete_checkpoint(
-        account_id: UUID,
-        app_id: UUID,
-        conversation_id: UUID,
-    ) -> None:
-        """删除会话对应的 LangGraph 线程。"""
+    def _delete_checkpoint(conversation_id: UUID) -> None:
+        """删除会话对应的 LangGraph checkpoint。"""
         # 1.获取平台配置的 Checkpointer，未配置时无需清理。
         checkpointer = get_configured_checkpointer()
         if checkpointer is False:
@@ -112,14 +107,8 @@ class AgentConversationCleanupService:
             # InMemorySaver 只在进程内保存状态，没有按线程删除接口；
             # 进程结束后状态会自然消失。
             return
-        # 2.使用与运行时相同的 thread_id 删除持久化状态。
-        delete_thread(
-            build_thread_id(
-                account_id=str(account_id),
-                app_id=str(app_id),
-                conversation_id=str(conversation_id),
-            )
-        )
+        # 2.LangGraph 的固定字段直接保存业务会话 ID。
+        delete_thread(str(conversation_id))
 
     @staticmethod
     def _delete_sandbox(

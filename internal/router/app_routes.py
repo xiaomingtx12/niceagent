@@ -6,7 +6,7 @@ from internal.handler import AppHandler
 
 
 def register_app_routes(blueprint: Blueprint, handler: AppHandler) -> None:
-    """注册应用 CRUD、发布配置和旧调试兼容路由。"""
+    """注册应用 CRUD 和发布配置路由。"""
     blueprint.add_url_rule("/apps", view_func=handler.get_apps_with_page)
     blueprint.add_url_rule("/apps", methods=["POST"], view_func=handler.create_app)
     blueprint.add_url_rule("/apps/<uuid:app_id>", view_func=handler.get_app)
@@ -49,11 +49,6 @@ def register_app_routes(blueprint: Blueprint, handler: AppHandler) -> None:
         view_func=handler.fallback_history_to_draft,
     )
 
-    blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/delete-debug-conversation",
-        methods=["POST"],
-        view_func=handler.delete_debug_conversation,
-    )
     blueprint.add_url_rule(
         "/apps/<uuid:app_id>/published-config", view_func=handler.get_published_config
     )

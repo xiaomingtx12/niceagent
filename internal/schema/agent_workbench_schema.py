@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -61,7 +62,6 @@ class WorkbenchCommandInputReq(BaseModel):
     selected_skills: list[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = (
         Field(default_factory=list, max_length=20)
     )
-    end_user_id: UUID | None = None
 
     @field_validator("image_urls", "file_ids", "selected_skills", mode="before")
     def normalize_list(value: Any) -> list[Any]:
@@ -82,6 +82,20 @@ class WorkbenchCommandInputReq(BaseModel):
             raise ValueError("所选 Skill 不能重复")
         return normalized
 
+    def to_run_input(self) -> WorkbenchRunInput:
+        """把已校验的协议输入转换成核心服务使用的运行输入。"""
+        message = self.messages[-1] if self.messages else None
+        query = message.text if message is not None else (self.query or "")
+        if not query:
+            raise ValidateErrorException("run.start 需要非空的用户输入")
+        return WorkbenchRunInput(
+            query=query,
+            image_urls=tuple(self.image_urls),
+            file_ids=tuple(self.file_ids),
+            selected_skills=tuple(self.selected_skills),
+            input_message_id=message.id if message else None,
+        )
+
 
 class WorkbenchCommandReq(BaseModel):
     """工作台当前支持的 Agent Protocol 命令。"""
@@ -94,7 +108,9 @@ class WorkbenchCommandReq(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def from_mapping(cls, command: Mapping[str, Any]) -> "WorkbenchCommandReq":
+    def from_mapping(cls, command: Any) -> "WorkbenchCommandReq":
+        if not isinstance(command, Mapping):
+            raise ValidateErrorException("工作台命令必须是 JSON 对象")
         try:
             return cls.model_validate(dict(command))
         except ValidationError as exc:
@@ -119,17 +135,7 @@ class WorkbenchCommandReq(BaseModel):
 
     def to_run_input(self) -> WorkbenchRunInput:
         """转换为 Service 可直接使用的可信运行输入。"""
-        value = self.input_data()
-        message = value.messages[-1] if value.messages else None
-        query = message.text if message is not None else (value.query or "")
-        return WorkbenchRunInput(
-            query=query,
-            image_urls=tuple(value.image_urls),
-            file_ids=tuple(value.file_ids),
-            selected_skills=tuple(value.selected_skills),
-            input_message_id=message.id if message else None,
-            end_user_id=value.end_user_id,
-        )
+        return self.input_data().to_run_input()
 
 
 class WorkbenchEventParams(BaseModel):
@@ -258,9 +264,19 @@ class WorkbenchSubscriptionReq(BaseModel):
     depth: StrictInt | None = Field(default=None, ge=0)
 
     @classmethod
-    def from_mapping(cls, body: Mapping[str, Any] | None) -> "WorkbenchSubscriptionReq":
+    def from_mapping(
+        cls,
+        body: Mapping[str, Any] | None,
+        *,
+        last_event_id: str | None = None,
+    ) -> "WorkbenchSubscriptionReq":
+        payload = dict(body) if isinstance(body, Mapping) else {}
+        if "since" not in payload and last_event_id:
+            sequence = _parse_last_event_sequence(last_event_id)
+            if sequence is not None:
+                payload["since"] = sequence
         try:
-            return cls.model_validate(dict(body or {}))
+            return cls.model_validate(payload)
         except ValidationError as exc:
             raise ValidateErrorException(f"工作台订阅参数错误: {exc}") from exc
 
@@ -274,6 +290,17 @@ class WorkbenchSubscriptionReq(BaseModel):
         ):
             return False
         return not (self.depth is not None and len(namespace) > self.depth)
+
+
+def _parse_last_event_sequence(value: str) -> int | None:
+    """解析 SSE 游标；cursor-reset 的事件 ID 使用重放起点而非事件序号。"""
+    parts = value.strip().split(":")
+    try:
+        if len(parts) >= 2 and parts[-2] == "cursor-reset":
+            return max(0, int(parts[-1]) - 1)
+        return max(0, int(parts[-1]))
+    except (ValueError, TypeError):
+        return None
 
 
 class WorkbenchCommandResultResp(BaseModel):
@@ -377,6 +404,17 @@ class WorkbenchCancelResp(BaseModel):
     status: str
 
 
+class WorkbenchRunObservabilityResp(BaseModel):
+    """一个平台 Agent Run 的可查询观测结果。"""
+
+    run_id: UUID
+    trace_id: UUID
+    status: str
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    observability: dict[str, Any] = Field(default_factory=dict)
+
+
 __all__ = [
     "WorkbenchCommandReq",
     "WorkbenchCommandInputReq",
@@ -400,4 +438,5 @@ __all__ = [
     "WorkbenchRunMetadataResp",
     "WorkbenchStateResp",
     "WorkbenchCancelResp",
+    "WorkbenchRunObservabilityResp",
 ]

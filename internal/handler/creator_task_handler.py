@@ -23,6 +23,10 @@ class CreatorTaskHandler:
     service: CreatorTaskService
 
     @login_required
+    def create_conversation(self, app_id: UUID):
+        return success_json(self.service.create_conversation(app_id, current_user))
+
+    @login_required
     def get_agents(self):
         return success_json({"list": self.service.get_agents(current_user)})
 

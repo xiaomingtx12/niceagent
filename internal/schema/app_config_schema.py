@@ -266,8 +266,6 @@ class AgentAppConfigReq(BaseModel):
             outputs_config=ToggleConfigReq(enable=False),
         )
     )
-    max_model_calls: Annotated[StrictInt, Field(ge=1)] = 10
-    max_tool_calls: Annotated[StrictInt, Field(ge=1)] = 40
     updated_at: StrictInt | None = None
     created_at: StrictInt | None = None
 

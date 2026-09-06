@@ -53,9 +53,13 @@ class AppHandler(object):
     @rate_limit(config_key="lightweight")
     @login_required
     def get_app(self, app_id: UUID):
-        app = self.app_service.get_app(app_id, current_user)
+        """获取应用详情和调试工作台使用的会话 ID。"""
+        app, conversation_id = self.app_service.get_app_with_debug_conversation(
+            app_id,
+            current_user,
+        )
         resp = GetAppResp()
-        return success_json(resp.dump(app))
+        return success_json(resp.dump((app, conversation_id)))
 
     @rate_limit(config_key="user")
     @login_required
@@ -191,13 +195,6 @@ class AppHandler(object):
         )
 
     # @deprecated 已由 Agent 工作台线程生命周期管理替代，暂保留兼容。
-    @rate_limit(config_key="sensitive")
-    @login_required
-    def delete_debug_conversation(self, app_id: UUID):
-        """旧版调试会话清理接口，已由工作台线程生命周期管理替代。"""
-        self.app_service.delete_debug_conversation(app_id, current_user)
-        return success_message("清空应用调试会话记录成功")
-
     @rate_limit(config_key="lightweight")
     @login_required
     def get_published_config(self, app_id: UUID):

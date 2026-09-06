@@ -16,7 +16,9 @@ from internal.repository import (
     CosObjectStorageRepository,
     WorkspaceFileStore,
 )
-from internal.service.agent_workbench_event_queue import AgentWorkbenchEventQueue
+from internal.service.agent_workbench_event_queue import (
+    AgentWorkbenchEventQueueManager,
+)
 from internal.service.agent_workbench_execution_service import (
     AgentWorkbenchRunExecutionService,
 )
@@ -25,7 +27,6 @@ from internal.service.agent_workbench_run_coordinator import (
 )
 from internal.service.agent_workbench_run_factory import AgentWorkbenchRunFactory
 from internal.service.agent_workbench_service import AgentWorkbenchService
-from internal.service.agent_workbench_stream_service import AgentWorkbenchStreamService
 from internal.service.embeddings_service import EmbeddingsService
 from internal.service.faiss_service import FaissService
 from pkg.sqlalchemy import SQLAlchemy
@@ -46,10 +47,10 @@ class ExtensionModule(Module):
             to=AgentWorkbenchService,
             scope=singleton,
         )
-        # Coordinator 和 StreamService 必须共享同一份进程内事件队列。
+        # Workbench 的生产端和订阅端共享同一个进程级队列管理器。
         binder.bind(
-            AgentWorkbenchEventQueue,
-            to=AgentWorkbenchEventQueue,
+            AgentWorkbenchEventQueueManager,
+            to=AgentWorkbenchEventQueueManager,
             scope=singleton,
         )
         binder.bind(
@@ -65,11 +66,6 @@ class ExtensionModule(Module):
         binder.bind(
             AgentWorkbenchRunCoordinator,
             to=AgentWorkbenchRunCoordinator,
-            scope=singleton,
-        )
-        binder.bind(
-            AgentWorkbenchStreamService,
-            to=AgentWorkbenchStreamService,
             scope=singleton,
         )
         # 将 EmbeddingsService 和 FaissService 绑定为单例，确保所有地方使用同一个实例

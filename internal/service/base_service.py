@@ -16,8 +16,14 @@ class BaseService:
     def create(self, model: Any, **kwargs) -> Any:
         """根据传递的模型类+键值对信息创建数据库记录"""
         with self.db.auto_commit():
-            model_instance = model(**kwargs)
-            self.db.session.add(model_instance)
+            model_instance = self.create_in_transaction(model, **kwargs)
+        return model_instance
+
+    def create_in_transaction(self, model: Any, **kwargs) -> Any:
+        """创建并刷新记录，事务提交由调用方统一管理。"""
+        model_instance = model(**kwargs)
+        self.db.session.add(model_instance)
+        self.db.session.flush()
         return model_instance
 
     def delete(self, model_instance: Any) -> Any:

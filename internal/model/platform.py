@@ -11,9 +11,7 @@ from sqlalchemy import (
     Index,
 )
 
-from internal.entity.conversation_entity import InvokeFrom
 from internal.extension.database_extension import db
-from .conversation import Conversation
 
 
 class WechatConfig(db.Model):
@@ -58,30 +56,6 @@ class WechatEndUser(db.Model):
         onupdate=datetime.now,
     )  # 更新时间
     created_at = Column(DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)"))  # 创建时间
-
-    @property
-    def conversation(self) -> "Conversation":
-        """获取微信终端用户的会话记录，如果没有则创建"""
-        # 1.查询会话记录
-        conversation = db.session.query(Conversation).filter(
-            Conversation.created_by == self.end_user_id,
-            Conversation.invoke_from == InvokeFrom.SERVICE_API,
-            ~Conversation.is_deleted,
-        ).one_or_none()
-
-        # 2.判断会话是否存在，不存在则创建
-        if not conversation:
-            with db.auto_commit():
-                conversation = Conversation(
-                    app_id=self.app_id,
-                    name="New Conversation",
-                    invoke_from=InvokeFrom.SERVICE_API,
-                    created_by=self.end_user_id,
-                )
-                db.session.add(conversation)
-
-        return conversation
-
 
 class WechatMessage(db.Model):
     """微信公众号消息模型，用于记录未推送的消息记录"""

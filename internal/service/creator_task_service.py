@@ -20,6 +20,7 @@ from pkg.sqlalchemy import SQLAlchemy
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .app_config_service import AppConfigService
 from .base_service import BaseService
+from .conversation_service import ConversationService
 
 
 @inject
@@ -30,6 +31,29 @@ class CreatorTaskService(BaseService):
     db: SQLAlchemy
     app_config_service: AppConfigService
     agent_cleanup_service: AgentConversationCleanupService
+    conversation_service: ConversationService
+
+    def create_conversation(self, app_id: UUID, account: Account) -> dict[str, Any]:
+        """创建任务中心会话并由数据库分配会话 ID。"""
+        app = (
+            self.db.session.query(App)
+            .filter(
+                App.id == app_id,
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+            )
+            .one_or_none()
+        )
+        if app is None:
+            raise NotFoundException("应用不存在、未发布或无权访问")
+        with self.db.auto_commit():
+            conversation = self.conversation_service.create_conversation(
+                app_id=app.id,
+                invoke_from=InvokeFrom.CREATOR_TASK,
+                created_by=account.id,
+                owner_account_id=account.id,
+            )
+        return self._serialize_conversation(conversation, app)
 
     def _visible_query(self, account: Account):
         """构建同账号可见的任务会话查询。
@@ -70,7 +94,7 @@ class CreatorTaskService(BaseService):
     def _last_run_status(self, conversation_id: UUID) -> str:
         run = (
             self.db.session.query(AgentRun.status)
-            .filter(AgentRun.thread_id == conversation_id)
+            .filter(AgentRun.conversation_id == conversation_id)
             .order_by(desc(AgentRun.created_at))
             .first()
         )

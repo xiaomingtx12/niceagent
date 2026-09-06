@@ -129,7 +129,7 @@ class GetAppResp(Schema):
     """获取应用基础信息响应结构"""
 
     id = fields.UUID(dump_default="")
-    debug_conversation_id = fields.UUID(dump_default="")
+    conversation_id = fields.UUID(dump_default="")
     name = fields.String(dump_default="")
     icon = fields.String(dump_default="")
     description = fields.String(dump_default="")
@@ -139,19 +139,18 @@ class GetAppResp(Schema):
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
-    def process_data(self, data: App, **kwargs):
+    def process_data(self, data: tuple[App, UUID], **kwargs):
+        app, conversation_id = data
         return {
-            "id": data.id,
-            "debug_conversation_id": (
-                data.debug_conversation_id if data.debug_conversation_id else ""
-            ),
-            "name": data.name,
-            "icon": data.icon,
-            "description": data.description,
-            "status": data.status,
-            "draft_updated_at": datetime_to_timestamp(data.draft_app_config.updated_at),
-            "updated_at": datetime_to_timestamp(data.updated_at),
-            "created_at": datetime_to_timestamp(data.created_at),
+            "id": app.id,
+            "conversation_id": conversation_id,
+            "name": app.name,
+            "icon": app.icon,
+            "description": app.description,
+            "status": app.status,
+            "draft_updated_at": datetime_to_timestamp(app.draft_app_config.updated_at),
+            "updated_at": datetime_to_timestamp(app.updated_at),
+            "created_at": datetime_to_timestamp(app.created_at),
         }
 
 

@@ -15,6 +15,7 @@ from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .base_service import BaseService
+from .conversation_service import ConversationService
 
 
 @inject
@@ -28,6 +29,19 @@ class WebAppService(BaseService):
     db: SQLAlchemy
     app_config_service: AppConfigService
     agent_cleanup_service: AgentConversationCleanupService
+    conversation_service: ConversationService
+
+    def create_conversation(self, token: str, account: Account) -> Conversation:
+        """创建 WebApp 会话并由数据库分配会话 ID。"""
+        app = self.get_web_app(token)
+        end_user = self.resolve_web_app_end_user(app=app, account=account)
+        with self.db.auto_commit():
+            return self.conversation_service.create_conversation(
+                app_id=app.id,
+                invoke_from=InvokeFrom.WEB_APP,
+                created_by=end_user.id,
+                owner_account_id=account.id,
+            )
 
     def resolve_web_app_end_user(
         self,
@@ -156,47 +170,6 @@ class WebAppService(BaseService):
         if conversation is None:
             raise ForbiddenException("会话不存在或不属于当前用户")
         return conversation
-
-    def get_or_create_owned_web_conversation(
-        self,
-        *,
-        token: str,
-        conversation_id: UUID,
-        account: Account,
-        conversation_name: str,
-    ) -> tuple[App, EndUser, Conversation]:
-        """获取工作台会话；客户端新 thread 在首次 command 时落库。"""
-        # 1.校验作用域并解析 WebApp 终端用户。
-        app = self.get_web_app(token)
-        end_user = self.resolve_web_app_end_user(app=app, account=account)
-        # 2.已有 thread 只允许返回属于当前应用和用户的会话。
-        existing = self.get(Conversation, conversation_id)
-        if existing is not None:
-            if (
-                existing.app_id != app.id
-                or existing.invoke_from
-                not in {InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK}
-                or existing.created_by not in {end_user.id, account.id}
-                or existing.is_deleted is True
-            ):
-                raise ForbiddenException("会话不存在或不属于当前用户")
-            # 登录账号是跨 WebApp 与 Creator 任务中心共享历史的稳定归属。
-            if existing.owner_account_id is None:
-                existing.owner_account_id = account.id
-                self.db.session.commit()
-            return app, end_user, existing
-
-        # 3.首次 command 时创建对应的业务会话记录。
-        conversation = self.create(
-            Conversation,
-            id=conversation_id,
-            app_id=app.id,
-            name=conversation_name[:255],
-            invoke_from=InvokeFrom.WEB_APP,
-            created_by=end_user.id,
-            owner_account_id=account.id,
-        )
-        return app, end_user, conversation
 
     def get_web_app(self, token: str) -> App:
         """根据访问令牌获取已发布的 WebApp 应用。"""

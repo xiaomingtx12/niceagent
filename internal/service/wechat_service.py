@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from collections.abc import Mapping
+from functools import partial
 from threading import Thread
 from typing import Any
 from uuid import UUID
@@ -26,10 +27,11 @@ from internal.model import (
     Conversation,
 )
 from pkg.sqlalchemy import SQLAlchemy
-from .app_config_service import AppConfigService
-from .agent_workbench_service import AgentWorkbenchService
+from .agent_workbench_access_service import AgentWorkbenchAccessService
+from .agent_workbench_run_coordinator import AgentWorkbenchRunCoordinator
+from .agent_workbench_run_factory import AgentWorkbenchRunFactory
 from .base_service import BaseService
-from .language_model_service import LanguageModelService
+from .conversation_service import ConversationService
 
 
 @inject
@@ -38,9 +40,10 @@ class WechatService(BaseService):
     """微信公众号服务"""
 
     db: SQLAlchemy
-    app_config_service: AppConfigService
-    language_model_service: LanguageModelService
-    agent_workbench_service: AgentWorkbenchService
+    workbench_access_service: AgentWorkbenchAccessService
+    workbench_run_factory: AgentWorkbenchRunFactory
+    workbench_run_coordinator: AgentWorkbenchRunCoordinator
+    conversation_service: ConversationService
 
     def wechat(
         self,
@@ -162,11 +165,25 @@ class WechatService(BaseService):
                         reply = TextReply(content=push_content, message=msg)
                         return reply.render()
 
-            # 19.消息不存在或者已推送，则将`1`作为普通输入，获取校验后的Agent运行时配置
-            app_config = self.app_config_service.get_app_config(app)
-
-            # 20.创建一条消息记录与微信消息推送记录
-            conversation = wechat_end_user.conversation
+            # 19.消息不存在或者已推送，则将`1`作为普通输入并创建消息记录。
+            conversation = (
+                self.db.session.query(Conversation)
+                .filter(
+                    Conversation.app_id == app.id,
+                    Conversation.created_by == wechat_end_user.end_user_id,
+                    Conversation.invoke_from == InvokeFrom.SERVICE_API,
+                    Conversation.is_deleted.is_(False),
+                )
+                .order_by(desc(Conversation.updated_at))
+                .first()
+            )
+            if conversation is None:
+                with self.db.auto_commit():
+                    conversation = self.conversation_service.create_conversation(
+                        app_id=app.id,
+                        invoke_from=InvokeFrom.SERVICE_API,
+                        created_by=wechat_end_user.end_user_id,
+                    )
             message = self.create(
                 Message,
                 **{
@@ -188,13 +205,12 @@ class WechatService(BaseService):
                 },
             )
 
-            # 21.创建子线程，在子线程中运行Agent并对话
+            # 20.创建子线程，在子线程中运行Agent并对话
             thread = Thread(
                 target=self._thread_chat,
                 kwargs={
                     "flask_app": flask_app,
                     "app_id": app.id,
-                    "app_config": app_config,
                     "conversation_id": conversation.id,
                     "message_id": message.id,
                     "query": content,
@@ -202,7 +218,7 @@ class WechatService(BaseService):
             )
             thread.start()
 
-            # 22.响应提示信息
+            # 21.响应提示信息
             reply = TextReply(content="思考中，请回复“1”获取结果。", message=msg)
             return reply.render()
 
@@ -210,48 +226,44 @@ class WechatService(BaseService):
         self,
         flask_app: Flask,
         app_id: UUID,
-        app_config: dict[str, Any],
         message_id: UUID,
         conversation_id: UUID,
         query: str,
     ):
         """使用子线程创建会话信息，避免数据处理超过5s"""
         with flask_app.app_context():
-            # 1.从语言模型中根据模型配置获取模型实例（传入account_id以使用用户自己的API Key）
             app = self.get(App, app_id)
-            llm = self.language_model_service.load_language_model(
-                app_config.get("model_config", {}),
-                account_id=app.account_id,
-            )
-
             conversation = self.get(Conversation, conversation_id)
 
             message = self.get(Message, message_id)
             invocation = AgentInvocation(
                 account_id=app.account_id,
-                configuration_account_id=app.account_id,
                 app_id=app.id,
-                app_name=app.name,
-                app_description=app.description,
-                app_config=app_config,
-                app_config_hydrated=True,
                 conversation_id=conversation.id,
                 message_id=message_id,
                 created_by=message.created_by,
-                user_id=message.created_by,
                 end_user_id=message.created_by,
                 invoke_from=InvokeFrom.SERVICE_API,
                 query=query,
                 image_urls=[],
-                opening_statement=(
-                    app_config["opening_statement"] if conversation.is_new else ""
-                ),
-                llm=llm,
             )
 
             account = self.get(Account, app.account_id)
-            self.agent_workbench_service.start_invocation(
-                invocation=invocation,
-                thread_id=conversation.id,
-                account=account,
-            )
+            try:
+                self.workbench_access_service.authorize_conversation(
+                    invoke_from=invocation.invoke_from,
+                    access_value=str(invocation.app_id),
+                    conversation_id=invocation.conversation_id,
+                    account=account,
+                )
+                self.workbench_run_coordinator.enqueue(
+                    conversation_id=invocation.conversation_id,
+                    invoke_from=invocation.invoke_from,
+                    input_message_id=invocation.input_message_id,
+                    run_builder=partial(
+                        self.workbench_run_factory.create_from_invocation,
+                        invocation=invocation,
+                    ),
+                )
+            finally:
+                self.db.session.close()

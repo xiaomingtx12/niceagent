@@ -1,11 +1,13 @@
 from dataclasses import dataclass
-from typing import Any
 from uuid import UUID
 
 from injector import inject
 from langchain_core.tools import BaseTool, tool
 
-from internal.model import Account
+from config import Config
+from internal.core.language_model.entities.model_entity import BaseLanguageModel
+from internal.exception import NotFoundException
+from internal.model import Account, Conversation
 from internal.schema.agent_tool_schema import (
     AppWithWorkflowGeneratorToolReq,
     CreateAppToolReq,
@@ -16,11 +18,12 @@ from internal.task.workflow_task import (
     auto_generate_workflow,
     auto_generate_app_with_workflow,
 )
-from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .embeddings_service import EmbeddingsService
 from .faiss_service import FaissService
 from .language_model_service import LanguageModelService
+from .conversation_service import ConversationService
+from pkg.sqlalchemy import SQLAlchemy
 
 
 @inject
@@ -32,13 +35,40 @@ class AssistantAgentService(BaseService):
     和工具，实际 Run 生命周期及 Agent 执行仍复用工作台和 Agent Core。
     """
 
-    db: SQLAlchemy
     faiss_service: FaissService
     embeddings_service: EmbeddingsService
     language_model_service: LanguageModelService
+    conversation_service: ConversationService
+    db: SQLAlchemy
+    config: Config
 
-    def prepare_runtime(self, account: Account) -> tuple[Any, list[BaseTool]]:
-        """构造辅助 Agent 专属模型与工具，执行仍交给 Agent Protocol Run。"""
+    def get_or_create_conversation(self, account: Account) -> Conversation:
+        """首次使用辅助 Agent 时创建会话，之后按归属复用。"""
+        try:
+            app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("辅助 Agent 应用配置无效") from exc
+
+        with self.db.auto_commit():
+            locked_account = (
+                self.db.session.query(Account)
+                .populate_existing()
+                .with_for_update()
+                .filter(Account.id == account.id)
+                .one_or_none()
+            )
+            if locked_account is None:
+                raise NotFoundException("账号不存在")
+            return self.conversation_service.get_or_create_assistant_conversation(
+                account_id=locked_account.id,
+                app_id=app_id,
+            )
+
+    def build_capabilities(
+        self,
+        account: Account,
+    ) -> tuple[BaseLanguageModel, list[BaseTool]]:
+        """构造辅助 Agent 专属模型与工具，执行仍交给统一装配入口。"""
         from internal.exception import FailException
 
         try:

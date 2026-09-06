@@ -11,7 +11,6 @@ from .agent_runtime_schema import (
     AgentConversationCleanupReq,
     AgentInvocation,
     AgentMessageCleanupReq,
-    AgentRuntimePrepareReq,
 )
 from .app_config_schema import AgentAppConfigReq, DraftAppConfigPatchReq
 from .agent_workbench_schema import (
@@ -36,6 +35,7 @@ from .agent_workbench_schema import (
     WorkbenchMessagePageInfoResp,
     WorkbenchMessagePageResp,
     WorkbenchRunMetadataResp,
+    WorkbenchRunObservabilityResp,
     WorkbenchStateResp,
 )
 from .workspace_file_schema import (
@@ -60,7 +60,6 @@ from .internal_agent_protocol_schema import (
     InternalRunCreateReq,
     InternalRunLaunchResp,
     InternalRunResp,
-    InternalThreadCreateReq,
     InternalThreadResp,
 )
 
@@ -79,7 +78,6 @@ __all__ = [
     "AgentConversationCleanupReq",
     "AgentInvocation",
     "AgentMessageCleanupReq",
-    "AgentRuntimePrepareReq",
     "DraftAppConfigPatchReq",
     "AgentAppConfigReq",
     "WorkbenchCancelResp",
@@ -103,6 +101,7 @@ __all__ = [
     "WorkbenchMessagePageInfoResp",
     "WorkbenchMessagePageResp",
     "WorkbenchRunMetadataResp",
+    "WorkbenchRunObservabilityResp",
     "WorkbenchStateResp",
     "ConversationWorkspaceFileReq",
     "DeleteWorkspaceFileReq",
@@ -121,6 +120,5 @@ __all__ = [
     "InternalRunCreateReq",
     "InternalRunLaunchResp",
     "InternalRunResp",
-    "InternalThreadCreateReq",
     "InternalThreadResp",
 ]

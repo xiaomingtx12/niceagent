@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import ClassVar
@@ -28,7 +27,7 @@ from internal.schema.agent_workbench_schema import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 
-from .agent_workbench_event_queue import AgentWorkbenchEventQueue
+from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
 from .agent_workbench_execution_service import AgentWorkbenchRunExecutionService
 from .agent_workbench_run_service import AgentWorkbenchRunService
 
@@ -41,32 +40,34 @@ class AgentWorkbenchRunCoordinator:
     db: SQLAlchemy
     run_service: AgentWorkbenchRunService
     redis_repository: AgentWorkbenchRedisRepository
-    event_queue: AgentWorkbenchEventQueue
+    queue_manager: AgentWorkbenchEventQueueManager
     execution_service: AgentWorkbenchRunExecutionService
 
     _starting_runs: dict[str, WorkbenchRunStartReservation] = field(
         init=False,
         default_factory=dict,
     )
-    _cancel_signal_poll_interval: ClassVar[float] = 0.25
+    _predecessor_poll_interval: ClassVar[float] = 0.25
+
+    # -------------------- Public coordination API --------------------
 
     def enqueue(
         self,
         *,
-        thread_id: UUID,
+        conversation_id: UUID,
         invoke_from: InvokeFrom,
         input_message_id: str | None,
-        command_id: int | None,
-        create_run: Callable[[UUID], WorkbenchRun],
+        run_builder: Callable[..., WorkbenchRun],
+        command_id: int | None = None,
     ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
         """执行 Run 去重、入库、注册和后台启动。"""
-        key = str(thread_id)
+        key = str(conversation_id)
         reservation = WorkbenchRunStartReservation(uuid4(), input_message_id)
         previous_run: WorkbenchRun | None = None
 
-        # 1.先检查本进程状态，快速处理重复提交和同线程并发冲突。
-        with self.event_queue.condition:
-            active = self.event_queue.get(key)
+        # 1.先检查本进程状态，快速处理重复提交和同会话并发冲突。
+        with self.queue_manager.condition:
+            active = self.queue_manager.get(key)
             if (
                 active is not None
                 and input_message_id is not None
@@ -107,12 +108,13 @@ class AgentWorkbenchRunCoordinator:
 
         conflict_message: str | None = None
         duplicate_run: AgentRun | None = None
+        run: WorkbenchRun | None = None
         try:
-            # 2.在数据库事务中加线程锁，再执行幂等查询和 Run 入库。
+            # 2.在数据库事务中加会话锁，再执行幂等查询和 Run 入库。
             with self.db.auto_commit():
-                self.run_service.lock_thread_start(thread_id)
+                self.run_service.lock_conversation_start(conversation_id)
                 duplicate_run, persisted_active = self.run_service.get_start_candidates(
-                    thread_id=thread_id,
+                    conversation_id=conversation_id,
                     input_message_id=input_message_id,
                 )
                 if duplicate_run is not None:
@@ -125,10 +127,10 @@ class AgentWorkbenchRunCoordinator:
                 ):
                     conflict_message = "当前任务已有正在执行的 Agent"
                 else:
-                    run = create_run(reservation.run_id)
+                    run = run_builder(run_id=reservation.run_id)
                     persisted_sequence = (
-                        self.run_service.get_thread_last_event_sequence(
-                            thread_id=thread_id,
+                        self.run_service.get_conversation_last_event_sequence(
+                            conversation_id=conversation_id,
                             invoke_from=invoke_from,
                             close_session=False,
                         )
@@ -164,15 +166,16 @@ class AgentWorkbenchRunCoordinator:
                 applied_through_sequence=applied_through_sequence,
             )
 
-        with self.event_queue.condition:
+        if run is None:
+            # 仅用于保护后续代码的状态不变量；正常分支一定会创建 Run。
+            self._clear_start_reservation(key, reservation)
+            raise RuntimeError("工作台 Run 创建结果为空")
+
+        with self.queue_manager.condition:
             if self._starting_runs.get(key) is reservation:
                 self._starting_runs.pop(key, None)
-            self.event_queue.register(run)
-        # 3.通知跨进程 SSE 订阅者有新 Run；Redis 故障时仍由本进程队列唤醒。
-        self.redis_repository.publish_run_started(
-            thread_id=thread_id,
-            run_id=run.run_id,
-        )
+            self.queue_manager.register(run)
+        # 3.启动带应用上下文的后台执行线程。
         try:
             self._start_background_run(
                 run,
@@ -182,14 +185,7 @@ class AgentWorkbenchRunCoordinator:
                 ),
             )
         except Exception as exc:
-            run.status = WorkbenchRunStatus.FAILED
-            run.error_message = str(exc)
-            self.run_service.set_status(
-                run,
-                WorkbenchRunStatus.FAILED,
-                error_message=str(exc),
-            )
-            self.event_queue.finish(run)
+            self._fail_background_start(run, exc)
             raise
         return WorkbenchCommandSuccessResp.create(
             command_id=command_id,
@@ -197,16 +193,35 @@ class AgentWorkbenchRunCoordinator:
             applied_through_sequence=applied_through_sequence,
         )
 
+    def request_cancel(self, run: AgentRun, *, conversation_id: UUID) -> bool:
+        """持久化并广播取消请求，不负责权限校验。"""
+        # 1.先用数据库活动状态判定取消是否仍然有效。
+        if run.status in WORKBENCH_TERMINAL_STATUSES:
+            return False
+        if not self.run_service.request_cancel(run):
+            # 取消请求和终态收敛可能并发发生，以数据库实际状态为准。
+            return False
+        # 2.通知跨进程 Redis 和当前 Worker 的本地队列。
+        if not self.redis_repository.request_cancel(run.id):
+            logger.warning(
+                "Agent 工作台取消信号 Redis 广播失败 run_id=%s",
+                run.id,
+            )
+        self.queue_manager.request_cancel(conversation_id, run.id)
+        return True
+
+    # -------------------- Internal startup helpers --------------------
+
     def _clear_start_reservation(
         self,
         key: str,
         reservation: WorkbenchRunStartReservation,
     ) -> None:
-        """清理启动占位并唤醒等待同一线程的提交。"""
-        with self.event_queue.condition:
+        """清理启动占位并唤醒等待同一会话的提交。"""
+        with self.queue_manager.condition:
             if self._starting_runs.get(key) is reservation:
                 self._starting_runs.pop(key, None)
-            self.event_queue.notify_all()
+            self.queue_manager.condition.notify_all()
 
     def _start_background_run(
         self,
@@ -223,14 +238,15 @@ class AgentWorkbenchRunCoordinator:
                 try:
                     if wait_for is not None:
                         wait_for.done.wait()
-                    # 同一 LangGraph thread 禁止并发写 checkpoint。
+                    # 同一会话禁止并发写 LangGraph checkpoint。
                     if wait_for_persisted_predecessor:
                         while self.run_service.has_unfinished_predecessor(run.run_id):
-                            time.sleep(self._cancel_signal_poll_interval)
+                            # 本进程前置 Run 完成时由队列立即唤醒，跨进程仍按间隔兜底。
+                            self.queue_manager.wait(self._predecessor_poll_interval)
                     if wait_for is not None or wait_for_persisted_predecessor:
                         persisted_sequence = (
-                            self.run_service.get_thread_last_event_sequence(
-                                thread_id=run.thread_id,
+                            self.run_service.get_conversation_last_event_sequence(
+                                conversation_id=run.conversation_id,
                                 invoke_from=run.spec.invoke_from,
                             )
                         )
@@ -265,20 +281,10 @@ class AgentWorkbenchRunCoordinator:
         except Exception:
             logger.exception("保存 Agent Run 初始化失败状态失败")
         finally:
-            self.event_queue.finish(run)
+            self.queue_manager.finish(run)
         logger.error(
             "Agent 工作台后台初始化失败",
             exc_info=(type(exc), exc, exc.__traceback__),
         )
-
-    def request_cancel(self, run: AgentRun, *, thread_id: UUID) -> bool:
-        """持久化并广播取消请求，不负责权限校验。"""
-        if run.status in WORKBENCH_TERMINAL_STATUSES:
-            return False
-        self.run_service.request_cancel(run)
-        self.redis_repository.request_cancel(run.id)
-        self.event_queue.request_cancel(thread_id, run.id)
-        return True
-
 
 __all__ = ["AgentWorkbenchRunCoordinator"]

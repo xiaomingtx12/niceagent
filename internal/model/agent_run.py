@@ -23,20 +23,20 @@ class AgentRun(db.Model):
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_agent_run_id"),
         Index(
-            "agent_run_thread_source_created_idx",
-            "thread_id",
+            "agent_run_conversation_source_created_idx",
+            "conversation_id",
             "invoke_from",
             "created_at",
         ),
         Index(
-            "agent_run_thread_executing_uq",
-            "thread_id",
+            "agent_run_conversation_executing_uq",
+            "conversation_id",
             unique=True,
             postgresql_where=text("status IN ('queued', 'running')"),
         ),
         Index(
-            "agent_run_thread_input_message_uq",
-            "thread_id",
+            "agent_run_conversation_input_message_uq",
+            "conversation_id",
             "input_message_id",
             unique=True,
             postgresql_where=text("input_message_id IS NOT NULL"),
@@ -45,12 +45,13 @@ class AgentRun(db.Model):
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
     app_id = Column(UUID, nullable=False)
-    thread_id = Column(UUID, nullable=False)
+    conversation_id = Column(UUID, nullable=False)
     invoke_from = Column(String(32), nullable=False)
     message_id = Column(UUID, nullable=False)
     input_message_id = Column(String(255), nullable=True)
     status = Column(String(32), nullable=False, server_default=text("'queued'"))
     state_snapshot = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    observability = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     last_event_sequence = Column(Integer, nullable=False, server_default=text("0"))
     error_message = Column(Text, nullable=False, server_default=text("''"))
     started_at = Column(DateTime, nullable=True)

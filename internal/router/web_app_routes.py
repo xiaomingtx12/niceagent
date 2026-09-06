@@ -13,6 +13,11 @@ def register_web_app_routes(blueprint: Blueprint, handler: WebAppHandler) -> Non
     )
     blueprint.add_url_rule(
         "/web-apps/<string:token>/conversations",
+        methods=["POST"],
+        view_func=handler.create_conversation,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/conversations",
         view_func=handler.get_conversations,
     )
     blueprint.add_url_rule(

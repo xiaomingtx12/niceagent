@@ -16,11 +16,7 @@ from internal.exception import (
     UnauthorizedException,
     ValidateErrorException,
 )
-from internal.schema.internal_agent_protocol_schema import (
-    InternalRunCreateReq,
-    InternalThreadCreateReq,
-    new_thread_id,
-)
+from internal.schema.internal_agent_protocol_schema import InternalRunCreateReq
 from internal.service.internal_agent_protocol_service import (
     InternalAgentProtocolService,
 )
@@ -44,32 +40,31 @@ class InternalAgentProtocolHandler:
     def _create_thread(self) -> Response:
         """解析请求并创建 SDK 线程。"""
         claims = self.service.authenticate(_token_from_request())
-        payload = _parse(InternalThreadCreateReq)
-        result = self.service.create_thread(claims, new_thread_id(payload.thread_id))
+        result = self.service.create_conversation(claims)
         return json_response(result.model_dump(mode="json"))
 
-    def get_thread(self, thread_id: UUID) -> Response:
+    def get_thread(self, conversation_id: UUID) -> Response:
         """读取线程当前状态和 values。"""
         return self._handle(
             lambda: json_response(
-                self.service.get_thread(
+                self.service.get_conversation(
                     claims=self.service.authenticate(_token_from_request()),
-                    thread_id=thread_id,
+                    conversation_id=conversation_id,
                 ).model_dump(mode="json")
             )
         )
 
-    def create_run(self, thread_id: UUID) -> Response:
+    def create_run(self, conversation_id: UUID) -> Response:
         """创建后台 Run，并立即返回 run_id。"""
-        return self._handle(lambda: self._create_run(thread_id))
+        return self._handle(lambda: self._create_run(conversation_id))
 
-    def _create_run(self, thread_id: UUID) -> Response:
+    def _create_run(self, conversation_id: UUID) -> Response:
         """解析请求并创建后台 Run。"""
         claims = self.service.authenticate(_token_from_request())
         payload = _parse(InternalRunCreateReq)
         result = self.service.create_run(
             claims=claims,
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             request=payload,
         )
         if result.run is None:
@@ -79,27 +74,27 @@ class InternalAgentProtocolHandler:
             )
         return json_response(result.run.model_dump(mode="json"), status=202)
 
-    def get_run(self, thread_id: UUID, run_id: UUID) -> Response:
+    def get_run(self, conversation_id: UUID, run_id: UUID) -> Response:
         """读取后台 Run 的最新状态。"""
         return self._handle(
             lambda: json_response(
                 self.service.get_run(
                     claims=self.service.authenticate(_token_from_request()),
-                    thread_id=thread_id,
+                    conversation_id=conversation_id,
                     run_id=run_id,
                 ).model_dump(mode="json")
             )
         )
 
-    def cancel_run(self, thread_id: UUID, run_id: UUID) -> Response:
+    def cancel_run(self, conversation_id: UUID, run_id: UUID) -> Response:
         """取消指定后台 Run。"""
-        return self._handle(lambda: self._cancel_run(thread_id, run_id))
+        return self._handle(lambda: self._cancel_run(conversation_id, run_id))
 
-    def _cancel_run(self, thread_id: UUID, run_id: UUID) -> Response:
+    def _cancel_run(self, conversation_id: UUID, run_id: UUID) -> Response:
         """鉴权并请求停止指定后台 Run。"""
         self.service.cancel_run(
             claims=self.service.authenticate(_token_from_request()),
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             run_id=run_id,
         )
         return Response(status=204)

@@ -26,7 +26,7 @@ from .base_service import BaseService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .provider_api_key_service import ProviderApiKeyService
 from ..exception import NotFoundException
-from ..model import Conversation, Message, Account
+from ..model import App, Conversation, Message, Account
 from ..schema.conversation_schema import GetConversationMessagesWithPageReq
 
 
@@ -94,6 +94,84 @@ class ConversationService(BaseService):
 
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None
+
+    def create_conversation(
+        self,
+        *,
+        app_id: UUID,
+        invoke_from: InvokeFrom,
+        created_by: UUID,
+        owner_account_id: UUID | None = None,
+        name: str = "新的会话",
+    ) -> Conversation:
+        """在调用方事务中创建由服务端分配 ID 的会话。"""
+        return self.create_in_transaction(
+            Conversation,
+            app_id=app_id,
+            name=name[:255],
+            invoke_from=invoke_from,
+            created_by=created_by,
+            owner_account_id=owner_account_id,
+        )
+
+    def get_or_create_debug_conversation(
+        self,
+        *,
+        app: App,
+        account_id: UUID,
+    ) -> Conversation:
+        """返回应用的调试会话；首次打开时由后端创建。"""
+        if app.account_id != account_id:
+            raise NotFoundException("应用不存在或无权访问")
+
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.app_id == app.id,
+                Conversation.invoke_from == InvokeFrom.DEBUGGER,
+                Conversation.created_by == account_id,
+                Conversation.is_deleted.is_(False),
+            )
+            .order_by(desc(Conversation.created_at), desc(Conversation.id))
+            .first()
+        )
+        if conversation is None:
+            conversation = self.create_conversation(
+                app_id=app.id,
+                invoke_from=InvokeFrom.DEBUGGER,
+                created_by=account_id,
+                owner_account_id=account_id,
+                name="New Conversation",
+            )
+        return conversation
+
+    def get_or_create_assistant_conversation(
+        self,
+        *,
+        account_id: UUID,
+        app_id: UUID,
+    ) -> Conversation:
+        """按会话归属返回账号的辅助 Agent 会话，首次使用时创建。"""
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.app_id == app_id,
+                Conversation.invoke_from == InvokeFrom.ASSISTANT_AGENT,
+                Conversation.created_by == account_id,
+                Conversation.is_deleted.is_(False),
+            )
+            .order_by(desc(Conversation.created_at), desc(Conversation.id))
+            .first()
+        )
+        if conversation is None:
+            conversation = self.create_conversation(
+                app_id=app_id,
+                invoke_from=InvokeFrom.ASSISTANT_AGENT,
+                created_by=account_id,
+                owner_account_id=account_id,
+                name="New Conversation",
+            )
+        return conversation
 
     def _load_model_from_config(
         self, model_config: dict = None, account_id: UUID = None

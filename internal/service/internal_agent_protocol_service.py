@@ -20,7 +20,7 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import ForbiddenException, NotFoundException, ValidateErrorException
 from internal.model import Account, AgentRun, App
-from internal.schema.agent_workbench_schema import WorkbenchCommandReq
+from internal.schema.agent_workbench_schema import WorkbenchCommandInputReq
 from internal.schema.internal_agent_protocol_schema import (
     InternalRunCreateReq,
     InternalRunLaunchResp,
@@ -32,6 +32,7 @@ from pkg.sqlalchemy import SQLAlchemy
 from .agent_workbench_run_service import AgentWorkbenchRunService
 from .agent_workbench_service import AgentWorkbenchService
 from .base_service import BaseService
+from .conversation_service import ConversationService
 
 
 @inject
@@ -43,6 +44,7 @@ class InternalAgentProtocolService(BaseService):
     config: Config
     workbench_service: AgentWorkbenchService
     run_service: AgentWorkbenchRunService
+    conversation_service: ConversationService
 
     def authenticate(self, token: str | None) -> InternalAgentProtocolClaims:
         """解析内部调用头，并校验账号与两个应用仍在授权范围内。"""
@@ -53,27 +55,38 @@ class InternalAgentProtocolService(BaseService):
         self._get_authorized_account(claims)
         return claims
 
-    def create_thread(
+    def create_conversation(
         self,
         claims: InternalAgentProtocolClaims,
-        thread_id: UUID,
     ) -> InternalThreadResp:
-        """返回 SDK 线程对象；真实业务会话在首次 Run 时延迟创建。"""
-        self._get_authorized_account(claims)
-        now = _iso_now()
-        return InternalThreadResp(
-            thread_id=thread_id,
-            created_at=now,
-            updated_at=now,
-            metadata={"graph_id": build_published_graph_id(claims.target_app_id)},
-            status="idle",
-        )
+        """创建业务会话，并投影为 SDK thread 响应。"""
+        account = self._get_authorized_account(claims)
+        try:
+            with self.db.auto_commit():
+                conversation = self.conversation_service.create_conversation(
+                    app_id=claims.target_app_id,
+                    invoke_from=InvokeFrom.CREATOR_TASK,
+                    created_by=account.id,
+                    owner_account_id=account.id,
+                )
+            now = _format_datetime(conversation.updated_at)
+            return InternalThreadResp(
+                thread_id=conversation.id,
+                created_at=_format_datetime(conversation.created_at),
+                updated_at=now,
+                metadata={
+                    "graph_id": build_published_graph_id(claims.target_app_id)
+                },
+                status="idle",
+            )
+        finally:
+            self.db.session.close()
 
     def create_run(
         self,
         *,
         claims: InternalAgentProtocolClaims,
-        thread_id: UUID,
+        conversation_id: UUID,
         request: InternalRunCreateReq,
     ) -> InternalRunLaunchResp:
         """校验 graph、可选中断前序 Run，并经 Workbench 入队后台任务。"""
@@ -90,22 +103,20 @@ class InternalAgentProtocolService(BaseService):
         if request.multitask_strategy == "interrupt":
             self._request_active_run_cancel(
                 account=account,
-                thread_id=thread_id,
+                conversation_id=conversation_id,
                 target_app_id=claims.target_app_id,
             )
 
-        command = WorkbenchCommandReq.from_mapping(
-            {
-                "method": "run.start",
-                "params": {"input": run_input},
-            }
-        )
+        try:
+            command_input = WorkbenchCommandInputReq.model_validate(run_input).to_run_input()
+        except ValueError as exc:
+            raise ValidateErrorException(f"后台 Run 输入格式错误: {exc}") from exc
         started = self.workbench_service.start_run(
             invoke_from=InvokeFrom.CREATOR_TASK,
             access_value=str(claims.target_app_id),
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             account=account,
-            command=command,
+            run_input=command_input,
         )
         if started.type == "error":
             return InternalRunLaunchResp(conflict_message=started.message)
@@ -116,7 +127,7 @@ class InternalAgentProtocolService(BaseService):
             return InternalRunLaunchResp(
                 run=self._to_run_response(
                     row=row,
-                    thread_id=thread_id,
+                    conversation_id=conversation_id,
                     target_app_id=claims.target_app_id,
                     multitask_strategy=request.multitask_strategy or "reject",
                 )
@@ -124,24 +135,24 @@ class InternalAgentProtocolService(BaseService):
         finally:
             self.db.session.close()
 
-    def get_thread(
+    def get_conversation(
         self,
         *,
         claims: InternalAgentProtocolClaims,
-        thread_id: UUID,
+        conversation_id: UUID,
     ) -> InternalThreadResp:
         """读取 SDK 所需的当前 State，用于异步任务获取最终结果。"""
         account = self._get_authorized_account(claims)
         state = self.workbench_service.get_state(
             invoke_from=InvokeFrom.CREATOR_TASK,
             access_value=str(claims.target_app_id),
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             account=account,
         )
         now = _iso_now()
         active = state.metadata.status in WORKBENCH_ACTIVE_STATUSES
         return InternalThreadResp(
-            thread_id=thread_id,
+            thread_id=conversation_id,
             created_at=now,
             updated_at=now,
             metadata={"graph_id": build_published_graph_id(claims.target_app_id)},
@@ -153,16 +164,16 @@ class InternalAgentProtocolService(BaseService):
         self,
         *,
         claims: InternalAgentProtocolClaims,
-        thread_id: UUID,
+        conversation_id: UUID,
         run_id: UUID,
     ) -> InternalRunResp:
-        """读取指定内部 Run，禁止跨应用或跨线程访问。"""
+        """读取指定内部 Run，禁止跨应用或跨会话访问。"""
         self._get_authorized_account(claims)
         row = self.run_service.get_run(run_id)
         try:
             return self._to_run_response(
                 row=row,
-                thread_id=thread_id,
+                conversation_id=conversation_id,
                 target_app_id=claims.target_app_id,
             )
         finally:
@@ -172,7 +183,7 @@ class InternalAgentProtocolService(BaseService):
         self,
         *,
         claims: InternalAgentProtocolClaims,
-        thread_id: UUID,
+        conversation_id: UUID,
         run_id: UUID,
     ) -> None:
         """将 SDK cancel 映射为 Workbench 指定 Run 取消。"""
@@ -181,7 +192,7 @@ class InternalAgentProtocolService(BaseService):
             self.workbench_service.cancel_run(
                 invoke_from=InvokeFrom.CREATOR_TASK,
                 access_value=str(claims.target_app_id),
-                thread_id=thread_id,
+                conversation_id=conversation_id,
                 run_id=run_id,
                 account=account,
             )
@@ -192,22 +203,22 @@ class InternalAgentProtocolService(BaseService):
         self,
         *,
         account: Account,
-        thread_id: UUID,
+        conversation_id: UUID,
         target_app_id: UUID,
     ) -> None:
         """为 update 语义请求停止前序运行，不等待其完成。"""
         active = self.run_service.get_latest_run(
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             invoke_from=InvokeFrom.CREATOR_TASK,
         )
         if active is None or active.status not in WORKBENCH_ACTIVE_STATUSES:
             return
         if active.app_id != target_app_id:
-            raise ForbiddenException("内部 Agent Protocol 线程不属于当前应用")
+            raise ForbiddenException("内部 Agent Protocol 会话不属于当前应用")
         self.workbench_service.cancel_run(
             invoke_from=InvokeFrom.CREATOR_TASK,
             access_value=str(target_app_id),
-            thread_id=thread_id,
+            conversation_id=conversation_id,
             run_id=active.id,
             account=account,
         )
@@ -238,14 +249,14 @@ class InternalAgentProtocolService(BaseService):
     def _to_run_response(
         *,
         row: AgentRun | None,
-        thread_id: UUID,
+        conversation_id: UUID,
         target_app_id: UUID,
         multitask_strategy: str = "reject",
     ) -> InternalRunResp:
         """把平台 Run 映射为 LangGraph SDK 可识别的状态对象。"""
         if (
             row is None
-            or row.thread_id != thread_id
+            or row.conversation_id != conversation_id
             or row.app_id != target_app_id
             or row.invoke_from != InvokeFrom.CREATOR_TASK.value
         ):
@@ -262,7 +273,7 @@ class InternalAgentProtocolService(BaseService):
         updated_at = _format_datetime(row.updated_at or row.created_at)
         return InternalRunResp(
             run_id=row.id,
-            thread_id=thread_id,
+            thread_id=conversation_id,
             assistant_id=build_published_graph_id(target_app_id),
             status=status,
             multitask_strategy=multitask_strategy,
