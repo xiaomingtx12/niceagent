@@ -1,6 +1,6 @@
 """LangGraph checkpoint 的真实持久化实现。
 
-这个模块只负责 Saver、连接池和稳定线程标识。
+这个模块只负责 Saver 和连接池。
 """
 
 from __future__ import annotations
@@ -261,17 +261,6 @@ def get_postgres_pool_stats() -> dict[str, int]:
     return _provider.get_pool_stats()
 
 
-def build_thread_id(
-    *,
-    account_id: str,
-    app_id: str,
-    conversation_id: str,
-    agent_id: str = "main",
-) -> str:
-    """构造稳定的 LangGraph thread_id。"""
-    return f"({account_id},{app_id},{conversation_id},{agent_id})"
-
-
 __all__ = [
     "BaseCheckpointSaver",
     "CheckpointProvider",
@@ -279,7 +268,6 @@ __all__ = [
     "PostgresSaver",
     "ResilientPostgresSaver",
     "_pg_uri_for_langgraph",
-    "build_thread_id",
     "close_connection_pool",
     "close_postgres_saver",
     "create_postgres_saver",

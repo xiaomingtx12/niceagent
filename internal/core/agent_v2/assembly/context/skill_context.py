@@ -10,6 +10,9 @@ from typing import Any
 from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
+from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
+
+
 @dataclass
 class SkillProjection:
     """主 Agent 和 SubAgent 可见的 Skill 投影。"""
@@ -27,7 +30,7 @@ class SkillContextAssembler:
         self,
         *,
         skills: list[Any],
-        subagents: list[dict[str, Any]] | None,
+        subagents: Sequence[SubAgentConfig],
         selected_skill_names: Sequence[str] = (),
     ) -> SkillProjection:
         """装配主 Agent 和 SubAgent 的只读 Skill 路由。"""
@@ -48,17 +51,17 @@ class SkillContextAssembler:
                 )
 
         skill_map = {skill.name: skill for skill in enabled_skills}
-        for subagent_config in subagents or []:
-            requested = subagent_config["skills"]
+        for subagent_config in subagents:
+            requested = subagent_config.skills
             missing = sorted(set(requested) - set(skill_map))
             if missing:
                 raise ValueError(
-                    f"subagent {subagent_config['name']!r} 引用了未启用的 Skills: "
+                    f"subagent {subagent_config.name!r} 引用了未启用的 Skills: "
                     f"{', '.join(missing)}"
                 )
             if not requested:
                 continue
-            name = subagent_config["name"]
+            name = subagent_config.name
             prefix = f"/subagent_skills/{name}/"
             selected = [skill_map[item] for item in requested]
             projection.routes[prefix] = _filesystem_backend(selected)

@@ -142,6 +142,16 @@ Daytona 按 Run 创建临时 Sandbox，结束时先把 `/workspace` 增量同步
 Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产入口脚本会在启用沙箱时
 检查该可执行文件并执行一次最小 namespace 烟雾检查。
 
+### 7. Agent 可观测性
+
+平台通过 LangChain Callback 自动采集主 Agent 和同步 SubAgent 的模型、工具调用，
+并将调用次数、Token、重试、耗时、错误类型和平台阶段耗时写入
+`agent_run.observability`。Workbench `run_id` 同时作为 `trace_id`，可通过
+`GET /agent-runs/<run_id>/observability` 查询有权限访问的完整链路。
+
+该链路不依赖 LangSmith，默认 `LANGSMITH_TRACING=false`。需要额外使用 LangSmith
+外部追踪时可自行开启；这不会改变平台观测数据的采集和持久化。
+
 Bubblewrap 是 Linux 内核 namespace 的开源命令行工具，不能在 Windows 原生进程中运行。
 Windows 开发环境可将 Provider 设为 `disabled`，或在 WSL2 / Docker Linux 容器中启用
 `bubblewrap` 做沙箱验证；如果宿主机禁用了 unprivileged user namespace，需调整容器或

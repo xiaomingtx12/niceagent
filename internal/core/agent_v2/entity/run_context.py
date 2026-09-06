@@ -1,4 +1,4 @@
-"""Agent Run 的身份、线程和长期记忆作用域。"""
+"""Agent Run 的会话身份和长期记忆作用域。"""
 
 from __future__ import annotations
 
@@ -13,21 +13,13 @@ from .workspace_scope import build_workspace_scope_id
 
 
 @dataclass(frozen=True, slots=True)
-class AgentThreadIdentity:
-    """一个 Agent 线程的可信服务端身份。"""
+class AgentConversationIdentity:
+    """一个 Agent 会话的可信服务端身份。"""
 
     account_id: str
     app_id: str
     conversation_id: str
     agent_id: str = "main"
-
-    @property
-    def thread_id(self) -> str:
-        """返回稳定的 LangGraph thread_id。"""
-        return (
-            f"({self.account_id},{self.app_id},"
-            f"{self.conversation_id},{self.agent_id})"
-        )
 
     @property
     def metadata(self) -> dict[str, str]:
@@ -40,9 +32,9 @@ class AgentThreadIdentity:
         }
 
     def to_config(self) -> dict[str, Any]:
-        """构造 LangGraph RunnableConfig。"""
+        """将会话 ID 映射到 LangGraph 固定的 thread_id 配置字段。"""
         return {
-            "configurable": {"thread_id": self.thread_id},
+            "configurable": {"thread_id": self.conversation_id},
             "metadata": self.metadata,
         }
 
@@ -61,9 +53,9 @@ class AgentRunContext(BaseModel):
     agent_id: str = Field(default="main", min_length=1, max_length=64)
 
     @property
-    def thread(self) -> AgentThreadIdentity:
-        """返回当前 Run 对应的线程身份。"""
-        return AgentThreadIdentity(
+    def conversation(self) -> AgentConversationIdentity:
+        """返回当前 Run 对应的会话身份。"""
+        return AgentConversationIdentity(
             account_id=str(self.account_id),
             app_id=str(self.app_id),
             conversation_id=str(self.conversation_id),
@@ -94,5 +86,5 @@ class AgentRunContext(BaseModel):
 
 __all__ = [
     "AgentRunContext",
-    "AgentThreadIdentity",
+    "AgentConversationIdentity",
 ]

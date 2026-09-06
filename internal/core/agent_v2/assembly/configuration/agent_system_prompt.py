@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 BASE_AGENT_PROMPT = """你是 {app_name}。
 
 <应用说明>
@@ -13,7 +11,6 @@ BASE_AGENT_PROMPT = """你是 {app_name}。
 <业务指令>
 {preset_prompt}
 </业务指令>
-{skill_instruction}
 <文件路径约束>
 文件工具使用平台虚拟路径，不要使用宿主机路径或其他未授权路径：
 - 所有工作文件和最终交付文件统一写入 /workspace/，例如 /workspace/周报.md。
@@ -22,7 +19,7 @@ BASE_AGENT_PROMPT = """你是 {app_name}。
 如果用户要求在工作区创建、导出或交付文件，统一使用 /workspace/。
 </文件路径约束>
 
-请严格遵循业务指令，按需使用已授权工具和 Skills。不要伪造工具结果；需要委派时选择最合适的子 Agent。"""
+请严格遵循业务指令，不要伪造工具结果。"""
 
 
 def build_app_system_prompt(
@@ -31,22 +28,12 @@ def build_app_system_prompt(
     app_description: str,
     preset_prompt: str,
     memory_enabled: bool = False,
-    selected_skills: Sequence[str] = (),
 ) -> str:
     """构造稳定的应用身份提示词。"""
     return BASE_AGENT_PROMPT.format(
         app_name=(app_name or "智能助手").strip(),
         app_description=(app_description or "提供准确、可靠的任务协助。").strip(),
         preset_prompt=(preset_prompt or "准确理解用户需求并完成任务。").strip(),
-        skill_instruction=(
-            "\n<本轮指定 Skill>\n"
-            f"用户已明确选择以下 Skill：{', '.join(selected_skills)}。"
-            "开始执行前必须读取对应的 /skills/<skill-name>/SKILL.md，"
-            "并遵循其中指令完成本轮任务；不要改用未选择的主 Agent Skill。\n"
-            "</本轮指定 Skill>\n"
-            if selected_skills
-            else ""
-        ),
         memory_instruction=(
             "- 长期记忆是当前租户、应用和主体隔离的小体量持久文本；"
             "需要跨会话保留的稳定偏好或事实写入 /memories/MEMORY.md。"

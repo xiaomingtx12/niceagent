@@ -1,4 +1,4 @@
-"""Agent 单次运行的已装配资源。"""
+"""Agent Core 单次运行的已装配资源。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from internal.core.agent_v2.entity.run_context import AgentRunContext
 
 @dataclass(frozen=True, slots=True)
 class AgentRuntimeResources:
-    """装配层交给 AgentExecutor 的一次运行时资源快照。"""
+    """装配层交给 Agent Core 的一次运行时资源快照。"""
 
     checkpointer: BaseCheckpointSaver | bool
     backend: BackendProtocol

@@ -1,6 +1,5 @@
 """Agent V2 领域对象和值对象。"""
 
-from .agent_config import AgentConfig
 from .agent_memory import (
     AGENT_MEMORY_NAMESPACE_ROOT,
     AGENT_MEMORY_SOURCE,
@@ -17,7 +16,7 @@ from .agent_memory import (
 )
 from .run_context import (
     AgentRunContext,
-    AgentThreadIdentity,
+    AgentConversationIdentity,
 )
 from .subagent_config import SubAgentConfig, SubAgentConfigList
 from .token_usage import AgentTokenUsage, AgentTokenUsageSummary
@@ -35,7 +34,6 @@ from .workspace_quota import (
 from .workspace_scope import build_workspace_scope_id
 
 __all__ = [
-    "AgentConfig",
     "AGENT_MEMORY_NAMESPACE_ROOT",
     "AGENT_MEMORY_SOURCE",
     "AGENT_MEMORY_VIRTUAL_ROOT",
@@ -45,7 +43,7 @@ __all__ = [
     "AgentMemoryPathError",
     "AgentMemoryQuotaExceeded",
     "AgentRunContext",
-    "AgentThreadIdentity",
+    "AgentConversationIdentity",
     "SubAgentConfig",
     "SubAgentConfigList",
     "AgentTokenUsage",

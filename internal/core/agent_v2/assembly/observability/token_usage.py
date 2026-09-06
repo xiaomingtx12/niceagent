@@ -4,15 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from typing import Any
-from uuid import UUID
 
 from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.outputs import LLMResult
 
-from internal.core.agent_v2.protocol.message_parser import response_messages
-from internal.core.agent_v2.entity.token_usage import (
-    AgentTokenUsage,
-    AgentTokenUsageSummary,
-)
+from internal.core.agent_v2.entity.token_usage import AgentTokenUsage
 
 
 _INPUT_KEYS = ("input_tokens", "prompt_tokens", "prompt_token_count")
@@ -54,18 +50,6 @@ def normalize_message(message: Any) -> AgentTokenUsage:
     return AgentTokenUsage()
 
 
-def normalize_response(response: Any) -> AgentTokenUsage:
-    """归一化模型响应中的全部 AI 消息。"""
-    usage = AgentTokenUsage()
-    for message in response_messages(response):
-        current = normalize_message(message)
-        if current.present:
-            usage.add(current)
-            if usage.source == "unknown":
-                usage.source = current.source
-    return usage
-
-
 def normalize_usage(raw: Any, *, source: str = "unknown") -> AgentTokenUsage:
     """归一化标准格式或 Provider 自定义格式的 Token 用量映射。"""
     if not isinstance(raw, Mapping):
@@ -95,43 +79,30 @@ def normalize_usage(raw: Any, *, source: str = "unknown") -> AgentTokenUsage:
     )
 
 
-def build_framework_run_usage(
-    framework_usage: Mapping[str, Mapping[str, Any]] | None,
-    *,
-    usage_id: UUID | str,
-    trace_id: UUID | str,
-    tool_call_count: int = 0,
-) -> dict[str, Any] | None:
-    """把 LangChain 回调用量转换为统一的 Run 级持久化结构。"""
-    aggregate = AgentTokenUsageSummary()
-    if framework_usage:
-        for model_name, raw_usage in framework_usage.items():
-            aggregate.add(
-                normalize_usage(raw_usage, source="langchain_callback"),
-                model_name=str(model_name),
-            )
-    if not aggregate.present and not tool_call_count:
-        return None
+def normalize_llm_result(response: LLMResult) -> AgentTokenUsage:
+    """归一化 Callback ``on_llm_end`` 收到的完整模型结果。"""
+    usage = AgentTokenUsage()
+    for generations in response.generations:
+        if not generations:
+            continue
+        # Provider 用量描述整次响应；只读取每组首个 Generation，避免
+        # n > 1 时把同一份响应级用量重复累加。
+        current = normalize_message(getattr(generations[0], "message", None))
+        if current.present:
+            usage.add(current)
+    if usage.present:
+        return usage
 
-    total = aggregate.total
-    return {
-        "trace_id": str(trace_id),
-        "usage_id": str(usage_id),
-        "model_count": len(aggregate.by_model),
-        "model_call_count": aggregate.call_count,
-        "tool_call_count": tool_call_count,
-        "usage_source": "langchain_callback",
-        "usage_present": aggregate.present,
-        "input_tokens": total.input_tokens,
-        "output_tokens": total.output_tokens,
-        "total_tokens": total.total_tokens or total.input_tokens + total.output_tokens,
-        "input_details": dict(total.input_details),
-        "output_details": dict(total.output_details),
-        "models": {
-            model_name: usage.to_dict()
-            for model_name, usage in aggregate.by_model.items()
-        },
-    }
+    llm_output = response.llm_output
+    if isinstance(llm_output, Mapping):
+        for key in ("token_usage", "usage", "usage_metadata"):
+            current = normalize_usage(
+                llm_output.get(key),
+                source=f"llm_output.{key}",
+            )
+            if current.present:
+                return current
+    return usage
 
 
 def _first_int(raw: Mapping[str, Any], keys: Iterable[str]) -> int:
@@ -175,7 +146,6 @@ def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
 
 __all__ = [
     "normalize_message",
-    "normalize_response",
+    "normalize_llm_result",
     "normalize_usage",
-    "build_framework_run_usage",
 ]

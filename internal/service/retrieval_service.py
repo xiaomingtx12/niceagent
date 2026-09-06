@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from uuid import UUID
 
-from flask import Flask
+from flask import Flask, current_app
 from injector import inject
 from langchain_classic.retrievers import EnsembleRetriever
 from langchain_core.documents import Document as LCDocument
@@ -133,9 +133,9 @@ class RetrievalService(BaseService):
 
     def create_langchain_tool_from_search(
         self,
-        flask_app: Flask,
         dataset_ids: list[UUID],
         account_id: UUID,
+        flask_app: Flask | None = None,
         retrieval_strategy: str = RetrievalStrategy.SEMANTIC,
         k: int = 4,
         score: float = 0,
@@ -144,11 +144,13 @@ class RetrievalService(BaseService):
     ) -> BaseTool:
         """把一次已确定范围的知识库检索能力包装成 LangChain Tool。"""
 
+        app = flask_app or current_app._get_current_object()
+
         @tool(DATASET_RETRIEVAL_TOOL_NAME, args_schema=DatasetRetrievalToolReq)
         def dataset_retrieval(query: str) -> str:
             """如果需要搜索扩展的知识库内容，当你觉得用户的提问超过你的知识范围时，可以尝试调用该工具，输入为搜索query语句，返回数据为检索内容字符串"""
             # 1.调用search_in_datasets检索得到LangChain文档列表
-            with flask_app.app_context():
+            with app.app_context():
                 documents = self.search_in_datasets(
                     dataset_ids=dataset_ids,
                     query=query,

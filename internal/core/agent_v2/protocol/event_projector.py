@@ -73,6 +73,23 @@ def _normalize_namespace(value: Any) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _project_public_state(value: Mapping[str, Any]) -> dict[str, Any]:
+    """把框架状态字段转换为平台公开的会话语义。"""
+    projected = _json_value(value)
+    if not isinstance(projected, dict):
+        return {}
+    async_tasks = projected.get("async_tasks")
+    if not isinstance(async_tasks, dict):
+        return projected
+    for task in async_tasks.values():
+        if not isinstance(task, dict):
+            continue
+        framework_thread_id = task.pop("thread_id", None)
+        if framework_thread_id is not None:
+            task.setdefault("conversation_id", framework_thread_id)
+    return projected
+
+
 class AgentProtocolEventProjector:
     """把一次 DeepAgents v3 运行转换成有序的 Agent Protocol 事件流。
 
@@ -249,6 +266,8 @@ class AgentProtocolEventProjector:
                         source_sequence=raw_sequence,
                     )
             projected_event_data = data
+            if method == "values" and isinstance(data, Mapping):
+                projected_event_data = _project_public_state(data)
             skill_events: list[dict[str, Any]] = []
             if method == "tools" and isinstance(data, Mapping):
                 projected_event_data, skill_events = self._project_skill_tool_event(

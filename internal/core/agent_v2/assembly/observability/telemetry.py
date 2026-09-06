@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
-from logging import Logger
 from typing import Mapping, Protocol
 
 from internal.core.agent_v2.entity.telemetry import (
     AgentTelemetryEvent,
     TelemetryValue,
 )
-from internal.extension.logging_extension import logger as application_logger
+from internal.extension.logging_extension import logger
 
 
 def build_path_digest(path: str) -> str:
@@ -32,21 +30,6 @@ class NullAgentTelemetrySink:
 
     def record(self, event: AgentTelemetryEvent) -> None:
         """接收事件但不执行 I/O。"""
-
-
-class LoggingAgentTelemetrySink:
-    """通过应用日志写入结构化遥测。"""
-
-    def __init__(self, logger: Logger | None = None) -> None:
-        """使用指定日志器或默认遥测日志器。"""
-        self._logger = logger or application_logger
-
-    def record(self, event: AgentTelemetryEvent) -> None:
-        """写入不含模型和文件内容的 JSON 事件。"""
-        self._logger.info(
-            "agent_runtime_event %s",
-            json.dumps(event.to_dict(), ensure_ascii=True, sort_keys=True),
-        )
 
 
 class AgentTelemetry:
@@ -80,38 +63,7 @@ class AgentTelemetry:
                 )
             )
         except Exception:
-            application_logger.exception(
-                "Agent telemetry sink failed for %s", name
-            )
-
-    def emit_span(
-        self,
-        operation: str,
-        *,
-        phase: str,
-        trace_id: str,
-        span_id: str,
-        parent_span_id: str | None = None,
-        status: str | None = None,
-        duration_ms: float | None = None,
-        attributes: Mapping[str, TelemetryValue | None] | None = None,
-    ) -> None:
-        """发送带有稳定 Span 关联字段的 Trace 生命周期事件。"""
-        span_attributes: dict[str, TelemetryValue | None] = {
-            "trace_id": trace_id,
-            "span_id": span_id,
-            "parent_span_id": parent_span_id,
-            "span_kind": operation,
-            "status": status,
-            "duration_ms": (
-                round(max(0.0, duration_ms), 3) if duration_ms is not None else None
-            ),
-        }
-        span_attributes.update(attributes or {})
-        self.emit(
-            f"agent.{operation}.{phase}",
-            attributes=span_attributes,
-        )
+            logger.exception("Agent telemetry sink failed for %s", name)
 
     @staticmethod
     def _sanitize(
@@ -131,7 +83,6 @@ __all__ = [
     "AgentTelemetry",
     "AgentTelemetrySink",
     "build_path_digest",
-    "LoggingAgentTelemetrySink",
     "NOOP_AGENT_TELEMETRY",
     "NullAgentTelemetrySink",
 ]
