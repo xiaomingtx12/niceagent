@@ -401,14 +401,18 @@ class AppService(BaseService):
         app = self.get_app(app_id, account)
 
         # 2.校验传递的草稿配置信息
+        draft_app_config_record = app.draft_app_config
         draft_app_config = self.app_config_service.validate_draft_app_config(
             draft_app_config,
             account_id=account.id,
             app_id=app.id,
+            current_config={
+                "skills": draft_app_config_record.skills or [],
+                "subagents": draft_app_config_record.subagents or [],
+            },
         )
 
         # 3.获取当前应用的最新草稿信息
-        draft_app_config_record = app.draft_app_config
         self.update(
             draft_app_config_record,
             updated_at=datetime.now(),

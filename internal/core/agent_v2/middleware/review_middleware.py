@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Optional
 
 from langchain.agents.middleware.types import AgentMiddleware, hook_config
 from langchain_core.messages import AIMessage
+
+from internal.core.agent_v2.execution.message_parser import (
+    message_content_to_text,
+    response_messages,
+)
 
 
 class ReviewBlocked(Exception):
@@ -60,6 +66,11 @@ class ReviewMiddleware(AgentMiddleware):
         """返回是否启用任一审核策略。"""
         return self._enabled
 
+    @property
+    def output_enabled(self) -> bool:
+        """仅在有实际输出规则时延迟公开事件。"""
+        return self._enabled and self._outputs_enabled and bool(self._keywords)
+
     @hook_config(can_jump_to=["end"])
     def before_model(self, state: dict, runtime: Any) -> dict | None:
         """命中输入关键词时返回预设响应并结束图。"""
@@ -69,9 +80,11 @@ class ReviewMiddleware(AgentMiddleware):
         if not messages:
             return None
         last = messages[-1]
-        text = getattr(last, "content", "") or ""
-        if not isinstance(text, str):
+        role = (last.get("type") or last.get("role")) if isinstance(last, Mapping) else getattr(last, "type", "")
+        if role not in {"human", "user"}:
             return None
+        content = last.get("content", "") if isinstance(last, Mapping) else getattr(last, "content", "")
+        text = message_content_to_text(content)
         hit = apply_keyword_filter(text, self._keywords)
         if hit is not None:
             return {
@@ -82,21 +95,31 @@ class ReviewMiddleware(AgentMiddleware):
             }
         return None
 
-    def after_model(self, state: dict, runtime: Any) -> dict | None:
-        """output 审核：拦截 LLM 回答。"""
-        if not self._enabled or not self._outputs_enabled or not self._keywords:
-            return None
-        messages = state.get("messages", [])
-        if not messages:
-            return None
-        last = messages[-1]
-        text = getattr(last, "content", "") or ""
-        if not isinstance(text, str):
-            return None
-        hit = apply_keyword_filter(text, self._keywords)
-        if hit is not None:
-            raise ReviewBlocked(f"LLM 输出命中关键词 '{hit}'，已拦截。")
-        return None
+    @hook_config(can_jump_to=["end"])
+    async def abefore_model(self, state: dict, runtime: Any) -> dict | None:
+        """异步图沿用相同的用户输入文本审核。"""
+        return self.before_model(state, runtime)
+
+    def wrap_model_call(self, request: Any, handler: Callable) -> Any:
+        """在回答写入图状态前审核，避免失败回答进入后续轮次上下文。"""
+        response = handler(request)
+        for message in response_messages(response):
+            self.check_output(message.content)
+        return response
+
+    async def awrap_model_call(self, request: Any, handler: Callable[..., Awaitable]) -> Any:
+        """异步调用与同步调用遵守相同的状态写入边界。"""
+        response = await handler(request)
+        for message in response_messages(response):
+            self.check_output(message.content)
+        return response
+
+    def check_output(self, content: Any) -> None:
+        """供模型和事件交付边界共用文本块审核规则。"""
+        if self.output_enabled and apply_keyword_filter(
+            message_content_to_text(content), self._keywords
+        ) is not None:
+            raise ReviewBlocked("输出内容未通过审核。")
 
 
 __all__ = ["ReviewBlocked", "ReviewMiddleware", "apply_keyword_filter"]

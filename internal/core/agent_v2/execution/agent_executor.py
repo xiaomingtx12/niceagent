@@ -29,6 +29,7 @@ from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
 from internal.core.agent_v2.entity.agent_event import AgentEvent
 from internal.core.agent_v2.execution.message_parser import message_content_to_text
+from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.extension.logging_extension import logger
 
 
@@ -50,12 +51,14 @@ class AgentExecutor:
         graph: CompiledStateGraph,
         runtime: AgentRuntimeResources,
         observer: PlatformAgentRunObserver,
+        review_config: Mapping[str, Any] | None = None,
     ) -> None:
         """接管已编译图和当前 Run 的资源生命周期。"""
         self._graph: CompiledStateGraph = graph
         self._backend: BackendProtocol = runtime.backend
         self._runtime_context: AgentRunContext = runtime.runtime_context
         self._observer = observer
+        self._review = ReviewMiddleware(review_config=dict(review_config or {}))
         self._run_lock = Lock()
         self._state = _ExecutorState.READY
         self._run_control: RunControl | None = None
@@ -72,6 +75,7 @@ class AgentExecutor:
         error: Exception | None = None
         cancelled = cancel_requested.is_set()
         raw_stream = self.stream_events(input)
+        reviewed_events: list[AgentEvent] = []
         try:
             # 1.取消后请求图协作退出，继续消费以完成图内部清理。
             if not cancelled:
@@ -93,7 +97,30 @@ class AgentExecutor:
                         continue
 
                     # 2.取消后的根状态仍用于保存部分结果，但不再向前端输出增量。
-                    on_event(event)
+                    if self._review.output_enabled:
+                        # 原生消息增量和 values 都可能携带未审核文本，整轮通过后再公开。
+                        if event.channel == "values" and isinstance(event.data, Mapping):
+                            for message in reversed(event.data.get("messages", []) or []):
+                                if isinstance(message, BaseMessage):
+                                    role, content = message.type, message.content
+                                elif isinstance(message, Mapping):
+                                    role = message.get("type") or message.get("role")
+                                    content = message.get("content")
+                                else:
+                                    continue
+                                if role in {"human", "user"}:
+                                    break
+                                if role in {"ai", "assistant"}:
+                                    self._review.check_output(content)
+                        reviewed_events.append(event)
+                    else:
+                        on_event(event)
+                if not cancelled and not cancel_requested.is_set():
+                    for event in reviewed_events:
+                        if cancel_requested.is_set():
+                            cancelled = True
+                            break
+                        on_event(event)
         except GraphDrained as exc:
             if exc.reason == "cancel_requested" or cancel_requested.is_set():
                 cancelled = True
@@ -120,6 +147,9 @@ class AgentExecutor:
                         logger.exception("Agent 执行失败后的资源关闭失败")
 
         # 4.从根图最终状态提取回答，并结束观测与用量统计。
+        if self._review.output_enabled and (error is not None or cancelled or cancel_requested.is_set()):
+            # 未通过交付审核的回答也不能经业务历史或取消结果公开。
+            state = {key: value for key, value in state.items() if key != "messages"}
         answer = ""
         messages = state.get("messages")
         if isinstance(messages, list):

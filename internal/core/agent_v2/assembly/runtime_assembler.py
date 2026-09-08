@@ -60,6 +60,7 @@ class AgentRuntimeAssembler:
         workspace: WorkspaceBackend | None = None
         sandbox: SandboxProjection | None = None
         backend: BackendProtocol | None = None
+        skill_projection = None
         phase_started_at = time.monotonic()
         try:
             telemetry = AgentTelemetry(observer, attributes=context.telemetry_attributes)
@@ -128,7 +129,10 @@ class AgentRuntimeAssembler:
                 runtime=runtime,
                 subagent_bindings=definition.subagent_bindings,
             )
-            agent = AgentExecutor(graph=graph, runtime=runtime, observer=observer)
+            agent = AgentExecutor(
+                graph=graph, runtime=runtime, observer=observer,
+                review_config=definition.review_config,
+            )
             graph_ms = (time.monotonic() - phase_started_at) * 1000
             observer.record_stage("assembly.graph", graph_ms)
             for stage, duration_ms in (
@@ -156,6 +160,8 @@ class AgentRuntimeAssembler:
                 resources = [workspace]
             else:
                 resources = []
+            if backend is None and skill_projection is not None:
+                resources.extend(skill_projection.routes.values())
             for resource in resources:
                 try:
                     close_runtime_backends(resource)

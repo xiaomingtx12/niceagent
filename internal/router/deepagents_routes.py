@@ -14,6 +14,22 @@ def register_deepagents_routes(
 ) -> None:
     """注册创建者与 WebApp 的 DeepAgents 资源路由。"""
     blueprint.add_url_rule(
+        "/apps/<uuid:app_id>/memory/entries", methods=["GET"],
+        view_func=memory_file_handler.list_app_memory_entries,
+    )
+    blueprint.add_url_rule(
+        "/apps/<uuid:app_id>/memory/entries", methods=["POST"],
+        view_func=memory_file_handler.change_app_memory_entry,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/memory/entries", methods=["GET"],
+        view_func=memory_file_handler.list_web_app_memory_entries,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/memory/entries", methods=["POST"],
+        view_func=memory_file_handler.change_web_app_memory_entry,
+    )
+    blueprint.add_url_rule(
         "/apps/<uuid:app_id>/skills",
         methods=["GET"],
         view_func=skill_handler.list_skills,

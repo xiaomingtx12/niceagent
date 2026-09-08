@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast, Union
 from uuid import UUID
@@ -74,6 +74,7 @@ class AppConfigService(BaseService):
         draft_app_config: DraftAppConfigPatchReq,
         account_id: UUID,
         app_id: UUID | None = None,
+        current_config: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """补充数据库业务校验，并返回可持久化的草稿更新数据。"""
         normalized = draft_app_config.model_dump(
@@ -105,14 +106,16 @@ class AppConfigService(BaseService):
                 draft_app_config.skills
             )
 
-        if draft_app_config.subagents is not None:
+        if draft_app_config.subagents is not None or draft_app_config.skills is not None:
+            # Patch 未提交的关联字段沿用草稿；仅用合并视图校验，不扩大写入范围。
+            effective_config = {**(current_config or {}), **normalized}
             enabled_skills = {
                 item["name"]
-                for item in normalized.get("skills", [])
+                for item in effective_config.get("skills", [])
                 if item.get("enabled", True)
             }
-            for subagent in draft_app_config.subagents:
-                missing = sorted(set(subagent.skills) - enabled_skills)
+            for subagent in effective_config.get("subagents", []):
+                missing = sorted(set(subagent.get("skills", [])) - enabled_skills)
                 if missing:
                     raise ValidateErrorException(
                         "SubAgent 只能选择主 Agent 已挂载的 Skills: "

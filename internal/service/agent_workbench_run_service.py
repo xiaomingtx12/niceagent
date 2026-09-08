@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, ClassVar
 from uuid import UUID
 
 from injector import inject
@@ -38,6 +38,7 @@ class AgentWorkbenchRunService:
     """负责 Run 记录、历史事件和消息终态的数据库读写。"""
 
     db: SQLAlchemy
+    lease_seconds: ClassVar[int] = 120
 
     def add_run(self, run: WorkbenchRun) -> AgentRun:
         """在调用方事务中创建平台级 ``AgentRun`` 数据库记录。"""
@@ -54,6 +55,8 @@ class AgentWorkbenchRunService:
             status=run.status.value,
             last_event_sequence=run.initial_event_sequence,
             created_at=datetime.now(UTC).replace(tzinfo=None),
+            executor_id=run.executor_id,
+            heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
         )
         # 2.交给调用方事务 flush，保证后续事件可以按 Run 主键写入。
         self.db.session.add(row)
@@ -72,14 +75,15 @@ class AgentWorkbenchRunService:
         with self.db.auto_commit():
             row = (
                 self.db.session.query(AgentRun)
+                .populate_existing()
                 .with_for_update()
                 .filter(AgentRun.id == run.run_id)
                 .one_or_none()
             )
-            if row is None:
-                return
-            if row.status in WORKBENCH_TERMINAL_STATUSES and row.status != status.value:
-                return
+            if row is None or row.executor_id != run.executor_id:
+                raise RuntimeError("Agent Run 执行权已失效")
+            if row.status in WORKBENCH_TERMINAL_STATUSES:
+                raise RuntimeError("Agent Run 已结束")
             if (
                 row.status == WorkbenchRunStatus.CANCELLING.value
                 and status is WorkbenchRunStatus.RUNNING
@@ -104,20 +108,21 @@ class AgentWorkbenchRunService:
         events: list[WorkbenchEvent] | None = None,
     ) -> bool:
         """在一个事务中收敛 Run、业务消息和平台观测快照。"""
-        # 1.锁定 Run，已由其他执行路径写入不同终态时不再覆盖。
+        # 1.锁定 Run，执行权失效或已写入终态时忽略迟到的结果。
         with self.db.auto_commit():
             row = (
                 self.db.session.query(AgentRun)
+                .populate_existing()
                 .with_for_update()
                 .filter(AgentRun.id == run.run_id)
                 .one_or_none()
             )
-            if row is None:
+            if row is None or row.executor_id != run.executor_id:
                 return False
-            if row.status in WORKBENCH_TERMINAL_STATUSES and row.status != status.value:
+            if row.status in WORKBENCH_TERMINAL_STATUSES:
                 return False
 
-            # 2.更新运行结果，重复保存同一终态时保留最初的结束时间。
+            # 2.仅第一次成功收敛的调用保存运行结果和结束时间。
             row.status = status.value
             row.error_message = error_message
             if row.finished_at is None:
@@ -186,12 +191,13 @@ class AgentWorkbenchRunService:
         with self.db.auto_commit():
             row = (
                 self.db.session.query(AgentRun)
+                .populate_existing()
                 .with_for_update()
                 .filter(AgentRun.id == run.run_id)
                 .one_or_none()
             )
-            if row is None:
-                return
+            if row is None or row.executor_id != run.executor_id or row.status in WORKBENCH_TERMINAL_STATUSES:
+                raise RuntimeError("Agent Run 执行权已失效，不能继续发布事件")
             previous_sequence = int(row.last_event_sequence or 0)
             row.last_event_sequence = max(previous_sequence, latest_sequence)
             if latest_snapshot is not None and snapshot_sequence >= previous_sequence:
@@ -206,9 +212,73 @@ class AgentWorkbenchRunService:
                     )
                 )
 
-    def get_run(self, run_id: UUID) -> AgentRun | None:
+    def renew_lease(self, run: WorkbenchRun) -> bool:
+        """只允许当前执行实例续租；已超时或已结束的 Run 不能被旧线程复活。"""
+        now = datetime.now(UTC).replace(tzinfo=None)
+        with self.db.auto_commit():
+            updated = (
+                self.db.session.query(AgentRun)
+                .filter(
+                    AgentRun.id == run.run_id,
+                    AgentRun.executor_id == run.executor_id,
+                    AgentRun.status.in_(WORKBENCH_ACTIVE_STATUSES),
+                    AgentRun.heartbeat_at >= now - timedelta(seconds=self.lease_seconds),
+                )
+                .update({AgentRun.heartbeat_at: now}, synchronize_session=False)
+            )
+        return bool(updated)
+
+    def recover_stale_runs(
+        self, *, conversation_id: UUID | None = None, run_id: UUID | None = None
+    ) -> None:
+        """按访问范围收敛失联 Run；终态、消息和 SSE 事件在同一事务提交。"""
+        if conversation_id is None and run_id is None:
+            raise ValueError("恢复运行必须指定会话或 Run")
+        now = datetime.now(UTC).replace(tzinfo=None)
+        with self.db.auto_commit():
+            query = self.db.session.query(AgentRun).filter(
+                AgentRun.status.in_(WORKBENCH_ACTIVE_STATUSES),
+                func.coalesce(AgentRun.heartbeat_at, AgentRun.started_at, AgentRun.created_at)
+                < now - timedelta(seconds=self.lease_seconds),
+            )
+            if conversation_id is not None:
+                query = query.filter(AgentRun.conversation_id == conversation_id)
+            if run_id is not None:
+                query = query.filter(AgentRun.id == run_id)
+            for row in query.populate_existing().with_for_update().all():
+                cancelled = row.status == WorkbenchRunStatus.CANCELLING.value
+                row.status = "cancelled" if cancelled else "failed"
+                row.error_message = "Agent 执行进程已失联，请重新发送消息。"
+                row.finished_at = now
+                # 撤销执行权，使迟到的事件、结果和续租无法覆盖恢复后的状态。
+                row.executor_id = None
+                row.last_event_sequence = int(row.last_event_sequence or 0) + 1
+                event = WorkbenchEvent(
+                    type="event",
+                    event_id=f"{row.id}:{row.last_event_sequence}",
+                    seq=row.last_event_sequence,
+                    method="lifecycle",
+                    params={"data": {
+                        "event": "interrupted" if cancelled else "failed",
+                        "status": row.status,
+                        "error": row.error_message,
+                        "message_id": str(row.message_id),
+                        "input_message_id": row.input_message_id,
+                    }},
+                )
+                self.db.session.add(AgentRunEvent(
+                    run_id=row.id, sequence=event.seq, payload=event.model_dump(mode="json")
+                ))
+                message = self.db.session.get(Message, row.message_id)
+                if message is not None:
+                    message.status = "stop" if cancelled else "error"
+                    message.error = row.error_message
+
+    def get_run(self, run_id: UUID, *, recover: bool = True) -> AgentRun | None:
         """按主键读取 Run；调用方若继续使用 ORM 对象需负责关闭 Session。"""
-        return self.db.session.get(AgentRun, run_id)
+        if recover:
+            self.recover_stale_runs(run_id=run_id)
+        return self.db.session.get(AgentRun, run_id, populate_existing=True)
 
     def get_run_by_input_message(
         self,
@@ -269,6 +339,7 @@ class AgentWorkbenchRunService:
         invoke_from: InvokeFrom,
     ) -> AgentRun | None:
         """读取会话指定来源的最新 Run，并释放只读 Session。"""
+        self.recover_stale_runs(conversation_id=conversation_id)
         try:
             return (
                 self.db.session.query(AgentRun)
@@ -365,6 +436,7 @@ class AgentWorkbenchRunService:
         with self.db.auto_commit():
             current = (
                 self.db.session.query(AgentRun)
+                .populate_existing()
                 .with_for_update()
                 .filter(
                     AgentRun.id == row.id,

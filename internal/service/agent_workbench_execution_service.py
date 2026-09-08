@@ -19,6 +19,7 @@ from internal.core.agent_v2 import AgentEvent, AgentExecutionResult
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     AgentMessageError,
 )
+from internal.core.agent_v2.middleware.review_middleware import ReviewBlocked
 from internal.service.agent_protocol.event_projector import (
     AgentProtocolEventProjector,
     project_public_state,
@@ -89,7 +90,11 @@ class AgentWorkbenchRunExecutionService:
                 if (
                     len(pending_events) >= self._persistence_batch_size
                     or time.monotonic() - last_flush_at >= 0.1
-                    or event.method == "lifecycle"
+                    # 阶段结束和工具启动前必须刷新，不能把尾批留到慢工具返回。
+                    or event.method != "messages"
+                    or event.params.data.get("event") in {
+                        "content-block-finish", "message-finish"
+                    }
                 ):
                     self.run_service.record_events(run, pending_events)
                     for committed in pending_events:
@@ -132,7 +137,7 @@ class AgentWorkbenchRunExecutionService:
                         with flask_app.app_context():
                             while not monitor_done.wait(0.5):
                                 try:
-                                    row = self.run_service.get_run(run.run_id)
+                                    row = self.run_service.get_run(run.run_id, recover=False)
                                     if row is not None and row.status == "cancelling":
                                         run.cancel_requested.set()
                                     if run.cancel_requested.is_set():
@@ -254,6 +259,8 @@ class AgentWorkbenchRunExecutionService:
                 error_code = error.code.value
             elif isinstance(error, AgentMessageError):
                 public_error = f"模型工具调用格式错误：{error}"
+            elif isinstance(error, ReviewBlocked):
+                public_error = "输出内容未通过审核。"
             message_updates = {"status": MessageStatus.ERROR, "error": public_error}
             lifecycle = {
                 "event": "failed",

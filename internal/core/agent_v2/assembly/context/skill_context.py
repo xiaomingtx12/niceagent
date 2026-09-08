@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
-from deepagents.backends import FilesystemBackend
 from deepagents.backends.protocol import BackendProtocol
 
+from internal.core.agent_v2.backends.skill_backend import SkillBackend
 from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
 
 
@@ -35,6 +34,7 @@ class SkillContextAssembler:
     ) -> SkillProjection:
         """装配主 Agent 和 SubAgent 的只读 Skill 路由。"""
         projection = SkillProjection()
+        packages: dict[str, list[tuple[str, bytes]]] = {}
         enabled_skills = [skill for skill in skills if getattr(skill, "enabled", True)]
         selected_names = set(selected_skill_names)
         main_skills = (
@@ -43,12 +43,11 @@ class SkillContextAssembler:
             else enabled_skills
         )
         if main_skills:
-            projection.routes["/skills/"] = _filesystem_backend(main_skills)
+            packages["/skills/"] = [
+                file for skill in main_skills
+                for file in _package_files(root=f"/{skill.name}", skill=skill)
+            ]
             projection.sources = ["/skills/"]
-            for skill in main_skills:
-                projection.files.extend(
-                    _package_files(root=f"/skills/{skill.name}", skill=skill)
-                )
 
         skill_map = {skill.name: skill for skill in enabled_skills}
         for subagent_config in subagents:
@@ -64,12 +63,19 @@ class SkillContextAssembler:
             name = subagent_config.name
             prefix = f"/subagent_skills/{name}/"
             selected = [skill_map[item] for item in requested]
-            projection.routes[prefix] = _filesystem_backend(selected)
+            packages[prefix] = [
+                file for skill in selected
+                for file in _package_files(root=f"/{skill.name}", skill=skill)
+            ]
             projection.subagent_sources[name] = [prefix]
-            for skill in selected:
-                projection.files.extend(
-                    _package_files(root=f"{prefix}{skill.name}", skill=skill)
-                )
+        try:
+            for prefix, files in packages.items():
+                projection.routes[prefix] = SkillBackend(files)
+                projection.files.extend((f"{prefix.rstrip('/')}{path}", content) for path, content in files)
+        except Exception:
+            for backend in projection.routes.values():
+                backend.close()
+            raise
         return projection
 
 
@@ -90,18 +96,6 @@ def _package_files(*, root: str, skill: Any) -> list[tuple[str, bytes]]:
             raise ValueError(f"invalid Skill package path: {relative}")
         files.append((f"{root.rstrip('/')}/{normalized}", str(content).encode("utf-8")))
     return files
-
-
-def _filesystem_backend(skills: Sequence[Any]) -> FilesystemBackend:
-    """把内置 Skill 根目录接入 DeepAgents 文件 Backend。"""
-    roots = {
-        Path(skill.package_root).resolve().parent
-        for skill in skills
-        if getattr(skill, "package_root", None) is not None
-    }
-    if len(roots) != 1:
-        raise ValueError("enabled Skills must share one package root")
-    return FilesystemBackend(root_dir=next(iter(roots)), virtual_mode=True)
 
 
 __all__ = ["SkillContextAssembler", "SkillProjection"]

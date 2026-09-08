@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Generic, TypeVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
@@ -57,6 +57,7 @@ class WorkbenchRun(Generic[_InvocationReqT]):
     run_id: UUID
     conversation_id: UUID
     spec: _InvocationReqT
+    executor_id: UUID = field(default_factory=uuid4)
     status: WorkbenchRunStatus = WorkbenchRunStatus.QUEUED
     initial_event_sequence: int = 0
     last_event_sequence: int = 0

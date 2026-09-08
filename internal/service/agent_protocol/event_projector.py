@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 from typing import Any
 from uuid import UUID, uuid4
@@ -62,7 +63,7 @@ def project_public_state(value: Mapping[str, Any]) -> dict[str, Any]:
     projected = _json_value(value)
     if not isinstance(projected, dict):
         return {}
-    # 工作台一条业务问答只显示一个回答，模型中间思考仍保留在原始 checkpoint。
+    # 会话摘要保留最后一条回答；阶段正文由公开 messages 事件独立重放。
     messages = projected.get("messages")
     if isinstance(messages, list):
         visible = []
@@ -154,7 +155,7 @@ class AgentProtocolEventProjector:
         self.last_event_sequence += 1
         params = {
             "namespace": _json_value(namespace or []),
-            "timestamp": timestamp,
+            "timestamp": timestamp if timestamp is not None else int(time.time() * 1000),
             "data": _json_value(data),
         }
         if node:
@@ -222,6 +223,20 @@ class AgentProtocolEventProjector:
                 if not namespace and child_namespace is not None:
                     namespace = _normalize_namespace(child_namespace)
             flushed = []
+            if (
+                method == "tools"
+                and isinstance(data, Mapping)
+                and data.get("event") == "tool-started"
+            ):
+                # 部分供应商不发送 finish chunk；工具边界也必须封存前一阶段。
+                # 只关闭当前图，不能截断仍在并行输出的子图。
+                for key in list(self._text_streams):
+                    if key[0] == tuple(namespace):
+                        flushed.extend(
+                            self._finish_text_stream(
+                                key, timestamp=timestamp, source_sequence=raw_sequence,
+                            )
+                        )
             if method == "lifecycle" and isinstance(data, Mapping):
                 lifecycle_value = data.get("event") or data.get("status") or ""
                 lifecycle_event = (

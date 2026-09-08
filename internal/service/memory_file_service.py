@@ -22,6 +22,10 @@ from internal.core.agent_v2.persistence.agent_memory_repository import (
     AgentMemoryStorageError,
 )
 from internal.exception import FailException, ValidateErrorException
+from internal.core.agent_v2.entity.memory_entry import MemoryChange, MemorySource
+from internal.core.agent_v2.persistence.memory_entry_repository import MemoryEntryRepository
+from psycopg import OperationalError, InterfaceError
+from psycopg_pool import PoolTimeout
 
 
 @inject
@@ -30,6 +34,29 @@ class MemoryFileService:
     """协调记忆身份、领域校验、配额和持久化。"""
 
     agent_memory_repository: AgentMemoryRepository
+
+    def list_entries(self, *, account_id: str | UUID, app_id: str | UUID) -> list:
+        """结构化记忆与文件管理共用已鉴权身份，不接受任意命名空间。"""
+        identity = self._identity(account_id, app_id)
+        try:
+            repository = MemoryEntryRepository(self.agent_memory_repository.store_provider())
+            return repository.list_entries(identity)
+        except (OperationalError, InterfaceError, PoolTimeout) as exc:
+            raise FailException("长期记忆存储暂时不可用") from exc
+
+    def change_entry(
+        self, *, account_id: str | UUID, app_id: str | UUID,
+        change: MemoryChange, evidence: str,
+    ) -> dict:
+        """管理界面的明确操作可以恢复候选、暂停或遗忘记忆。"""
+        identity = self._identity(account_id, app_id)
+        try:
+            repository = MemoryEntryRepository(self.agent_memory_repository.store_provider())
+            return repository.change(identity, change, MemorySource(kind="user", evidence=evidence))
+        except ValueError as exc:
+            raise ValidateErrorException(str(exc)) from exc
+        except (OperationalError, InterfaceError, PoolTimeout) as exc:
+            raise FailException("长期记忆存储暂时不可用") from exc
 
     def list_files(
         self,

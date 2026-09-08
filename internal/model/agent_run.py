@@ -54,6 +54,8 @@ class AgentRun(db.Model):
     observability = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     last_event_sequence = Column(Integer, nullable=False, server_default=text("0"))
     error_message = Column(Text, nullable=False, server_default=text("''"))
+    executor_id = Column(UUID, nullable=True)
+    heartbeat_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(

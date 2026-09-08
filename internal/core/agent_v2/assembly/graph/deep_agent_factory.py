@@ -31,10 +31,9 @@ from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
 from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
-from internal.core.agent_v2.middleware.reloading_memory_middleware import (
-    ReloadingMemoryMiddleware,
-)
+from internal.core.agent_v2.middleware.structured_memory_middleware import StructuredMemoryMiddleware
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
+from internal.core.agent_v2.middleware.reloading_skills_middleware import ReloadingSkillsMiddleware
 from internal.core.agent_v2.middleware.runtime_context_middleware import (
     RuntimeContextMiddleware,
 )
@@ -110,6 +109,11 @@ def _build_platform_middleware(
 ) -> list[AgentMiddleware]:
     """按稳定顺序构造 MyDify 扩展的 DeepAgents 中间件。"""
     middleware: list[AgentMiddleware] = [
+        ReloadingSkillsMiddleware(
+            backend=runtime.backend,
+            sources=list(runtime.skill_sources),
+            system_prompt=None,
+        ),
         ToolCallValidationMiddleware(),
         RuntimeContextMiddleware(),
         ReviewMiddleware(review_config=dict(review_config)),
@@ -136,13 +140,7 @@ def _build_platform_middleware(
         ),
     ]
     if runtime.memory_sources:
-        middleware.append(
-            ReloadingMemoryMiddleware(
-                backend=runtime.backend,
-                sources=list(runtime.memory_sources),
-                add_cache_control=True,
-            )
-        )
+        middleware.append(StructuredMemoryMiddleware())
     return middleware
 
 

@@ -72,6 +72,7 @@ class AgentWorkbenchService:
     ) -> Iterator[dict[str, Any] | None]:
         """使用已提交事件续传，跨进程订阅和快速结束的 Run 走同一条路径。"""
         try:
+            self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
             replay_events = self.run_service.get_reconnect_events(
                 conversation_id=context.conversation_id,
                 invoke_from=context.invoke_from,
@@ -85,6 +86,7 @@ class AgentWorkbenchService:
             cursor = stream_request.since
             events = replay_events
             heartbeat_at = time.monotonic() + 15
+            recovery_at = time.monotonic() + 10
             while True:
                 for event in events:
                     cursor = event.seq
@@ -96,6 +98,9 @@ class AgentWorkbenchService:
                     yield None
                     heartbeat_at = time.monotonic() + 15
                 try:
+                    if time.monotonic() >= recovery_at:
+                        self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
+                        recovery_at = time.monotonic() + 10
                     events = self.run_service.get_reconnect_events(
                         conversation_id=context.conversation_id,
                         invoke_from=context.invoke_from,
@@ -112,6 +117,7 @@ class AgentWorkbenchService:
         context: AgentInvocationContext,
     ) -> WorkbenchStateResp:
         """使用入口已校验的上下文读取工作台状态。"""
+        self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
         # 1.由会话服务读取业务消息和稳定游标，再关联对应的 Agent Run。
         rows, has_more, next_before = self.conversation_service.get_message_page(
             conversation_id=context.conversation_id,
@@ -296,6 +302,7 @@ class AgentWorkbenchService:
     ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
         """锁定会话后完成去重和创建，提交成功才注册并启动后台执行。"""
         conversation_id = context.conversation_id
+        self.run_service.recover_stale_runs(conversation_id=conversation_id)
 
         with self.db.auto_commit():
             # 1.锁定会话行，使同一会话的启动请求按顺序检查和创建。
@@ -416,12 +423,45 @@ class AgentWorkbenchService:
     def _execute_background_run(self, flask_app: Flask, run: WorkbenchRun) -> None:
         """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
         with flask_app.app_context():
+            lease_done = threading.Event()
+            lease_monitor = threading.Thread(
+                target=self._watch_run_lease,
+                args=(flask_app, run, lease_done),
+                name=f"agent-lease-{run.run_id}",
+                daemon=True,
+            )
             try:
+                if not self.run_service.renew_lease(run):
+                    raise RuntimeError("Agent Run 执行权已失效")
+                lease_monitor.start()
                 self.execution_service.execute(run)
             except Exception as exc:
                 self._fail_background_run(run, exc)
             finally:
+                lease_done.set()
+                if lease_monitor.ident is not None:
+                    lease_monitor.join(timeout=1)
                 self.db.session.remove()
+
+    def _watch_run_lease(
+        self, flask_app: Flask, run: WorkbenchRun, done: threading.Event
+    ) -> None:
+        """从装配开始独立续租，模型无输出或工具耗时不会被误判为进程退出。"""
+        last_renewed = time.monotonic()
+        with flask_app.app_context():
+            while not done.wait(10):
+                try:
+                    if not self.run_service.renew_lease(run):
+                        run.cancel_requested.set()
+                        return
+                    last_renewed = time.monotonic()
+                except Exception:
+                    logger.exception("Agent Run 心跳更新失败 run_id=%s", run.run_id)
+                    if time.monotonic() - last_renewed >= self.run_service.lease_seconds:
+                        run.cancel_requested.set()
+                        return
+                finally:
+                    self.db.session.remove()
 
     def _fail_background_run(self, run: WorkbenchRun, exc: Exception) -> None:
         """后台执行异常时保证数据库状态和本地队列都进入终态。"""
