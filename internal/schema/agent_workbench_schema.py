@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -34,6 +33,8 @@ class WorkbenchCommandMessageReq(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     id: StrictStr | None = Field(default=None, max_length=255)
+    type: Literal["human", "user"] | None = None
+    role: Literal["human", "user"] | None = None
     content: Any = ""
 
     @property
@@ -58,7 +59,7 @@ class WorkbenchCommandInputReq(BaseModel):
     messages: list[WorkbenchCommandMessageReq] = Field(default_factory=list)
     query: StrictStr | None = None
     image_urls: list[StrictStr] = Field(default_factory=list, max_length=10)
-    file_ids: list[StrictStr] = Field(default_factory=list, max_length=5)
+    file_ids: list[UUID] = Field(default_factory=list, max_length=5)
     selected_skills: list[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = (
         Field(default_factory=list, max_length=20)
     )
@@ -82,10 +83,19 @@ class WorkbenchCommandInputReq(BaseModel):
             raise ValueError("所选 Skill 不能重复")
         return normalized
 
+    @field_validator("file_ids")
+    @classmethod
+    def reject_duplicate_file_ids(cls, value: list[UUID]) -> list[UUID]:
+        """同一附件在一次调用中只能出现一次。"""
+        if len(value) != len(set(value)):
+            raise ValueError("附件不能重复提交")
+        return value
+
     def to_run_input(self) -> WorkbenchRunInput:
         """把已校验的协议输入转换成核心服务使用的运行输入。"""
         message = self.messages[-1] if self.messages else None
         query = message.text if message is not None else (self.query or "")
+        query = query.strip()
         if not query:
             raise ValidateErrorException("run.start 需要非空的用户输入")
         return WorkbenchRunInput(
@@ -155,9 +165,7 @@ class _WorkbenchToolEventBase(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    tool_call_id: StrictStr = Field(
-        validation_alias=AliasChoices("tool_call_id", "id")
-    )
+    tool_call_id: StrictStr = Field(validation_alias=AliasChoices("tool_call_id", "id"))
 
     @field_validator("tool_call_id", mode="before")
     @classmethod
@@ -170,9 +178,7 @@ class WorkbenchToolStartedData(_WorkbenchToolEventBase):
     """工具开始事件。"""
 
     event: Literal["tool-started"]
-    tool_name: StrictStr = Field(
-        validation_alias=AliasChoices("tool_name", "name")
-    )
+    tool_name: StrictStr = Field(validation_alias=AliasChoices("tool_name", "name"))
     input: Any = None
 
 
@@ -229,17 +235,7 @@ class WorkbenchEvent(BaseModel):
     params: WorkbenchEventParams
 
 
-@dataclass(frozen=True)
-class WorkbenchLocalEventBatchResp:
-    """一次本地工作台事件队列读取结果。"""
-
-    events: tuple[WorkbenchEvent, ...]
-    oldest_event_sequence: int | None
-    timed_out: bool
-    finished: bool
-
-
-class WorkbenchSubscriptionReq(BaseModel):
+class WorkbenchEventStreamReq(BaseModel):
     """SSE 订阅过滤条件。
 
     ``input`` 和 ``checkpoints`` 是 LangGraph SDK 根订阅的控制 channel。
@@ -269,12 +265,13 @@ class WorkbenchSubscriptionReq(BaseModel):
         body: Mapping[str, Any] | None,
         *,
         last_event_id: str | None = None,
-    ) -> "WorkbenchSubscriptionReq":
+    ) -> "WorkbenchEventStreamReq":
         payload = dict(body) if isinstance(body, Mapping) else {}
-        if "since" not in payload and last_event_id:
+        if last_event_id:
             sequence = _parse_last_event_sequence(last_event_id)
-            if sequence is not None:
-                payload["since"] = sequence
+            since = payload.get("since", 0)
+            if sequence is not None and type(since) is int and since >= 0:
+                payload["since"] = max(since, sequence)
         try:
             return cls.model_validate(payload)
         except ValidationError as exc:
@@ -347,13 +344,6 @@ class WorkbenchCommandErrorResp(BaseModel):
     message: str
 
 
-class WorkbenchReplayBatchResp(BaseModel):
-    """Repository 返回的一批短期重放事件。"""
-
-    events: list[WorkbenchEvent] = Field(default_factory=list)
-    oldest_event_sequence: int | None = Field(default=None, ge=1)
-
-
 class WorkbenchHistoryMessageResp(BaseModel):
     """状态水合和消息分页中的一条对话消息。"""
 
@@ -370,13 +360,6 @@ class WorkbenchMessagePageInfoResp(BaseModel):
 
     has_more: bool = False
     next_before: UUID | None = None
-
-
-class WorkbenchMessagePageResp(BaseModel):
-    """工作台历史消息分页响应。"""
-
-    messages: list[WorkbenchHistoryMessageResp] = Field(default_factory=list)
-    page: WorkbenchMessagePageInfoResp
 
 
 class WorkbenchRunMetadataResp(BaseModel):
@@ -419,22 +402,19 @@ __all__ = [
     "WorkbenchCommandReq",
     "WorkbenchCommandInputReq",
     "WorkbenchCommandMessageReq",
-    "WorkbenchSubscriptionReq",
+    "WorkbenchEventStreamReq",
     "WorkbenchCommandResultResp",
     "WorkbenchCommandSuccessResp",
     "WorkbenchCommandErrorResp",
     "WorkbenchEvent",
     "WorkbenchEventParams",
-    "WorkbenchLocalEventBatchResp",
     "WorkbenchToolEventData",
     "WorkbenchToolErrorData",
     "WorkbenchToolFinishedData",
     "WorkbenchToolOutputDeltaData",
     "WorkbenchToolStartedData",
     "WorkbenchHistoryMessageResp",
-    "WorkbenchReplayBatchResp",
     "WorkbenchMessagePageInfoResp",
-    "WorkbenchMessagePageResp",
     "WorkbenchRunMetadataResp",
     "WorkbenchStateResp",
     "WorkbenchCancelResp",

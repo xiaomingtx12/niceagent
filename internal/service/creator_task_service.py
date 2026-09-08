@@ -14,7 +14,10 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
 from internal.model import Account, AgentRun, App, Conversation, EndUser
-from internal.schema.agent_runtime_schema import AgentConversationCleanupReq
+from internal.schema.agent_runtime_schema import (
+    AgentConversationCleanupReq,
+    AgentInvocationContext,
+)
 from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
@@ -46,14 +49,49 @@ class CreatorTaskService(BaseService):
         )
         if app is None:
             raise NotFoundException("应用不存在、未发布或无权访问")
-        with self.db.auto_commit():
-            conversation = self.conversation_service.create_conversation(
-                app_id=app.id,
-                invoke_from=InvokeFrom.CREATOR_TASK,
-                created_by=account.id,
-                owner_account_id=account.id,
-            )
+        conversation = self.create(
+            Conversation,
+            app_id=app.id,
+            name="新的会话",
+            invoke_from=InvokeFrom.CREATOR_TASK,
+            created_by=account.id,
+            owner_account_id=account.id,
+        )
         return self._serialize_conversation(conversation, app)
+
+    def get_invocation_context(
+        self,
+        *,
+        app_id: UUID,
+        conversation_id: UUID,
+        account: Account,
+    ) -> AgentInvocationContext:
+        """把 Creator 任务入口转换为已校验的 Agent 调用上下文。"""
+        app = (
+            self.db.session.query(App)
+            .filter(
+                App.id == app_id,
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+            )
+            .one_or_none()
+        )
+        if app is None:
+            raise NotFoundException("应用不存在、未发布或无权访问")
+        conversation = self.conversation_service.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
+            app_id=app.id,
+            allowed_sources=(InvokeFrom.CREATOR_TASK, InvokeFrom.WEB_APP),
+        )
+        return AgentInvocationContext(
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+            created_by=account.id,
+            end_user_id=None,
+            invoke_from=InvokeFrom.CREATOR_TASK,
+        )
 
     def _visible_query(self, account: Account):
         """构建同账号可见的任务会话查询。
@@ -66,10 +104,15 @@ class CreatorTaskService(BaseService):
         )
         ownership = or_(
             Conversation.owner_account_id == account.id,
-            Conversation.created_by == account.id,
             and_(
-                Conversation.invoke_from == InvokeFrom.WEB_APP,
-                Conversation.created_by.in_(legacy_end_users),
+                Conversation.owner_account_id.is_(None),
+                or_(
+                    Conversation.created_by == account.id,
+                    and_(
+                        Conversation.invoke_from == InvokeFrom.WEB_APP,
+                        Conversation.created_by.in_(legacy_end_users),
+                    ),
+                ),
             ),
         )
         return (
@@ -78,10 +121,12 @@ class CreatorTaskService(BaseService):
             .filter(
                 App.account_id == account.id,
                 App.status == AppStatus.PUBLISHED,
-                Conversation.invoke_from.in_([
-                    InvokeFrom.CREATOR_TASK,
-                    InvokeFrom.WEB_APP,
-                ]),
+                Conversation.invoke_from.in_(
+                    [
+                        InvokeFrom.CREATOR_TASK,
+                        InvokeFrom.WEB_APP,
+                    ]
+                ),
                 Conversation.is_deleted.is_(False),
                 ownership,
             )
@@ -100,7 +145,9 @@ class CreatorTaskService(BaseService):
         )
         return str(run[0]) if run else "idle"
 
-    def _serialize_conversation(self, conversation: Conversation, app: App) -> dict[str, Any]:
+    def _serialize_conversation(
+        self, conversation: Conversation, app: App
+    ) -> dict[str, Any]:
         return {
             "id": str(conversation.id),
             "name": conversation.name or "新的会话",
@@ -127,7 +174,11 @@ class CreatorTaskService(BaseService):
         )
         results: list[dict[str, Any]] = []
         for app in apps:
-            count = self._visible_query(account).filter(Conversation.app_id == app.id).count()
+            count = (
+                self._visible_query(account)
+                .filter(Conversation.app_id == app.id)
+                .count()
+            )
             latest = (
                 self._visible_query(account)
                 .filter(Conversation.app_id == app.id)
@@ -142,7 +193,9 @@ class CreatorTaskService(BaseService):
                     "description": app.description,
                     "status": app.status,
                     "conversation_count": count,
-                    "last_active_at": self._timestamp(latest[0].updated_at) if latest else 0,
+                    "last_active_at": (
+                        self._timestamp(latest[0].updated_at) if latest else 0
+                    ),
                 }
             )
         return results
@@ -165,9 +218,9 @@ class CreatorTaskService(BaseService):
             "name": app.name,
             "icon": app.icon,
             "description": app.description,
-            "app_config": self.app_config_service.get_agent_runtime_config(app).model_dump(
-                mode="json"
-            ),
+            "app_config": self.app_config_service.get_agent_runtime_config(
+                app
+            ).model_dump(mode="json"),
         }
 
     def get_conversations(
@@ -185,7 +238,10 @@ class CreatorTaskService(BaseService):
         if search.strip():
             keyword = f"%{search.strip()}%"
             query = query.filter(
-                or_(Conversation.name.ilike(keyword), Conversation.summary.ilike(keyword))
+                or_(
+                    Conversation.name.ilike(keyword),
+                    Conversation.summary.ilike(keyword),
+                )
             )
         if before:
             cursor = self.db.session.get(Conversation, before)
@@ -207,21 +263,36 @@ class CreatorTaskService(BaseService):
         has_more = len(rows) > page_size
         rows = rows[:page_size]
         return {
-            "list": [self._serialize_conversation(conversation, app) for conversation, app in rows],
+            "list": [
+                self._serialize_conversation(conversation, app)
+                for conversation, app in rows
+            ],
             "page": {
                 "has_more": has_more,
                 "next_before": str(rows[-1][0].id) if has_more and rows else None,
             },
         }
 
-    def get_conversation(self, conversation_id: UUID, account: Account) -> dict[str, Any]:
-        row = self._visible_query(account).filter(Conversation.id == conversation_id).one_or_none()
+    def get_conversation(
+        self, conversation_id: UUID, account: Account
+    ) -> dict[str, Any]:
+        row = (
+            self._visible_query(account)
+            .filter(Conversation.id == conversation_id)
+            .one_or_none()
+        )
         if row is None:
             raise NotFoundException("会话不存在或无权访问")
         return self._serialize_conversation(row[0], row[1])
 
-    def update_conversation(self, conversation_id: UUID, account: Account, **values: Any) -> dict[str, Any]:
-        row = self._visible_query(account).filter(Conversation.id == conversation_id).one_or_none()
+    def update_conversation(
+        self, conversation_id: UUID, account: Account, **values: Any
+    ) -> dict[str, Any]:
+        row = (
+            self._visible_query(account)
+            .filter(Conversation.id == conversation_id)
+            .one_or_none()
+        )
         if row is None:
             raise NotFoundException("会话不存在或无权访问")
         conversation, app = row
@@ -231,7 +302,11 @@ class CreatorTaskService(BaseService):
         return self._serialize_conversation(conversation, app)
 
     def delete_conversation(self, conversation_id: UUID, account: Account) -> None:
-        row = self._visible_query(account).filter(Conversation.id == conversation_id).one_or_none()
+        row = (
+            self._visible_query(account)
+            .filter(Conversation.id == conversation_id)
+            .one_or_none()
+        )
         if row is None:
             raise NotFoundException("会话不存在或无权访问")
         conversation, app = row

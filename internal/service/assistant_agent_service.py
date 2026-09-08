@@ -6,6 +6,7 @@ from langchain_core.tools import BaseTool, tool
 
 from config import Config
 from internal.core.language_model.entities.model_entity import BaseLanguageModel
+from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
 from internal.model import Account, Conversation
 from internal.schema.agent_tool_schema import (
@@ -13,6 +14,7 @@ from internal.schema.agent_tool_schema import (
     CreateAppToolReq,
     WorkflowGeneratorToolReq,
 )
+from internal.schema.agent_runtime_schema import AgentInvocationContext
 from internal.task.app_task import auto_create_app
 from internal.task.workflow_task import (
     auto_generate_workflow,
@@ -63,6 +65,32 @@ class AssistantAgentService(BaseService):
                 account_id=locked_account.id,
                 app_id=app_id,
             )
+
+    def get_invocation_context(
+        self,
+        *,
+        conversation_id: UUID,
+        account: Account,
+    ) -> AgentInvocationContext:
+        """把辅助 Agent 入口转换为已校验的 Agent 调用上下文。"""
+        try:
+            app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise RuntimeError("辅助 Agent 应用配置无效") from exc
+        conversation = self.conversation_service.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
+            app_id=app_id,
+            allowed_sources=(InvokeFrom.ASSISTANT_AGENT,),
+        )
+        return AgentInvocationContext(
+            account_id=account.id,
+            app_id=app_id,
+            conversation_id=conversation.id,
+            created_by=account.id,
+            end_user_id=None,
+            invoke_from=InvokeFrom.ASSISTANT_AGENT,
+        )
 
     def build_capabilities(
         self,

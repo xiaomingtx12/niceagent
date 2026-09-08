@@ -1,4 +1,4 @@
-"""Agent 工作台运行记录与可重放协议事件。"""
+"""Agent 工作台运行记录与持久化协议事件。"""
 
 from sqlalchemy import (
     Column,
@@ -32,7 +32,7 @@ class AgentRun(db.Model):
             "agent_run_conversation_executing_uq",
             "conversation_id",
             unique=True,
-            postgresql_where=text("status IN ('queued', 'running')"),
+            postgresql_where=text("status IN ('queued', 'running', 'cancelling')"),
         ),
         Index(
             "agent_run_conversation_input_message_uq",

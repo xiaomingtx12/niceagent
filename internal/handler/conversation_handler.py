@@ -7,13 +7,12 @@ from injector import inject
 
 from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.conversation_schema import (
-    GetConversationMessagesWithPageReq,
-    GetConversationMessagesWithPageResp,
+    ConversationMessageResp,
     UpdateConversationNameReq,
     UpdateConversationIsPinnedReq,
 )
 from internal.service import ConversationService
-from pkg.paginator import PageModel
+from pkg.paginator import CursorPaginatorReq
 from pkg.response import validate_error_json, success_json, success_message
 
 
@@ -26,24 +25,31 @@ class ConversationHandler:
 
     @rate_limit(config_key="database_intensive")
     @login_required
-    def get_conversation_messages_with_page(self, conversation_id: UUID):
-        """根据传递的会话id获取该会话的消息列表分页数据"""
-        # 1.提取数据并校验
-        req = GetConversationMessagesWithPageReq(request.args)
+    def get_messages(self, conversation_id: UUID):
+        """按稳定游标返回当前账号可访问的业务 Message DTO。"""
+        # 1.Handler 只解析通用游标参数。
+        req = CursorPaginatorReq(request.args)
         if not req.validate():
             return validate_error_json(req.errors)
 
-        # 2.调用服务获取消息列表
-        messages, paginator = (
-            self.conversation_service.get_conversation_messages_with_page(
-                conversation_id, req, current_user
+        # 2.Service 统一执行会话鉴权和消息分页。
+        messages, has_more, next_before = (
+            self.conversation_service.get_account_message_page(
+                conversation_id=conversation_id,
+                account=current_user,
+                before=req.before_uuid,
+                page_size=req.page_size.data,
             )
         )
-
-        # 3.构建响应结构并返回
-        resp = GetConversationMessagesWithPageResp(many=True)
-
-        return success_json(PageModel(list=resp.dump(messages), paginator=paginator))
+        return success_json(
+            {
+                "messages": ConversationMessageResp(many=True).dump(messages),
+                "page": {
+                    "has_more": has_more,
+                    "next_before": str(next_before) if next_before else None,
+                },
+            }
+        )
 
     @rate_limit(config_key="sensitive")
     @login_required

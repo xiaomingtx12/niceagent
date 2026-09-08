@@ -5,6 +5,7 @@ from __future__ import annotations
 import mimetypes
 from collections.abc import Sequence
 from dataclasses import dataclass
+from uuid import UUID
 
 from deepagents.backends.protocol import BackendProtocol
 from injector import inject
@@ -12,7 +13,6 @@ from injector import inject
 from internal.entity.agent_attachment_entity import AgentAttachment
 from internal.exception import FailException, ForbiddenException
 from internal.model import UploadFile
-from internal.schema.agent_attachment_schema import AgentAttachmentResolveReq
 from pkg.sqlalchemy import SQLAlchemy
 from .cos_service import CosService
 
@@ -31,44 +31,45 @@ class AgentAttachmentService:
 
     def resolve(
         self,
-        req: AgentAttachmentResolveReq,
-    ) -> list[AgentAttachment]:
+        file_ids: Sequence[UUID],
+        *,
+        owner_id: UUID,
+    ) -> tuple[AgentAttachment, ...]:
         """按提交顺序校验上传记录归属，并返回可信附件元数据。"""
-        if not req.file_ids:
-            return []
+        if not file_ids:
+            return ()
 
         # 1.按当前用户查询上传记录，阻断跨用户读取。
         rows = (
             self.db.session.query(UploadFile)
             .filter(
-                UploadFile.id.in_(req.file_ids),
-                UploadFile.account_id == req.owner_id,
+                UploadFile.id.in_(file_ids),
+                UploadFile.account_id == owner_id,
             )
             .all()
         )
         rows_by_id = {row.id: row for row in rows}
-        missing = [item for item in req.file_ids if item not in rows_by_id]
+        missing = [file_id for file_id in file_ids if file_id not in rows_by_id]
         if missing:
             raise ForbiddenException("附件不存在或不属于当前用户")
 
         # 2.按请求顺序转换为 Agent 可见的可信领域对象。
-        return [
-            AgentAttachment(
+        attachments = []
+        for file_id in file_ids:
+            row = rows_by_id[file_id]
+            attachment = AgentAttachment(
                 id=row.id,
                 name=row.name,
                 key=row.key,
                 url=self.cos_service.get_file_url(row.key),
                 size=int(row.size or 0),
                 extension=row.extension,
-                mime_type=(
-                    row.mime_type
-                    or mimetypes.guess_type(row.name)[0]
-                    or "application/octet-stream"
-                ),
+                mime_type=row.mime_type
+                or mimetypes.guess_type(row.name)[0]
+                or "application/octet-stream",
             )
-            for item in req.file_ids
-            for row in [rows_by_id[item]]
-        ]
+            attachments.append(attachment)
+        return tuple(attachments)
 
     def materialize(
         self,

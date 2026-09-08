@@ -7,18 +7,20 @@ from flask import Response, request
 from flask_login import current_user, login_required
 from injector import inject
 
-from internal.entity.conversation_entity import InvokeFrom
 from internal.schema import (
     WorkbenchCancelResp,
     WorkbenchCommandReq,
-    WorkbenchMessagePageResp,
     WorkbenchRunObservabilityResp,
     WorkbenchStateResp,
-    WorkbenchSubscriptionReq,
+    WorkbenchEventStreamReq,
 )
-from pkg.paginator import CursorPaginatorReq
-from internal.service import AgentWorkbenchService
-from pkg.response import json_response, sse_response, validate_error_json
+from internal.service import (
+    AgentWorkbenchService,
+    AppService,
+    CreatorTaskService,
+    WebAppService,
+)
+from pkg.response import json_response, sse_response
 
 
 @inject
@@ -27,6 +29,9 @@ class AgentWorkbenchHandler:
     """Agent 工作台 HTTP 处理器。"""
 
     service: AgentWorkbenchService
+    app_service: AppService
+    web_app_service: WebAppService
+    creator_task_service: CreatorTaskService
 
     @login_required
     def run_observability(self, run_id: UUID) -> Response:
@@ -44,10 +49,11 @@ class AgentWorkbenchHandler:
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
         result = self.service.start_run(
-            invoke_from=InvokeFrom.DEBUGGER,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
+            context=self.app_service.get_debugger_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
             run_input=command.to_run_input(),
             command_id=command.command_id,
         )
@@ -56,16 +62,17 @@ class AgentWorkbenchHandler:
     @login_required
     def debug_stream(self, app_id: UUID, conversation_id: UUID) -> Response:
         """订阅调试工作台的 Agent 事件。"""
-        subscription = WorkbenchSubscriptionReq.from_mapping(
+        stream_request = WorkbenchEventStreamReq.from_mapping(
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
         events = self.service.subscribe(
-            invoke_from=InvokeFrom.DEBUGGER,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
-            subscription=subscription,
+            context=self.app_service.get_debugger_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
+            stream_request=stream_request,
         )
         return sse_response(events)
 
@@ -73,29 +80,13 @@ class AgentWorkbenchHandler:
     def debug_state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """读取调试工作台状态和消息快照。"""
         result = self.service.get_state(
-            invoke_from=InvokeFrom.DEBUGGER,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
+            context=self.app_service.get_debugger_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
         )
         response = WorkbenchStateResp.model_validate(result)
-        return json_response(response.model_dump(mode="json"))
-
-    @login_required
-    def debug_messages(self, app_id: UUID, conversation_id: UUID) -> Response:
-        """读取调试工作台历史消息分页。"""
-        query = CursorPaginatorReq(request.args)
-        if not query.validate():
-            return validate_error_json(query.errors)
-        result = self.service.get_message_page(
-            invoke_from=InvokeFrom.DEBUGGER,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
-            before=query.before_uuid,
-            page_size=query.page_size.data,
-        )
-        response = WorkbenchMessagePageResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
 
     @login_required
@@ -104,10 +95,11 @@ class AgentWorkbenchHandler:
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
         result = self.service.start_run(
-            invoke_from=InvokeFrom.WEB_APP,
-            access_value=token,
-            conversation_id=conversation_id,
-            account=current_user,
+            context=self.web_app_service.get_invocation_context(
+                token=token,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
             run_input=command.to_run_input(),
             command_id=command.command_id,
         )
@@ -116,16 +108,17 @@ class AgentWorkbenchHandler:
     @login_required
     def web_app_stream(self, token: str, conversation_id: UUID) -> Response:
         """订阅发布态 WebApp 的 Agent 事件。"""
-        subscription = WorkbenchSubscriptionReq.from_mapping(
+        stream_request = WorkbenchEventStreamReq.from_mapping(
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
         events = self.service.subscribe(
-            invoke_from=InvokeFrom.WEB_APP,
-            access_value=token,
-            conversation_id=conversation_id,
-            account=current_user,
-            subscription=subscription,
+            context=self.web_app_service.get_invocation_context(
+                token=token,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
+            stream_request=stream_request,
         )
         return sse_response(events)
 
@@ -133,29 +126,13 @@ class AgentWorkbenchHandler:
     def web_app_state(self, token: str, conversation_id: UUID) -> Response:
         """读取发布态 WebApp 工作台状态和消息快照。"""
         result = self.service.get_state(
-            invoke_from=InvokeFrom.WEB_APP,
-            access_value=token,
-            conversation_id=conversation_id,
-            account=current_user,
+            context=self.web_app_service.get_invocation_context(
+                token=token,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
         )
         response = WorkbenchStateResp.model_validate(result)
-        return json_response(response.model_dump(mode="json"))
-
-    @login_required
-    def web_app_messages(self, token: str, conversation_id: UUID) -> Response:
-        """读取发布态 WebApp 历史消息分页。"""
-        query = CursorPaginatorReq(request.args)
-        if not query.validate():
-            return validate_error_json(query.errors)
-        result = self.service.get_message_page(
-            invoke_from=InvokeFrom.WEB_APP,
-            access_value=token,
-            conversation_id=conversation_id,
-            account=current_user,
-            before=query.before_uuid,
-            page_size=query.page_size.data,
-        )
-        response = WorkbenchMessagePageResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
 
     @login_required
@@ -167,11 +144,12 @@ class AgentWorkbenchHandler:
     ) -> Response:
         """取消调试工作台的指定 Agent Run。"""
         result = self.service.cancel_run(
-            invoke_from=InvokeFrom.DEBUGGER,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
+            context=self.app_service.get_debugger_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
             run_id=run_id,
-            account=current_user,
         )
         response = WorkbenchCancelResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
@@ -185,11 +163,12 @@ class AgentWorkbenchHandler:
     ) -> Response:
         """取消发布态 WebApp 的指定 Agent Run。"""
         result = self.service.cancel_run(
-            invoke_from=InvokeFrom.WEB_APP,
-            access_value=token,
-            conversation_id=conversation_id,
+            context=self.web_app_service.get_invocation_context(
+                token=token,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
             run_id=run_id,
-            account=current_user,
         )
         response = WorkbenchCancelResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
@@ -200,10 +179,11 @@ class AgentWorkbenchHandler:
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
         result = self.service.start_run(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
+            context=self.creator_task_service.get_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
             run_input=command.to_run_input(),
             command_id=command.command_id,
         )
@@ -212,16 +192,17 @@ class AgentWorkbenchHandler:
     @login_required
     def creator_task_stream(self, app_id: UUID, conversation_id: UUID) -> Response:
         """Creator 任务中心订阅 Agent 事件。"""
-        subscription = WorkbenchSubscriptionReq.from_mapping(
+        stream_request = WorkbenchEventStreamReq.from_mapping(
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
         events = self.service.subscribe(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
-            subscription=subscription,
+            context=self.creator_task_service.get_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
+            stream_request=stream_request,
         )
         return sse_response(events)
 
@@ -229,29 +210,13 @@ class AgentWorkbenchHandler:
     def creator_task_state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """Creator 任务中心读取会话状态。"""
         result = self.service.get_state(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
+            context=self.creator_task_service.get_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
         )
         response = WorkbenchStateResp.model_validate(result)
-        return json_response(response.model_dump(mode="json"))
-
-    @login_required
-    def creator_task_messages(self, app_id: UUID, conversation_id: UUID) -> Response:
-        """Creator 任务中心读取会话消息。"""
-        query = CursorPaginatorReq(request.args)
-        if not query.validate():
-            return validate_error_json(query.errors)
-        result = self.service.get_message_page(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
-            account=current_user,
-            before=query.before_uuid,
-            page_size=query.page_size.data,
-        )
-        response = WorkbenchMessagePageResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
 
     @login_required
@@ -260,11 +225,12 @@ class AgentWorkbenchHandler:
     ) -> Response:
         """Creator 任务中心取消指定 Agent Run。"""
         result = self.service.cancel_run(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(app_id),
-            conversation_id=conversation_id,
+            context=self.creator_task_service.get_invocation_context(
+                app_id=app_id,
+                conversation_id=conversation_id,
+                account=current_user,
+            ),
             run_id=run_id,
-            account=current_user,
         )
         response = WorkbenchCancelResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))

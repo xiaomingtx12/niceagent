@@ -33,9 +33,7 @@ class Config:
         self.WTF_CSRF_ENABLED = _get_bool_env("WTF_CSRF_ENABLED")
 
         # 配置数据库配置
-        self.SQLALCHEMY_DATABASE_URI = str(
-            _get_env("SQLALCHEMY_DATABASE_URI") or ""
-        )
+        self.SQLALCHEMY_DATABASE_URI = str(_get_env("SQLALCHEMY_DATABASE_URI") or "")
         self.SQLALCHEMY_POOL_SIZE = int(_get_env("SQLALCHEMY_POOL_SIZE"))
         self.SQLALCHEMY_MAX_OVERFLOW = int(_get_env("SQLALCHEMY_MAX_OVERFLOW"))
         self.SQLALCHEMY_POOL_TIMEOUT_SECONDS = float(
@@ -51,9 +49,7 @@ class Config:
         self.POSTGRES_KEEPALIVES_INTERVAL_SECONDS = int(
             _get_env("POSTGRES_KEEPALIVES_INTERVAL_SECONDS")
         )
-        self.POSTGRES_KEEPALIVES_COUNT = int(
-            _get_env("POSTGRES_KEEPALIVES_COUNT")
-        )
+        self.POSTGRES_KEEPALIVES_COUNT = int(_get_env("POSTGRES_KEEPALIVES_COUNT"))
         self.POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS = int(
             _get_env("POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS")
         )
@@ -104,12 +100,8 @@ class Config:
             _get_env("AGENT_CHECKPOINT_POOL_MAX_WAITING")
         )
         self.AGENT_MEMORY_BACKEND = str(_get_env("AGENT_MEMORY_BACKEND")).lower()
-        self.AGENT_MEMORY_POOL_MIN_SIZE = int(
-            _get_env("AGENT_MEMORY_POOL_MIN_SIZE")
-        )
-        self.AGENT_MEMORY_POOL_MAX_SIZE = int(
-            _get_env("AGENT_MEMORY_POOL_MAX_SIZE")
-        )
+        self.AGENT_MEMORY_POOL_MIN_SIZE = int(_get_env("AGENT_MEMORY_POOL_MIN_SIZE"))
+        self.AGENT_MEMORY_POOL_MAX_SIZE = int(_get_env("AGENT_MEMORY_POOL_MAX_SIZE"))
         self.AGENT_MEMORY_POOL_TIMEOUT_SECONDS = float(
             _get_env("AGENT_MEMORY_POOL_TIMEOUT_SECONDS")
         )
@@ -124,9 +116,7 @@ class Config:
         self.AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS = int(
             _get_env("AGENT_SANDBOX_DELETE_AFTER_STOP_SECONDS")
         )
-        self.AGENT_SANDBOX_ALLOW_NETWORK = _get_bool_env(
-            "AGENT_SANDBOX_ALLOW_NETWORK"
-        )
+        self.AGENT_SANDBOX_ALLOW_NETWORK = _get_bool_env("AGENT_SANDBOX_ALLOW_NETWORK")
         self.AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS = int(
             _get_env("AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS")
         )
@@ -177,19 +167,6 @@ class Config:
             _get_env("REDIS_SOCKET_CONNECT_TIMEOUT")
         )
         self.REDIS_HEALTH_CHECK_INTERVAL = int(_get_env("REDIS_HEALTH_CHECK_INTERVAL"))
-        self.AGENT_WORKBENCH_REPLAY_KEY_PREFIX = str(
-            _get_env("AGENT_WORKBENCH_REPLAY_KEY_PREFIX")
-        )
-        self.AGENT_WORKBENCH_REPLAY_TTL_SECONDS = int(
-            _get_env("AGENT_WORKBENCH_REPLAY_TTL_SECONDS")
-        )
-        self.AGENT_WORKBENCH_REPLAY_MAX_LENGTH = int(
-            _get_env("AGENT_WORKBENCH_REPLAY_MAX_LENGTH")
-        )
-        if self.AGENT_WORKBENCH_REPLAY_TTL_SECONDS < 60:
-            raise ValueError("AGENT_WORKBENCH_REPLAY_TTL_SECONDS 必须至少为 60 秒")
-        if self.AGENT_WORKBENCH_REPLAY_MAX_LENGTH < 100:
-            raise ValueError("AGENT_WORKBENCH_REPLAY_MAX_LENGTH 必须至少为 100")
 
         # Celery配置
         self.CELERY = {
@@ -265,9 +242,7 @@ class Config:
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} 必须大于 0")
         if self.POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS <= 0:
-            raise ValueError(
-                "POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS 必须大于 0"
-            )
+            raise ValueError("POSTGRES_IDLE_IN_TRANSACTION_TIMEOUT_SECONDS 必须大于 0")
 
     def _validate_agent_settings(self) -> None:
         """校验 Agent 持久化和记忆配置。"""
@@ -330,9 +305,7 @@ class Config:
             and self.AGENT_SANDBOX_PROVIDER == "daytona"
             and not self.DAYTONA_API_KEY
         ):
-            raise ValueError(
-                "生产环境启用 Daytona Sandbox 时必须配置 DAYTONA_API_KEY"
-            )
+            raise ValueError("生产环境启用 Daytona Sandbox 时必须配置 DAYTONA_API_KEY")
         if (
             os.getenv("FLASK_ENV", "").lower() == "production"
             and self.AGENT_MEMORY_BACKEND != "postgres"

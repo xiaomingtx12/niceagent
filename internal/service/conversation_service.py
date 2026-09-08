@@ -1,14 +1,15 @@
 from dataclasses import dataclass
-from datetime import datetime
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from injector import inject
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from sqlalchemy import desc
+from sqlalchemy import and_, desc, or_
 
+from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import (
     CONVERSATION_NAME_TEMPLATE,
     ConversationInfo,
@@ -16,18 +17,17 @@ from internal.entity.conversation_entity import (
     MessageStatus,
 )
 from internal.extension.logging_extension import logger
-from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from internal.schema.agent_runtime_schema import (
     AgentConversationCleanupReq,
+    AgentInvocationContext,
     AgentMessageCleanupReq,
 )
 from .base_service import BaseService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from .provider_api_key_service import ProviderApiKeyService
-from ..exception import NotFoundException
-from ..model import App, Conversation, Message, Account
-from ..schema.conversation_schema import GetConversationMessagesWithPageReq
+from ..exception import ForbiddenException, NotFoundException
+from ..model import App, Conversation, EndUser, Message, Account
 
 
 def _usage_detail(details: Mapping[str, Any], name: str) -> int:
@@ -95,23 +95,144 @@ class ConversationService(BaseService):
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None
 
-    def create_conversation(
+    def create_agent_message(
+        self,
+        *,
+        context: AgentInvocationContext,
+        query: str,
+        image_urls: tuple[str, ...],
+        attachments: list[dict[str, Any]],
+    ) -> Message:
+        """在调用方事务中校验会话并创建一次 Agent 业务消息。"""
+        conversation = self.db.session.get(Conversation, context.conversation_id)
+        if (
+            conversation is None
+            or conversation.app_id != context.app_id
+            or conversation.is_deleted
+        ):
+            raise ForbiddenException("会话不存在或已删除")
+        if conversation.owner_account_id is None:
+            conversation.owner_account_id = context.account_id
+        elif conversation.owner_account_id != context.account_id:
+            raise ForbiddenException("会话不存在或不属于当前账号")
+
+        # 服务端预创建的空会话在首条消息提交时获得业务名称。
+        has_message = (
+            self.db.session.query(Message.id)
+            .filter(
+                Message.conversation_id == conversation.id,
+                Message.is_deleted.is_(False),
+            )
+            .first()
+            is not None
+        )
+        if not has_message:
+            conversation.name = query[:255]
+        conversation.updated_at = datetime.now()
+
+        message = Message(
+            id=uuid4(),
+            app_id=context.app_id,
+            conversation_id=conversation.id,
+            invoke_from=context.invoke_from,
+            created_by=context.created_by,
+            query=query,
+            image_urls=list(image_urls),
+            attachments=attachments,
+            status=MessageStatus.NORMAL,
+        )
+        self.db.session.add(message)
+        return message
+
+    def create_service_api_conversation(
         self,
         *,
         app_id: UUID,
-        invoke_from: InvokeFrom,
-        created_by: UUID,
-        owner_account_id: UUID | None = None,
-        name: str = "新的会话",
-    ) -> Conversation:
-        """在调用方事务中创建由服务端分配 ID 的会话。"""
-        return self.create_in_transaction(
-            Conversation,
-            app_id=app_id,
-            name=name[:255],
-            invoke_from=invoke_from,
-            created_by=created_by,
-            owner_account_id=owner_account_id,
+        account: Account,
+        end_user_id: UUID | None = None,
+    ) -> UUID:
+        """校验应用和终端用户后创建账号拥有的 Service API 会话。"""
+        with self.db.auto_commit():
+            app = (
+                self.db.session.query(App)
+                .filter(
+                    App.id == app_id,
+                    App.account_id == account.id,
+                    App.status == AppStatus.PUBLISHED,
+                )
+                .one_or_none()
+            )
+            if app is None:
+                raise ForbiddenException("应用不存在、未发布或无权访问")
+
+            if end_user_id is None:
+                end_user = EndUser(tenant_id=app.account_id, app_id=app.id)
+                self.db.session.add(end_user)
+                self.db.session.flush()
+            else:
+                end_user = self.db.session.get(EndUser, end_user_id)
+                if (
+                    end_user is None
+                    or end_user.app_id != app.id
+                    or end_user.tenant_id != app.account_id
+                ):
+                    raise ForbiddenException("终端用户不属于当前应用")
+
+            conversation = Conversation(
+                app_id=app.id,
+                name="新的会话",
+                invoke_from=InvokeFrom.SERVICE_API,
+                created_by=end_user.id,
+                owner_account_id=account.id,
+            )
+            self.db.session.add(conversation)
+            self.db.session.flush()
+            conversation_id = conversation.id
+        return conversation_id
+
+    def get_service_api_invocation_context(
+        self,
+        *,
+        app_id: UUID,
+        conversation_id: UUID,
+        account: Account,
+    ) -> AgentInvocationContext:
+        """返回开放 API 入口已校验的会话调用上下文。"""
+        app = (
+            self.db.session.query(App)
+            .filter(
+                App.id == app_id,
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+            )
+            .one_or_none()
+        )
+        if app is None:
+            raise ForbiddenException("应用不存在、未发布或无权访问")
+        conversation = self.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
+            app_id=app.id,
+            allowed_sources=(InvokeFrom.SERVICE_API,),
+        )
+        end_user = (
+            self.db.session.query(EndUser)
+            .filter(
+                EndUser.id == conversation.created_by,
+                EndUser.app_id == app.id,
+                EndUser.tenant_id == app.account_id,
+            )
+            .one_or_none()
+        )
+        if end_user is None:
+            raise ForbiddenException("服务 API 会话终端用户无效")
+        return AgentInvocationContext(
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+            created_by=end_user.id,
+            end_user_id=end_user.id,
+            invoke_from=InvokeFrom.SERVICE_API,
         )
 
     def get_or_create_debug_conversation(
@@ -136,13 +257,15 @@ class ConversationService(BaseService):
             .first()
         )
         if conversation is None:
-            conversation = self.create_conversation(
+            conversation = Conversation(
                 app_id=app.id,
+                name="New Conversation",
                 invoke_from=InvokeFrom.DEBUGGER,
                 created_by=account_id,
                 owner_account_id=account_id,
-                name="New Conversation",
             )
+            self.db.session.add(conversation)
+            self.db.session.flush()
         return conversation
 
     def get_or_create_assistant_conversation(
@@ -164,13 +287,15 @@ class ConversationService(BaseService):
             .first()
         )
         if conversation is None:
-            conversation = self.create_conversation(
+            conversation = Conversation(
                 app_id=app_id,
+                name="New Conversation",
                 invoke_from=InvokeFrom.ASSISTANT_AGENT,
                 created_by=account_id,
                 owner_account_id=account_id,
-                name="New Conversation",
             )
+            self.db.session.add(conversation)
+            self.db.session.flush()
         return conversation
 
     def _load_model_from_config(
@@ -338,61 +463,127 @@ class ConversationService(BaseService):
             return []
 
     def get_conversation(self, conversation_id: UUID, account: Account) -> Conversation:
-        """根据会话 ID 和账号获取指定会话。"""
-        # 1.根据会话 ID 查询会话记录。
-        conversation = self.get(Conversation, conversation_id)
-        if (
-            not conversation
-            or conversation.created_by != account.id
-            or conversation.is_deleted
-        ):
-            raise NotFoundException("该会话不存在或被删除，请核实后重试")
-
-        # 2.校验通过后返回会话。
-        return conversation
-
-    def get_message(self, message_id: UUID, account: Account) -> Message:
-        """根据消息 ID 和账号获取指定消息。"""
-        # 1.根据消息 ID 查询消息记录。
-        message = self.get(Message, message_id)
-        if not message or message.created_by != account.id or message.is_deleted:
-            raise NotFoundException("该消息不存在或被删除，请核实后重试")
-
-        # 2.校验通过后返回消息。
-        return message
-
-    def get_conversation_messages_with_page(
-        self,
-        conversation_id: UUID,
-        req: GetConversationMessagesWithPageReq,
-        account: Account,
-    ) -> tuple[list[Message], Paginator]:
-        """根据会话和分页请求获取当前账号可见的消息列表。"""
-        # 1.获取会话并校验访问权限。
-        conversation = self.get_conversation(conversation_id, account)
-
-        # 2.构建分页器并设置游标条件。
-        paginator = Paginator(db=self.db, req=req)
-        filters = []
-        if req.created_at.data:
-            # 3.将时间戳转换为日期时间对象。
-            created_at_datetime = datetime.fromtimestamp(req.created_at.data)
-            filters.append(Message.created_at <= created_at_datetime)
-
-        # 4.执行分页查询。
-        messages = paginator.paginate(
-            self.db.session.query(Message)
-            .filter(
-                Message.conversation_id == conversation.id,
-                Message.status.in_([MessageStatus.STOP, MessageStatus.NORMAL]),
-                Message.answer != "",
-                ~Message.is_deleted,
-                *filters,
-            )
-            .order_by(desc("created_at"))
+        """按稳定账号归属获取会话，并兼容尚未回填归属的历史数据。"""
+        return self.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
         )
 
-        return messages, paginator
+    def get_owned_conversation(
+        self,
+        *,
+        conversation_id: UUID,
+        account: Account,
+        app_id: UUID | None = None,
+        allowed_sources: tuple[InvokeFrom, ...] | None = None,
+    ) -> Conversation:
+        """校验会话的账号归属、应用和来源约束。"""
+        query = self.db.session.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.is_deleted.is_(False),
+        )
+        if app_id is not None:
+            query = query.filter(Conversation.app_id == app_id)
+        if allowed_sources:
+            query = query.filter(Conversation.invoke_from.in_(allowed_sources))
+        conversation = query.one_or_none()
+        if conversation is None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
+
+        # owner_account_id 是唯一的新数据授权依据；后续条件只兼容旧数据。
+        if conversation.owner_account_id == account.id:
+            return conversation
+        if conversation.owner_account_id is not None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
+
+        legacy_owned = conversation.created_by == account.id
+        if not legacy_owned and conversation.invoke_from == InvokeFrom.WEB_APP:
+            legacy_owned = (
+                self.db.session.query(EndUser.id)
+                .filter(
+                    EndUser.id == conversation.created_by,
+                    EndUser.app_id == conversation.app_id,
+                    EndUser.external_user_id == account.id,
+                )
+                .one_or_none()
+                is not None
+            )
+        if not legacy_owned and conversation.invoke_from == InvokeFrom.SERVICE_API:
+            legacy_owned = (
+                self.db.session.query(App.id)
+                .filter(
+                    App.id == conversation.app_id,
+                    App.account_id == account.id,
+                )
+                .one_or_none()
+                is not None
+            )
+        if not legacy_owned:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
+        return conversation
+
+    def get_message_page(
+        self,
+        *,
+        conversation_id: UUID,
+        before: UUID | None = None,
+        page_size: int = 20,
+    ) -> tuple[list[Message], bool, UUID | None]:
+        """按 created_at 与消息 ID 的稳定游标读取一页业务消息。"""
+        limit = min(max(page_size, 1), 50)
+        query = self.db.session.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.is_deleted.is_(False),
+        )
+        if before is not None:
+            cursor = (
+                self.db.session.query(Message)
+                .filter(
+                    Message.id == before,
+                    Message.conversation_id == conversation_id,
+                    Message.is_deleted.is_(False),
+                )
+                .one_or_none()
+            )
+            if cursor is None:
+                raise NotFoundException("历史消息游标不存在")
+            query = query.filter(
+                or_(
+                    Message.created_at < cursor.created_at,
+                    and_(
+                        Message.created_at == cursor.created_at,
+                        Message.id < cursor.id,
+                    ),
+                )
+            )
+        descending_rows = (
+            query.order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(limit + 1)
+            .all()
+        )
+        has_more = len(descending_rows) > limit
+        page_rows = descending_rows[:limit]
+        return (
+            list(reversed(page_rows)),
+            has_more,
+            page_rows[-1].id if has_more and page_rows else None,
+        )
+
+    def get_account_message_page(
+        self,
+        *,
+        conversation_id: UUID,
+        account: Account,
+        before: UUID | None = None,
+        page_size: int = 20,
+    ) -> tuple[list[Message], bool, UUID | None]:
+        """鉴权后读取当前账号的一页业务消息。"""
+        conversation = self.get_conversation(conversation_id, account)
+        return self.get_message_page(
+            conversation_id=conversation.id,
+            before=before,
+            page_size=page_size,
+        )
 
     def delete_conversation(
         self, conversation_id: UUID, account: Account
@@ -422,14 +613,20 @@ class ConversationService(BaseService):
         # 1.获取会话记录并校验访问权限。
         conversation = self.get_conversation(conversation_id, account)
 
-        # 2.获取消息并校验访问权限。
-        message = self.get_message(message_id, account)
-
-        # 3.确认消息属于当前会话。
-        if conversation.id != message.conversation_id:
+        # 2.消息权限继承会话归属，不比较可能记录 EndUser 的 created_by。
+        message = (
+            self.db.session.query(Message)
+            .filter(
+                Message.id == message_id,
+                Message.conversation_id == conversation.id,
+                Message.is_deleted.is_(False),
+            )
+            .one_or_none()
+        )
+        if message is None:
             raise NotFoundException("该会话下不存在该消息，请核实后重试")
 
-        # 4.校验通过后标记消息已删除。
+        # 3.校验通过后标记消息已删除。
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_message(

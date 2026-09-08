@@ -36,11 +36,6 @@ def register_agent_workbench_routes(
         view_func=handler.debug_state,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/messages",
-        methods=["GET"],
-        view_func=handler.debug_messages,
-    )
-    blueprint.add_url_rule(
         "/web-apps/<string:token>/conversations/<uuid:conversation_id>/commands",
         methods=["POST"],
         view_func=handler.web_app_command,
@@ -54,11 +49,6 @@ def register_agent_workbench_routes(
         "/web-apps/<string:token>/conversations/<uuid:conversation_id>/state",
         methods=["GET"],
         view_func=handler.web_app_state,
-    )
-    blueprint.add_url_rule(
-        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/messages",
-        methods=["GET"],
-        view_func=handler.web_app_messages,
     )
     blueprint.add_url_rule(
         "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
@@ -86,11 +76,6 @@ def register_agent_workbench_routes(
         view_func=handler.creator_task_state,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/messages",
-        methods=["GET"],
-        view_func=handler.creator_task_messages,
-    )
-    blueprint.add_url_rule(
         "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
         methods=["POST"],
         view_func=handler.creator_task_cancel_run,
@@ -116,9 +101,6 @@ def register_assistant_agent_protocol_routes(
         f"{prefix}/stream", methods=["POST"], view_func=handler.stream
     )
     blueprint.add_url_rule(f"{prefix}/state", methods=["GET"], view_func=handler.state)
-    blueprint.add_url_rule(
-        f"{prefix}/messages", methods=["GET"], view_func=handler.messages
-    )
     blueprint.add_url_rule(
         f"{prefix}/runs/<uuid:run_id>/cancel",
         methods=["POST"],
@@ -152,11 +134,6 @@ def register_openapi_agent_protocol_routes(
         f"{prefix}/state",
         methods=["GET"],
         view_func=handler.state,
-    )
-    blueprint.add_url_rule(
-        f"{prefix}/messages",
-        methods=["GET"],
-        view_func=handler.messages,
     )
     blueprint.add_url_rule(
         f"{prefix}/runs/<uuid:run_id>/cancel",

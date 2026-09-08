@@ -48,11 +48,11 @@ class Conversation(db.Model):
     created_by = Column(
         UUID,
         nullable=True,
-    )  # 会话创建者，会随着invoke_from的差异记录不同的信息，其中web_app和debugger会记录账号id、service_api会记录终端用户id
+    )  # 会话来源主体；按入口记录 Account.id 或 EndUser.id，不作为平台账号鉴权依据
     owner_account_id = Column(
         UUID,
         nullable=True,
-    )  # 登录账号维度的会话归属，用于 Creator 与 WebApp 历史互通
+    )  # 平台账号维度的稳定会话归属；外部渠道没有登录账号时允许为空
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -83,7 +83,13 @@ class Message(db.Model):
     __tablename__ = "message"
     __table_args__ = (
         PrimaryKeyConstraint("id", name="pk_message_id"),
-        Index("message_conversation_id_idx", "conversation_id"),
+        Index(
+            "message_conversation_created_id_idx",
+            "conversation_id",
+            "created_at",
+            "id",
+            postgresql_where=text("is_deleted = false"),
+        ),
         Index("message_created_by_idx", "created_by"),
     )
 
@@ -99,7 +105,7 @@ class Message(db.Model):
     )  # 调用来源，涵盖service_api、web_app、debugger等
     created_by = Column(
         UUID, nullable=False
-    )  # 消息的创建来源，有可能是LLMOps的用户，也有可能是开放API的终端用户
+    )  # 消息来源主体，可能是 Account.id 或 EndUser.id，权限继承所属会话
 
     # 消息关联的原始问题
     query = Column(

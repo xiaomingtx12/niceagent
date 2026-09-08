@@ -1,25 +1,14 @@
 from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
-from wtforms import IntegerField, StringField, BooleanField
-from wtforms.validators import Optional, NumberRange, DataRequired, Length
+from wtforms import StringField, BooleanField
+from wtforms.validators import DataRequired, Length
 
 from internal.lib.helper import datetime_to_timestamp
 from internal.model import Message
-from pkg.paginator import PaginatorReq
 
 
-class GetConversationMessagesWithPageReq(PaginatorReq):
-    """获取指定会话消息列表分页数据请求结构"""
-
-    created_at = IntegerField(
-        "created_at",
-        default=0,
-        validators=[Optional(), NumberRange(min=0, message="created_at游标最小值为0")],
-    )
-
-
-class GetConversationMessagesWithPageResp(Schema):
-    """获取指定会话消息列表分页数据响应结构"""
+class ConversationMessageResp(Schema):
+    """一条业务 Message DTO，不包含协议角色投影。"""
 
     id = fields.UUID(dump_default="")
     conversation_id = fields.UUID(dump_default="")

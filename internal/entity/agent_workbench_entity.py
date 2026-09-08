@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import threading
-from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Generic, TypeVar
+from typing import Generic, TypeVar
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
-
-if TYPE_CHECKING:
-    from internal.model import App, Conversation, EndUser
-    from internal.schema.agent_workbench_schema import WorkbenchEvent
 
 _InvocationReqT = TypeVar("_InvocationReqT")
 
@@ -43,23 +38,6 @@ WORKBENCH_TERMINAL_STATUSES = frozenset(
 )
 
 
-@dataclass(frozen=True)
-class WorkbenchRunStartReservation:
-    """command 入库期间用于阻止同一会话重复启动的占位记录。"""
-
-    run_id: UUID
-    input_message_id: str | None
-
-
-@dataclass(frozen=True)
-class AuthorizedWorkbenchContext:
-    """一次 Run 启动已校验、可直接交给 Factory 复用的业务对象。"""
-
-    app: App | None
-    conversation: Conversation | None
-    end_user: EndUser | None = None
-
-
 class WorkbenchRunInput(BaseModel):
     """从 Agent Protocol 命令中提取出的可信运行输入。"""
 
@@ -67,7 +45,7 @@ class WorkbenchRunInput(BaseModel):
 
     query: StrictStr = Field(min_length=1)
     image_urls: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=10)
-    file_ids: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=5)
+    file_ids: tuple[UUID, ...] = Field(default_factory=tuple, max_length=5)
     selected_skills: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=20)
     input_message_id: StrictStr | None = None
 
@@ -82,21 +60,15 @@ class WorkbenchRun(Generic[_InvocationReqT]):
     status: WorkbenchRunStatus = WorkbenchRunStatus.QUEUED
     initial_event_sequence: int = 0
     last_event_sequence: int = 0
-    state_snapshot: dict[str, Any] | None = None
     error_message: str = ""
-    events: deque[WorkbenchEvent] = field(default_factory=lambda: deque(maxlen=2000))
     done: threading.Event = field(default_factory=threading.Event)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
-    last_cancel_signal_check: float = 0.0
-    last_cancel_status_check: float = 0.0
 
 
 __all__ = [
-    "AuthorizedWorkbenchContext",
     "WORKBENCH_ACTIVE_STATUSES",
     "WORKBENCH_TERMINAL_STATUSES",
     "WorkbenchRun",
     "WorkbenchRunInput",
-    "WorkbenchRunStartReservation",
     "WorkbenchRunStatus",
 ]

@@ -611,7 +611,7 @@ class Router:
         # 16.会话模块
         bp.add_url_rule(
             "/conversations/<uuid:conversation_id>/messages",
-            view_func=self.conversation_handler.get_conversation_messages_with_page,
+            view_func=self.conversation_handler.get_messages,
         )
         bp.add_url_rule(
             "/conversations/<uuid:conversation_id>/delete",

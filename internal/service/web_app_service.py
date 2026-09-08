@@ -3,14 +3,17 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import desc, or_
+from sqlalchemy import and_, desc, or_
 from sqlalchemy.dialects.postgresql import insert
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, EndUser
-from internal.schema.agent_runtime_schema import AgentConversationCleanupReq
+from internal.schema.agent_runtime_schema import (
+    AgentConversationCleanupReq,
+    AgentInvocationContext,
+)
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
@@ -35,13 +38,14 @@ class WebAppService(BaseService):
         """创建 WebApp 会话并由数据库分配会话 ID。"""
         app = self.get_web_app(token)
         end_user = self.resolve_web_app_end_user(app=app, account=account)
-        with self.db.auto_commit():
-            return self.conversation_service.create_conversation(
-                app_id=app.id,
-                invoke_from=InvokeFrom.WEB_APP,
-                created_by=end_user.id,
-                owner_account_id=account.id,
-            )
+        return self.create(
+            Conversation,
+            app_id=app.id,
+            name="新的会话",
+            invoke_from=InvokeFrom.WEB_APP,
+            created_by=end_user.id,
+            owner_account_id=account.id,
+        )
 
     def resolve_web_app_end_user(
         self,
@@ -109,27 +113,36 @@ class WebAppService(BaseService):
         # 1.校验 WebApp token 并解析当前账号对应的终端用户。
         app = self.get_web_app(token)
         end_user = self.resolve_web_app_end_user(app=app, account=account)
-        # 2.按应用、调用方式和创建者限制会话可见范围。
-        conversation = (
-            self.db.session.query(Conversation)
-            .filter(
-                Conversation.id == conversation_id,
-                Conversation.app_id == app.id,
-                Conversation.invoke_from.in_([
-                    InvokeFrom.WEB_APP,
-                    InvokeFrom.CREATOR_TASK,
-                ]),
-                or_(
-                    Conversation.owner_account_id == account.id,
-                    Conversation.created_by.in_([end_user.id, account.id]),
-                ),
-                Conversation.is_deleted.is_(False),
-            )
-            .one_or_none()
+        # 2.账号归属和旧数据兼容统一交给会话模块。
+        conversation = self.conversation_service.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
+            app_id=app.id,
+            allowed_sources=(InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK),
         )
-        if conversation is None:
-            raise ForbiddenException("会话不存在或不属于当前用户")
         return app, end_user, conversation
+
+    def get_invocation_context(
+        self,
+        *,
+        token: str,
+        conversation_id: UUID,
+        account: Account,
+    ) -> AgentInvocationContext:
+        """把 WebApp token 和账号映射为已校验的 Agent 调用上下文。"""
+        app, end_user, conversation = self.get_owned_web_conversation(
+            token=token,
+            conversation_id=conversation_id,
+            account=account,
+        )
+        return AgentInvocationContext(
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+            created_by=end_user.id,
+            end_user_id=end_user.id,
+            invoke_from=InvokeFrom.WEB_APP,
+        )
 
     def get_owned_web_conversation_by_app_id(
         self,
@@ -139,37 +152,12 @@ class WebAppService(BaseService):
         account: Account,
     ) -> Conversation:
         """使用稳定应用归属校验 WebApp 会话，不依赖可能轮换的访问 token。"""
-        end_user = (
-            self.db.session.query(EndUser)
-            .filter(
-                EndUser.app_id == app_id,
-                EndUser.external_user_id == account.id,
-            )
-            .one_or_none()
+        return self.conversation_service.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
+            app_id=app_id,
+            allowed_sources=(InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK),
         )
-        allowed_creators = {account.id}
-        if end_user is not None:
-            allowed_creators.add(end_user.id)
-        conversation = (
-            self.db.session.query(Conversation)
-            .filter(
-                Conversation.id == conversation_id,
-                Conversation.app_id == app_id,
-                Conversation.invoke_from.in_([
-                    InvokeFrom.WEB_APP,
-                    InvokeFrom.CREATOR_TASK,
-                ]),
-                or_(
-                    Conversation.owner_account_id == account.id,
-                    Conversation.created_by.in_(allowed_creators),
-                ),
-                Conversation.is_deleted.is_(False),
-            )
-            .one_or_none()
-        )
-        if conversation is None:
-            raise ForbiddenException("会话不存在或不属于当前用户")
-        return conversation
 
     def get_web_app(self, token: str) -> App:
         """根据访问令牌获取已发布的 WebApp 应用。"""
@@ -244,12 +232,17 @@ class WebAppService(BaseService):
                 Conversation.app_id == app.id,
                 or_(
                     Conversation.owner_account_id == account.id,
-                    Conversation.created_by.in_([end_user.id, account.id]),
+                    and_(
+                        Conversation.owner_account_id.is_(None),
+                        Conversation.created_by.in_([end_user.id, account.id]),
+                    ),
                 ),
-                Conversation.invoke_from.in_([
-                    InvokeFrom.WEB_APP,
-                    InvokeFrom.CREATOR_TASK,
-                ]),
+                Conversation.invoke_from.in_(
+                    [
+                        InvokeFrom.WEB_APP,
+                        InvokeFrom.CREATOR_TASK,
+                    ]
+                ),
                 Conversation.is_pinned == is_pinned,
                 ~Conversation.is_deleted,
             )

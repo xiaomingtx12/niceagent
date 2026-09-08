@@ -158,7 +158,10 @@ class AudioService(BaseService):
                 or message.created_by != account.id
                 or not (
                     conversation.owner_account_id == account.id
-                    or conversation.created_by == account.id
+                    or (
+                        conversation.owner_account_id is None
+                        and conversation.created_by == account.id
+                    )
                 )
             ):
                 raise NotFoundException("该消息不存在，请核实后重试")

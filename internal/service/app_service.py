@@ -21,6 +21,7 @@ from internal.entity.app_entity import (
     DEFAULT_APP_CONFIG,
     GENERATE_ICON_PROMPT_TEMPLATE,
 )
+from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import (
     NotFoundException,
     ForbiddenException,
@@ -39,6 +40,7 @@ from internal.schema.app_schema import (
 )
 from internal.schema.agent_runtime_schema import (
     AgentAppCleanupReq,
+    AgentInvocationContext,
 )
 from internal.schema.app_config_schema import DraftAppConfigPatchReq
 from pkg.paginator import Paginator
@@ -197,6 +199,30 @@ class AppService(BaseService):
         if app.account_id != account.id:
             raise ForbiddenException("当前账号无权限访问该应用，请核实后尝试")
         return app
+
+    def get_debugger_invocation_context(
+        self,
+        *,
+        app_id: UUID,
+        conversation_id: UUID,
+        account: Account,
+    ) -> AgentInvocationContext:
+        """把调试入口转换为已校验的 Agent 调用上下文。"""
+        app = self.get_app(app_id, account)
+        conversation = self.conversation_service.get_owned_conversation(
+            conversation_id=conversation_id,
+            account=account,
+            app_id=app.id,
+            allowed_sources=(InvokeFrom.DEBUGGER,),
+        )
+        return AgentInvocationContext(
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
+            created_by=account.id,
+            end_user_id=None,
+            invoke_from=InvokeFrom.DEBUGGER,
+        )
 
     def delete_app(self, app_id: UUID, account: Account) -> App:
         """根据传递的应用id+账号，删除指定的应用信息，目前仅删除应用基础信息即可"""

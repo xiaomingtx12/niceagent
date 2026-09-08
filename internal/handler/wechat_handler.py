@@ -8,10 +8,11 @@ from wechatpy import parse_message
 from internal.service import WechatService
 
 
+# @deprecated 微信公众号入口已不再作为主流程使用，仅保留兼容。
 @inject
 @dataclass
 class WechatHandler:
-    """微信公众号服务服务"""
+    """[已废弃] 微信公众号旧入口适配器。"""
 
     wechat_service: WechatService
 

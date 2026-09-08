@@ -1,6 +1,6 @@
 from flask_login import LoginManager
 from flask_migrate import Migrate
-from injector import Binder, Injector, Module, provider, singleton
+from injector import Binder, Injector, Module, singleton
 from redis import Redis
 from flask_weaviate import FlaskWeaviate
 
@@ -11,7 +11,6 @@ from internal.extension.migrate_extension import migrate
 from internal.extension.redis_extension import redis_client
 from internal.extension.weaviate_extension import weaviate
 from internal.repository import (
-    AgentWorkbenchRedisRepository,
     BuiltinSkillRepository,
     CosObjectStorageRepository,
     WorkspaceFileStore,
@@ -22,10 +21,6 @@ from internal.service.agent_workbench_event_queue import (
 from internal.service.agent_workbench_execution_service import (
     AgentWorkbenchRunExecutionService,
 )
-from internal.service.agent_workbench_run_coordinator import (
-    AgentWorkbenchRunCoordinator,
-)
-from internal.service.agent_workbench_run_factory import AgentWorkbenchRunFactory
 from internal.service.agent_workbench_service import AgentWorkbenchService
 from internal.service.embeddings_service import EmbeddingsService
 from internal.service.faiss_service import FaissService
@@ -54,18 +49,8 @@ class ExtensionModule(Module):
             scope=singleton,
         )
         binder.bind(
-            AgentWorkbenchRunFactory,
-            to=AgentWorkbenchRunFactory,
-            scope=singleton,
-        )
-        binder.bind(
             AgentWorkbenchRunExecutionService,
             to=AgentWorkbenchRunExecutionService,
-            scope=singleton,
-        )
-        binder.bind(
-            AgentWorkbenchRunCoordinator,
-            to=AgentWorkbenchRunCoordinator,
             scope=singleton,
         )
         # 将 EmbeddingsService 和 FaissService 绑定为单例，确保所有地方使用同一个实例
@@ -85,21 +70,6 @@ class ExtensionModule(Module):
             WorkspaceFileStore,
             to=WorkspaceFileStore,
             scope=singleton,
-        )
-
-    @singleton
-    @provider
-    def provide_agent_workbench_redis_repository(
-        self,
-        redis_client: Redis,
-        config: Config,
-    ) -> AgentWorkbenchRedisRepository:
-        """使用统一配置构造进程级工作台 Redis Repository。"""
-        return AgentWorkbenchRedisRepository(
-            redis_client,
-            key_prefix=config.AGENT_WORKBENCH_REPLAY_KEY_PREFIX,
-            ttl_seconds=config.AGENT_WORKBENCH_REPLAY_TTL_SECONDS,
-            max_length=config.AGENT_WORKBENCH_REPLAY_MAX_LENGTH,
         )
 
 

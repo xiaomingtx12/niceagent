@@ -10,18 +10,23 @@ from internal.entity.agent_attachment_entity import AgentAttachment
 from internal.entity.conversation_entity import InvokeFrom
 
 
-class AgentInvocation(BaseModel):
-    """Service 交给 Agent 装配层的一次可信调用参数。"""
+class AgentInvocationContext(BaseModel):
+    """入口完成鉴权后交给运行模块的可信调用上下文。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     account_id: UUID
     app_id: UUID
     conversation_id: UUID
-    message_id: UUID
     created_by: UUID
     end_user_id: UUID | None
     invoke_from: InvokeFrom
+
+
+class AgentInvocation(AgentInvocationContext):
+    """Service 交给 Agent 装配层的一次可信调用参数。"""
+
+    message_id: UUID
     query: str
     image_urls: tuple[str, ...] = Field(default_factory=tuple)
     attachments: tuple[AgentAttachment, ...] = Field(default_factory=tuple)
@@ -58,5 +63,6 @@ __all__ = [
     "AgentAppCleanupReq",
     "AgentConversationCleanupReq",
     "AgentInvocation",
+    "AgentInvocationContext",
     "AgentMessageCleanupReq",
 ]

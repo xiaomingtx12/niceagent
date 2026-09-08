@@ -11,15 +11,20 @@ from injector import inject
 
 from config import Config
 from internal.core.agent_v2.entity.subagent_config import build_published_graph_id
-from internal.core.agent_v2.protocol.internal_auth import (
+from internal.service.agent_protocol.internal_auth import (
     InternalAgentProtocolClaims,
     parse_internal_agent_protocol_token,
 )
 from internal.entity import WORKBENCH_ACTIVE_STATUSES
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import ForbiddenException, NotFoundException, ValidateErrorException
-from internal.model import Account, AgentRun, App
+from internal.exception import (
+    ForbiddenException,
+    NotFoundException,
+    ValidateErrorException,
+)
+from internal.model import Account, AgentRun, App, Conversation
+from internal.schema.agent_runtime_schema import AgentInvocationContext
 from internal.schema.agent_workbench_schema import WorkbenchCommandInputReq
 from internal.schema.internal_agent_protocol_schema import (
     InternalRunCreateReq,
@@ -33,6 +38,7 @@ from .agent_workbench_run_service import AgentWorkbenchRunService
 from .agent_workbench_service import AgentWorkbenchService
 from .base_service import BaseService
 from .conversation_service import ConversationService
+from .creator_task_service import CreatorTaskService
 
 
 @inject
@@ -45,6 +51,7 @@ class InternalAgentProtocolService(BaseService):
     workbench_service: AgentWorkbenchService
     run_service: AgentWorkbenchRunService
     conversation_service: ConversationService
+    creator_task_service: CreatorTaskService
 
     def authenticate(self, token: str | None) -> InternalAgentProtocolClaims:
         """解析内部调用头，并校验账号与两个应用仍在授权范围内。"""
@@ -61,26 +68,22 @@ class InternalAgentProtocolService(BaseService):
     ) -> InternalThreadResp:
         """创建业务会话，并投影为 SDK thread 响应。"""
         account = self._get_authorized_account(claims)
-        try:
-            with self.db.auto_commit():
-                conversation = self.conversation_service.create_conversation(
-                    app_id=claims.target_app_id,
-                    invoke_from=InvokeFrom.CREATOR_TASK,
-                    created_by=account.id,
-                    owner_account_id=account.id,
-                )
-            now = _format_datetime(conversation.updated_at)
-            return InternalThreadResp(
-                thread_id=conversation.id,
-                created_at=_format_datetime(conversation.created_at),
-                updated_at=now,
-                metadata={
-                    "graph_id": build_published_graph_id(claims.target_app_id)
-                },
-                status="idle",
-            )
-        finally:
-            self.db.session.close()
+        conversation = self.create(
+            Conversation,
+            app_id=claims.target_app_id,
+            name="新的会话",
+            invoke_from=InvokeFrom.CREATOR_TASK,
+            created_by=account.id,
+            owner_account_id=account.id,
+        )
+        now = _format_datetime(conversation.updated_at)
+        return InternalThreadResp(
+            thread_id=conversation.id,
+            created_at=_format_datetime(conversation.created_at),
+            updated_at=now,
+            metadata={"graph_id": build_published_graph_id(claims.target_app_id)},
+            status="idle",
+        )
 
     def create_run(
         self,
@@ -91,6 +94,11 @@ class InternalAgentProtocolService(BaseService):
     ) -> InternalRunLaunchResp:
         """校验 graph、可选中断前序 Run，并经 Workbench 入队后台任务。"""
         account = self._get_authorized_account(claims)
+        context = self.creator_task_service.get_invocation_context(
+            app_id=claims.target_app_id,
+            conversation_id=conversation_id,
+            account=account,
+        )
         expected_graph_id = build_published_graph_id(claims.target_app_id)
         if request.assistant_id != expected_graph_id:
             raise ForbiddenException("内部 Agent Protocol graph_id 不在授权范围内")
@@ -102,20 +110,17 @@ class InternalAgentProtocolService(BaseService):
         # 和顺序入队机制，避免同一 LangGraph thread 并发写 checkpoint。
         if request.multitask_strategy == "interrupt":
             self._request_active_run_cancel(
-                account=account,
-                conversation_id=conversation_id,
-                target_app_id=claims.target_app_id,
+                context=context,
             )
 
         try:
-            command_input = WorkbenchCommandInputReq.model_validate(run_input).to_run_input()
+            command_input = WorkbenchCommandInputReq.model_validate(
+                run_input
+            ).to_run_input()
         except ValueError as exc:
             raise ValidateErrorException(f"后台 Run 输入格式错误: {exc}") from exc
         started = self.workbench_service.start_run(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(claims.target_app_id),
-            conversation_id=conversation_id,
-            account=account,
+            context=context,
             run_input=command_input,
         )
         if started.type == "error":
@@ -123,17 +128,14 @@ class InternalAgentProtocolService(BaseService):
 
         run_id = started.result.run_id
         row = self.run_service.get_run(run_id)
-        try:
-            return InternalRunLaunchResp(
-                run=self._to_run_response(
-                    row=row,
-                    conversation_id=conversation_id,
-                    target_app_id=claims.target_app_id,
-                    multitask_strategy=request.multitask_strategy or "reject",
-                )
+        return InternalRunLaunchResp(
+            run=self._to_run_response(
+                row=row,
+                conversation_id=conversation_id,
+                target_app_id=claims.target_app_id,
+                multitask_strategy=request.multitask_strategy or "reject",
             )
-        finally:
-            self.db.session.close()
+        )
 
     def get_conversation(
         self,
@@ -144,10 +146,11 @@ class InternalAgentProtocolService(BaseService):
         """读取 SDK 所需的当前 State，用于异步任务获取最终结果。"""
         account = self._get_authorized_account(claims)
         state = self.workbench_service.get_state(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(claims.target_app_id),
-            conversation_id=conversation_id,
-            account=account,
+            context=self.creator_task_service.get_invocation_context(
+                app_id=claims.target_app_id,
+                conversation_id=conversation_id,
+                account=account,
+            ),
         )
         now = _iso_now()
         active = state.metadata.status in WORKBENCH_ACTIVE_STATUSES
@@ -170,14 +173,11 @@ class InternalAgentProtocolService(BaseService):
         """读取指定内部 Run，禁止跨应用或跨会话访问。"""
         self._get_authorized_account(claims)
         row = self.run_service.get_run(run_id)
-        try:
-            return self._to_run_response(
-                row=row,
-                conversation_id=conversation_id,
-                target_app_id=claims.target_app_id,
-            )
-        finally:
-            self.db.session.close()
+        return self._to_run_response(
+            row=row,
+            conversation_id=conversation_id,
+            target_app_id=claims.target_app_id,
+        )
 
     def cancel_run(
         self,
@@ -188,39 +188,32 @@ class InternalAgentProtocolService(BaseService):
     ) -> None:
         """将 SDK cancel 映射为 Workbench 指定 Run 取消。"""
         account = self._get_authorized_account(claims)
-        try:
-            self.workbench_service.cancel_run(
-                invoke_from=InvokeFrom.CREATOR_TASK,
-                access_value=str(claims.target_app_id),
+        self.workbench_service.cancel_run(
+            context=self.creator_task_service.get_invocation_context(
+                app_id=claims.target_app_id,
                 conversation_id=conversation_id,
-                run_id=run_id,
                 account=account,
-            )
-        finally:
-            self.db.session.close()
+            ),
+            run_id=run_id,
+        )
 
     def _request_active_run_cancel(
         self,
         *,
-        account: Account,
-        conversation_id: UUID,
-        target_app_id: UUID,
+        context: AgentInvocationContext,
     ) -> None:
         """为 update 语义请求停止前序运行，不等待其完成。"""
         active = self.run_service.get_latest_run(
-            conversation_id=conversation_id,
+            conversation_id=context.conversation_id,
             invoke_from=InvokeFrom.CREATOR_TASK,
         )
         if active is None or active.status not in WORKBENCH_ACTIVE_STATUSES:
             return
-        if active.app_id != target_app_id:
+        if active.app_id != context.app_id:
             raise ForbiddenException("内部 Agent Protocol 会话不属于当前应用")
         self.workbench_service.cancel_run(
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            access_value=str(target_app_id),
-            conversation_id=conversation_id,
+            context=context,
             run_id=active.id,
-            account=account,
         )
 
     def _get_authorized_account(
@@ -228,22 +221,27 @@ class InternalAgentProtocolService(BaseService):
         claims: InternalAgentProtocolClaims,
     ) -> Account:
         """复核签名声明对应的账号、父应用和目标发布应用。"""
-        try:
-            account = self.db.session.get(Account, claims.account_id)
-            parent = self.db.session.query(App.id).filter(
+        account = self.db.session.get(Account, claims.account_id)
+        parent = (
+            self.db.session.query(App.id)
+            .filter(
                 App.id == claims.parent_app_id,
                 App.account_id == claims.account_id,
-            ).one_or_none()
-            target = self.db.session.query(App.id).filter(
+            )
+            .one_or_none()
+        )
+        target = (
+            self.db.session.query(App.id)
+            .filter(
                 App.id == claims.target_app_id,
                 App.account_id == claims.account_id,
                 App.status == AppStatus.PUBLISHED,
-            ).one_or_none()
-            if account is None or parent is None or target is None:
-                raise ForbiddenException("内部 Agent Protocol 调用不在有效应用范围内")
-            return account
-        finally:
-            self.db.session.close()
+            )
+            .one_or_none()
+        )
+        if account is None or parent is None or target is None:
+            raise ForbiddenException("内部 Agent Protocol 调用不在有效应用范围内")
+        return account
 
     @staticmethod
     def _to_run_response(
@@ -280,7 +278,11 @@ class InternalAgentProtocolService(BaseService):
             metadata={},
             created_at=created_at,
             updated_at=updated_at,
-            error=(str(row.error_message) if status == "error" and row.error_message else None),
+            error=(
+                str(row.error_message)
+                if status == "error" and row.error_message
+                else None
+            ),
         )
 
 

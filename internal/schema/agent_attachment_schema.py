@@ -1,61 +1,14 @@
-"""Agent 附件请求与响应 Schema。"""
+"""Agent 附件响应 Schema。"""
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict
 
 from internal.entity.agent_attachment_entity import AgentAttachment
-from internal.exception import ValidateErrorException
-
-_MAX_AGENT_ATTACHMENTS = 5
-
-
-class AgentAttachmentResolveReq(BaseModel):
-    """解析一次 Agent 调用附件所需的可信请求。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    owner_id: UUID
-    file_ids: list[UUID] = Field(
-        default_factory=list,
-        max_length=_MAX_AGENT_ATTACHMENTS,
-    )
-
-    @field_validator("file_ids")
-    @classmethod
-    def reject_duplicate_file_ids(cls, value: list[UUID]) -> list[UUID]:
-        """拒绝同一附件被重复提交。"""
-        if len(value) != len(set(value)):
-            raise ValueError("附件不能重复提交")
-        return value
-
-    @classmethod
-    def from_values(
-        cls,
-        file_ids: Sequence[str | UUID] | None,
-        *,
-        owner_id: UUID,
-    ) -> "AgentAttachmentResolveReq":
-        """解析调用方值并转换为项目统一校验异常。"""
-        try:
-            return cls.model_validate(
-                {"owner_id": owner_id, "file_ids": list(file_ids or [])}
-            )
-        except ValidationError as exc:
-            raise ValidateErrorException(
-                "附件参数校验失败",
-                data=json.loads(
-                    exc.json(
-                        include_url=False,
-                        include_context=False,
-                    )
-                ),
-            ) from exc
 
 
 class AgentAttachmentResp(BaseModel):
@@ -97,7 +50,6 @@ def dump_agent_attachments(
 
 
 __all__ = [
-    "AgentAttachmentResolveReq",
     "AgentAttachmentResp",
     "dump_agent_attachments",
 ]
