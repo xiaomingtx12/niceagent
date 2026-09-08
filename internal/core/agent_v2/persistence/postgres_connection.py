@@ -9,7 +9,7 @@ from typing import Any, TypeVar
 from psycopg import InterfaceError as PsycopgInterfaceError
 from psycopg import OperationalError as PsycopgOperationalError
 from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
+from psycopg_pool import ConnectionPool, PoolClosed, PoolTimeout, TooManyRequests
 
 
 POSTGRES_CONNECTION_ERRORS = (
@@ -70,6 +70,9 @@ def execute_with_postgres_retry(
     """连接瞬时失效时只重试当前幂等数据库操作一次。"""
     try:
         return operation()
+    except (PoolClosed, PoolTimeout, TooManyRequests):
+        # 池已关闭或容量耗尽时不会因再次借连接而恢复，直接交给调用方处理。
+        raise
     except POSTGRES_CONNECTION_ERRORS as exc:
         logger.warning(
             "%s PostgreSQL 连接失效，使用连接池新连接重试 operation=%s error_type=%s",

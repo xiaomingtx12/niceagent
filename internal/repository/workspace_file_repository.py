@@ -38,9 +38,12 @@ class WorkspaceFileRepository:
         scope_id: UUID,
         limits: AgentWorkspaceLimits,
         created_by: UUID | None = None,
+        *,
+        owns_session: bool = False,
     ) -> None:
         """绑定数据库会话、访问作用域和配额规则。"""
         self._session = session
+        self._owns_session = owns_session
         self.account_id = account_id
         self.app_id = app_id
         self.scope_id = scope_id
@@ -69,7 +72,7 @@ class WorkspaceFileRepository:
         )
         if not include_deleted:
             stmt = stmt.where(WorkspaceFile.is_deleted.is_(False))
-        with self._session_lock:
+        with self._read_session():
             return self._session.execute(
                 stmt.execution_options(populate_existing=True)
             ).scalar_one_or_none()
@@ -94,7 +97,7 @@ class WorkspaceFileRepository:
         stmt = stmt.order_by(WorkspaceFile.path.asc()).execution_options(
             populate_existing=True
         )
-        with self._session_lock:
+        with self._read_session():
             return list(self._session.execute(stmt).scalars().all())
 
     def save_metadata(
@@ -160,6 +163,19 @@ class WorkspaceFileRepository:
             row.revision += 1
             row.updated_at = datetime.now(timezone.utc)
         return object_key
+
+    @contextmanager
+    def _read_session(self) -> Iterator[None]:
+        """独立 Session 查询后立即归还连接；HTTP 借入的 Session 仍由请求管理。
+
+        close 会分离已加载的元数据，外部内容下载期间读取字段不会重新借连接。
+        """
+        with self._session_lock:
+            try:
+                yield
+            finally:
+                if self._owns_session:
+                    self._session.close()
 
     @contextmanager
     def _write_transaction(self) -> Iterator[None]:

@@ -66,8 +66,8 @@ _WRITE_ERRORS = (
 class AgentWorkspaceBackend(WorkspaceBackend):
     """把 Workspace 元数据和 COS 内容适配为 DeepAgents 文件 Backend。
 
-    Backend 使用本次运行独立的数据库 Session；业务 Workspace Service 负责
-    HTTP 查询和权限流程，两者不共享 Session 生命周期。
+    Backend 拥有独立 Session，元数据查询结束即归还连接，避免等待模型或
+    对象存储时占满连接池；HTTP Workspace Service 使用请求自己的 Session。
     """
 
     @classmethod
@@ -121,6 +121,7 @@ class AgentWorkspaceBackend(WorkspaceBackend):
             scope_id=workspace_scope_id,
             created_by=created_by,
             limits=limits,
+            owns_session=True,
         )
 
     def close(self) -> None:
