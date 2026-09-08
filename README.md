@@ -96,8 +96,10 @@ python run.py
 示例：
 
 ```bash
-gunicorn -w 4 -b 0.0.0.0:5000 wsgi:application
+gunicorn -w 1 --threads 2 -b 0.0.0.0:5000 wsgi:application
 ```
+
+工作台实时事件保存在 API 进程内，生产环境必须保持单 Worker；可通过线程数提高并发能力。
 
 ### 5. Docker 启动（可选）
 
