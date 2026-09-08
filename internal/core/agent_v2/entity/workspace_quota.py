@@ -63,9 +63,15 @@ class AgentWorkspaceLimits(BaseModel):
             - (current.size_bytes if current is not None else 0)
             + new_size
         )
-        if projected_files > self.max_files:
+        self.check_usage(files=projected_files, size_bytes=projected_bytes)
+
+    def check_usage(self, *, files: int, size_bytes: int) -> None:
+        """接收仓储聚合后的用量，避免为配额校验加载全部文件实体。"""
+        if files < 0 or size_bytes < 0:
+            raise ValueError("Workspace 用量不能小于 0")
+        if files > self.max_files:
             raise WorkspaceQuotaExceeded(WorkspaceQuotaKind.FILES, self.max_files)
-        if projected_bytes > self.max_bytes:
+        if size_bytes > self.max_bytes:
             raise WorkspaceQuotaExceeded(WorkspaceQuotaKind.BYTES, self.max_bytes)
 
 

@@ -1,4 +1,4 @@
-"""Agent V2 的结构化遥测边界。"""
+"""Agent 结构化遥测接口。"""
 
 from __future__ import annotations
 

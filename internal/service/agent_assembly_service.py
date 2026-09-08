@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import cast
 from uuid import UUID
 
@@ -15,20 +16,23 @@ from langchain_core.tools import BaseTool
 from pydantic import ValidationError
 
 from config.config import Config
-from internal.core.language_model.entities.model_entity import BaseLanguageModel
-from internal.core.agent_v2.assembly.graph.deep_agent_factory import build_deep_agent
-from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
+from internal.core.agent_v2 import (
+    AgentConfig,
+    AgentExecutor,
+    AgentRunContext,
+    AgentRuntimeAssembler,
+    AgentSkill,
     SubAgentRuntimeBinding,
 )
-from internal.core.agent_v2.assembly.observability.run_observer import (
+from internal.core.language_model.entities.model_entity import BaseLanguageModel
+from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
 from internal.core.agent_v2.entity.subagent_config import (
     SubAgentConfig,
     build_published_graph_id,
 )
-from internal.core.agent_v2.execution.agent_executor import AgentExecutor
-from internal.core.agent_v2.protocol.internal_auth import (
+from internal.service.agent_protocol.internal_auth import (
     issue_internal_agent_protocol_token,
 )
 from internal.entity.app_entity import AppStatus
@@ -40,16 +44,19 @@ from internal.exception import (
 )
 from internal.extension.logging_extension import logger
 from internal.model import Account, App
+from internal.repository import WorkspaceFileStore
+from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
 from internal.schema.agent_runtime_schema import AgentInvocation
 from internal.schema.agent_attachment_schema import dump_agent_attachments
 from internal.schema.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_attachment_service import AgentAttachmentService
-from .agent_runtime_factory import AgentRuntimeFactory
 from .app_config_service import AppConfigService
 from .assistant_agent_service import AssistantAgentService
 from .language_model_service import LanguageModelService
 from .retrieval_service import RetrievalService
+from .skill_service import SkillService
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,12 +76,7 @@ class _ResolvedAgentDefinition:
 @inject
 @dataclass
 class AgentAssemblyService:
-    """统一完成业务配置到 Agent Core 的装配。
-
-    本服务在执行边界读取草稿或发布配置并解析应用能力；运行时资源
-    由 ``AgentRuntimeFactory`` 持有，``AgentWorkbenchService`` 仍负责
-    Run、事件和取消。真正的图构建与模型/工具调度由 Agent Core 完成。
-    """
+    """解析平台应用、授权能力和输入，将资源装配交给 Agent Core。"""
 
     db: SQLAlchemy
     app_config_service: AppConfigService
@@ -82,7 +84,8 @@ class AgentAssemblyService:
     language_model_service: LanguageModelService
     agent_attachment_service: AgentAttachmentService
     assistant_agent_service: AssistantAgentService
-    runtime_factory: AgentRuntimeFactory
+    skill_service: SkillService
+    workspace_file_store: WorkspaceFileStore
     config: Config
 
     # -------------------- Core assembly flow --------------------
@@ -93,15 +96,10 @@ class AgentAssemblyService:
         *,
         observer: PlatformAgentRunObserver,
     ) -> tuple[AgentExecutor, BaseMessage]:
-        """根据一次调用的业务输入构造一次性的 ``AgentExecutor``。
-
-        返回的执行器和输入消息只对应当前 Run，不能作为可复用实例保存。
-        """
-        # 1.读取并解析本次 Run 的应用定义、模型、工具和 SubAgent。
+        """准备平台能力并委托 Core 装配，返回仅属于当前 Run 的执行器和输入。"""
+        # 1.读取平台配置并转换为 Agent 输入消息。
         build_started_at = time.monotonic()
         definition = self._resolve_definition(req, observer)
-
-        # 2.将业务输入转换为模型可消费的 LangChain 消息。
         input_message = definition.model.convert_to_human_message(
             req.query,
             req.image_urls,
@@ -109,62 +107,68 @@ class AgentAssemblyService:
         )
         if req.input_message_id:
             input_message.id = req.input_message_id
-        phase_started_at = time.monotonic()
+        input_message.additional_kwargs.update(
+            {
+                "business_message_id": str(req.message_id),
+                "run_id": str(observer.run_id),
+            }
+        )
 
-        # 3.创建本次 Run 独占的 Workspace、Memory、Skill、Sandbox 等资源。
+        # 2.平台只负责解析已授权 Skill，Agent Core 接管资源和图生命周期。
+        context = AgentRunContext(
+            account_id=req.account_id,
+            app_id=req.app_id,
+            conversation_id=req.conversation_id,
+            created_by=req.created_by,
+            principal_id=(req.end_user_id or req.created_by),
+            memory_enabled=definition.config.long_term_memory.enable,
+        )
+        skills = self.skill_service.resolve_enabled_skills(definition.config.skills)
+        agent_config = AgentConfig(
+            name=definition.name,
+            description=definition.description,
+            model=cast(BaseChatModel, definition.model),
+            preset_prompt=definition.config.preset_prompt,
+            review_config=definition.config.review_config.model_dump(mode="json"),
+            tools=definition.tools,
+            skills=tuple(
+                AgentSkill(
+                    name=skill.name,
+                    skill_md=skill.skill_md,
+                    package_root=skill.package_root,
+                    package_files=dict(skill.package_files),
+                )
+                for skill in skills
+            ),
+            selected_skills=definition.selected_skills,
+            subagents=definition.subagents,
+            subagent_bindings=definition.subagent_bindings,
+        )
+
+        # 3.Core 装配运行时并编译图，平台只提供附件写入操作和异常转换。
         try:
-            runtime = self.runtime_factory.create(
-                invocation=req,
-                app_config=definition.config,
-                selected_skills=definition.selected_skills,
-                subagents=definition.subagents,
+            agent = AgentRuntimeAssembler(
+                workspace_factory=partial(
+                    AgentWorkspaceBackend.create,
+                    engine=self.db.engine,
+                    file_store=self.workspace_file_store,
+                    limits=AgentWorkspaceLimits(
+                        max_bytes=self.config.WORKSPACE_MAX_BYTES,
+                        max_files=self.config.WORKSPACE_MAX_FILES,
+                    ),
+                ),
+                config=self.config,
+            ).build(
+                context=context,
+                definition=agent_config,
                 observer=observer,
+                prepare_backend=partial(
+                    self.agent_attachment_service.materialize,
+                    req.attachments,
+                ),
             )
         except ValueError as exc:
             raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
-        self._log_build_timing(req, "runtime", phase_started_at, observer)
-        phase_started_at = time.monotonic()
-
-        # 4.将附件投影到 Workspace，供 Agent 文件工具读取。
-        try:
-            self.agent_attachment_service.materialize(
-                req.attachments,
-                runtime.backend,
-            )
-        except Exception:
-            # 附件投影失败时执行器尚未接管资源；关闭操作不得覆盖原异常。
-            self.runtime_factory.close(runtime)
-            raise
-        self._log_build_timing(req, "attachments", phase_started_at, observer)
-        phase_started_at = time.monotonic()
-
-        # 5.将已解析定义和运行时资源编译为 Deep Agents 图。
-        try:
-            graph = build_deep_agent(
-                llm=cast(BaseChatModel, definition.model),
-                app_name=definition.name,
-                app_description=definition.description,
-                preset_prompt=definition.config.preset_prompt,
-                review_config=definition.config.review_config.model_dump(mode="json"),
-                tools=definition.tools,
-                subagents=definition.subagents,
-                runtime=runtime,
-                subagent_bindings=definition.subagent_bindings,
-            )
-            agent = AgentExecutor(
-                graph=graph,
-                runtime=runtime,
-                observer=observer,
-            )
-        except ValueError as exc:
-            self.runtime_factory.close(runtime)
-            raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
-        except Exception:
-            self.runtime_factory.close(runtime)
-            raise
-        self._log_build_timing(req, "graph", phase_started_at, observer)
-
-        # 6.交出资源生命周期，返回当前 Run 的一次性执行器和输入消息。
         self._log_build_timing(req, "total", build_started_at, observer)
         return agent, input_message
 
@@ -457,8 +461,7 @@ class AgentAssemblyService:
             dict.fromkeys(
                 config.published_app_id
                 for config in subagents
-                if config.source == "published"
-                and config.published_app_id is not None
+                if config.source == "published" and config.published_app_id is not None
             )
         )
         if not target_ids:
@@ -477,9 +480,7 @@ class AgentAssemblyService:
 
         # 3.拒绝不存在、越权或已经取消发布的引用。
         apps_by_id = {app.id: app for app in apps}
-        missing = [
-            target_id for target_id in target_ids if target_id not in apps_by_id
-        ]
+        missing = [target_id for target_id in target_ids if target_id not in apps_by_id]
         if missing:
             raise NotFoundException(
                 "子 Agent 引用的发布应用不存在或已取消发布: "

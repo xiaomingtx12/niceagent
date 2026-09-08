@@ -14,7 +14,7 @@ from typing import Any
 from deepagents.backends import LocalShellBackend
 from deepagents.backends.protocol import ExecuteResponse
 
-from internal.core.agent_v2.assembly.observability.telemetry import (
+from internal.core.agent_v2.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
@@ -22,9 +22,12 @@ from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
     SandboxProviderError,
     close_workspace_safely,
     seed_sandbox_workspace,
-    sync_workspace_changes,
 )
-from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
+    close_managed_sandbox,
+)
+from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
+from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
 
 
 _VIRTUAL_PATH_PATTERN = re.compile(
@@ -38,7 +41,7 @@ class ManagedLocalShellBackend(LocalShellBackend):
     def __init__(
         self,
         *,
-        workspace: AgentWorkspaceBackend,
+        workspace: WorkspaceBackend,
         telemetry: AgentTelemetry | None = None,
         timeout: int = 1800,
         max_output_bytes: int = 500 * 1024,
@@ -47,7 +50,7 @@ class ManagedLocalShellBackend(LocalShellBackend):
         self._workspace = workspace
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._root = Path(tempfile.mkdtemp(prefix="my-dify-local-shell-"))
-        self._baseline_manifest: dict[str, str] = {}
+        self._baseline_manifest: WorkspaceManifest | None = None
         self._managed_closed = False
         try:
             super().__init__(
@@ -65,7 +68,7 @@ class ManagedLocalShellBackend(LocalShellBackend):
             shutil.rmtree(self._root, ignore_errors=True)
             raise
 
-    def set_workspace_baseline(self, manifest: dict[str, str]) -> None:
+    def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
         """记录本次运行开始时的权威 Workspace 摘要。"""
         self._baseline_manifest = dict(manifest)
 
@@ -83,33 +86,19 @@ class ManagedLocalShellBackend(LocalShellBackend):
         """先同步 Workspace 增量，再删除临时目录和业务 Workspace 会话。"""
         if self._managed_closed:
             return
-        sync_error: Exception | None = None
         try:
-            sync_workspace_changes(
+            close_managed_sandbox(
                 backend=self,
                 workspace=self._workspace,
                 baseline_manifest=self._baseline_manifest,
-            )
-        except Exception as exc:  # noqa: BLE001
-            sync_error = exc
-            self._telemetry.emit(
-                "sandbox.workspace_sync_failed",
-                attributes={"sandbox_id": self.id},
+                close_provider=lambda: LocalShellBackend.close(self),
+                telemetry=self._telemetry,
+                sandbox_id=self.id,
+                provider_name="local shell",
             )
         finally:
             shutil.rmtree(self._root, ignore_errors=True)
-            workspace_close_error = close_workspace_safely(
-                self._workspace,
-                telemetry=self._telemetry,
-                sandbox_id=self.id,
-            )
-            if sync_error is None and workspace_close_error is not None:
-                sync_error = workspace_close_error
             self._managed_closed = True
-        if sync_error is not None:
-            raise SandboxProviderError(
-                f"failed to close local Shell Backend {self.id}"
-            ) from sync_error
 
     def _install_windows_python_alias(self) -> None:
         """让 Windows 下常见的 ``python3`` 命令指向当前服务解释器。"""
@@ -127,7 +116,7 @@ class ManagedLocalShellBackend(LocalShellBackend):
 def create_backend(
     *,
     settings: Any,
-    workspace: AgentWorkspaceBackend,
+    workspace: WorkspaceBackend,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,

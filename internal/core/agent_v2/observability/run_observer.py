@@ -1,4 +1,4 @@
-"""平台自有的 Agent Run 观测采集器。"""
+"""Agent 执行过程的调用链和用量采集。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import ToolMessage
 from langchain_core.outputs import LLMResult
 
-from internal.core.agent_v2.assembly.observability.token_usage import (
+from internal.core.agent_v2.observability.token_usage import (
     normalize_llm_result,
 )
 from internal.core.agent_v2.entity.telemetry import (

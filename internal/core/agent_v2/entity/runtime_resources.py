@@ -1,4 +1,4 @@
-"""Agent Core 单次运行的已装配资源。"""
+"""装配阶段交给执行器的运行资源及其所有权。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from deepagents.middleware.filesystem import FilesystemPermission
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.store.base import BaseStore
 
-from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 
 

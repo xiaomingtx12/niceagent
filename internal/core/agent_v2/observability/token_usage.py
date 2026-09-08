@@ -1,4 +1,4 @@
-"""兼容不同模型 Provider 的 Token 用量归一化和聚合。"""
+"""模型 Provider Token 用量的归一化和聚合。"""
 
 from __future__ import annotations
 

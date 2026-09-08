@@ -13,12 +13,13 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
     SandboxProviderError,
     close_workspace_safely,
 )
-from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
+from internal.extension.logging_extension import logger
 
 
 _DISABLED_PROVIDERS = {"disabled", "none", "off", "false"}
@@ -29,7 +30,7 @@ _ProviderCreator = Callable[..., SandboxBackendProtocol]
 def build_sandbox_backend(
     *,
     settings: Any,
-    workspace: AgentWorkspaceBackend,
+    workspace: WorkspaceBackend,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
@@ -50,8 +51,10 @@ def build_sandbox_backend(
         raise SandboxProviderError(
             f"unsupported AGENT_SANDBOX_PROVIDER: {provider}"
         )
+    # Provider owns cleanup after it accepts the Workspace. Keeping that
+    # ownership in one place prevents double-closing its database Session.
+    creator = _load_provider_creator(canonical_provider, module_path)
     try:
-        creator = _load_provider_creator(canonical_provider, module_path)
         return creator(
             settings=settings,
             workspace=workspace,
@@ -60,10 +63,8 @@ def build_sandbox_backend(
             telemetry=telemetry,
         )
     except SandboxProviderError:
-        close_workspace_safely(workspace, telemetry=telemetry)
         raise
     except Exception as exc:  # noqa: BLE001
-        close_workspace_safely(workspace, telemetry=telemetry)
         raise SandboxProviderError(
             f"failed to initialize {canonical_provider} Sandbox"
         ) from exc
@@ -89,6 +90,39 @@ def _load_provider_creator(
             f"Sandbox provider module {module_path} does not expose create_backend"
         )
     return creator
+
+
+def delete_agent_sandbox(
+    *,
+    settings: Any,
+    account_id: object,
+    app_id: object,
+    conversation_id: object,
+) -> None:
+    """清理会话持有的远程资源；保持与正常运行结束时关闭 Backend 相区分。"""
+    provider = _normalize_provider(settings)
+    if provider != "langsmith":
+        return
+    name = build_stable_sandbox_name(
+        account_id=account_id,
+        app_id=app_id,
+        conversation_id=conversation_id,
+        agent_id="main",
+    )
+    try:
+        module = import_module(_PROVIDER_MODULES[provider])
+        module.delete_sandbox(name)
+    except Exception:
+        # 远程删除失败不回滚已提交的业务删除，保留上下文供排查与补偿。
+        logger.warning(
+            "删除 Agent Sandbox 失败: account_id=%s app_id=%s "
+            "conversation_id=%s sandbox=%s",
+            account_id,
+            app_id,
+            conversation_id,
+            name,
+            exc_info=True,
+        )
 
 
 def _normalize_provider(settings: Any) -> str:
@@ -121,4 +155,4 @@ def build_stable_sandbox_name(
     return f"mydify-sandbox-{digest}"
 
 
-__all__ = ["build_sandbox_backend", "build_stable_sandbox_name"]
+__all__ = ["build_sandbox_backend", "build_stable_sandbox_name", "delete_agent_sandbox"]

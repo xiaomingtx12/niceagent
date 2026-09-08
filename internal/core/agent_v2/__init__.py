@@ -1,5 +1,19 @@
-"""MyDify DeepAgents V2 核心包。
+"""Agent 对外入口：已解析配置、运行上下文、执行器、事件与结果。"""
 
-根包不聚合具体实现。请从所属子包或具体模块导入对象，保持依赖方向清晰，
-避免通过包级懒加载隐藏跨层依赖。
-"""
+from .entity.agent_config import AgentConfig, AgentSkill, SubAgentRuntimeBinding
+from .entity.agent_event import AgentEvent
+from .entity.execution_result import AgentExecutionResult
+from .entity.run_context import AgentRunContext
+from .execution.agent_executor import AgentExecutor
+from .assembly.runtime_assembler import AgentRuntimeAssembler
+
+__all__ = [
+    "AgentConfig",
+    "AgentSkill",
+    "SubAgentRuntimeBinding",
+    "AgentEvent",
+    "AgentExecutionResult",
+    "AgentRunContext",
+    "AgentExecutor",
+    "AgentRuntimeAssembler",
+]

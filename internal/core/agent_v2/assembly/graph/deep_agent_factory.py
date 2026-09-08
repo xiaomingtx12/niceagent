@@ -21,15 +21,15 @@ from openai import APIConnectionError
 from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
     build_app_system_prompt,
 )
-from internal.core.agent_v2.assembly.context.runtime_resources import (
+from internal.core.agent_v2.entity.runtime_resources import (
     AgentRuntimeResources,
 )
 from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
-    SubAgentRuntimeBinding,
     build_subagent_specs,
     validate_agent_tools,
 )
 from internal.core.agent_v2.entity.run_context import AgentRunContext
+from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
 from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
 from internal.core.agent_v2.middleware.reloading_memory_middleware import (
     ReloadingMemoryMiddleware,
@@ -37,6 +37,9 @@ from internal.core.agent_v2.middleware.reloading_memory_middleware import (
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.middleware.runtime_context_middleware import (
     RuntimeContextMiddleware,
+)
+from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
+    ToolCallValidationMiddleware,
 )
 
 
@@ -107,6 +110,7 @@ def _build_platform_middleware(
 ) -> list[AgentMiddleware]:
     """按稳定顺序构造 MyDify 扩展的 DeepAgents 中间件。"""
     middleware: list[AgentMiddleware] = [
+        ToolCallValidationMiddleware(),
         RuntimeContextMiddleware(),
         ReviewMiddleware(review_config=dict(review_config)),
         ModelRetryMiddleware(

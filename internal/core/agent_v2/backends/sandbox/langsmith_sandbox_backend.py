@@ -12,10 +12,13 @@ from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
     SandboxProviderError,
     close_workspace_safely,
     seed_sandbox_workspace,
-    sync_workspace_changes,
 )
-from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
-from internal.core.agent_v2.assembly.observability.telemetry import (
+from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
+    close_managed_sandbox,
+)
+from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
+from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
+from internal.core.agent_v2.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
@@ -29,7 +32,7 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
         *,
         sandbox: Any,
         client: Any,
-        workspace: AgentWorkspaceBackend,
+        workspace: WorkspaceBackend,
         telemetry: AgentTelemetry | None = None,
     ) -> None:
         super().__init__(sandbox)
@@ -38,9 +41,9 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._closed = False
         self._remote_deleted = False
-        self._baseline_manifest: dict[str, str] = {}
+        self._baseline_manifest: WorkspaceManifest | None = None
 
-    def set_workspace_baseline(self, manifest: dict[str, str]) -> None:
+    def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
         """记录本次运行开始时的权威 Workspace 清单。"""
         self._baseline_manifest = dict(manifest)
 
@@ -48,32 +51,18 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
         """先回收工作文件，再删除远程 Sandbox。"""
         if self._closed:
             return
-        sync_error: Exception | None = None
         try:
-            sync_workspace_changes(
+            close_managed_sandbox(
                 backend=self,
                 workspace=self._workspace,
                 baseline_manifest=self._baseline_manifest,
-            )
-        except Exception as exc:  # noqa: BLE001
-            sync_error = exc
-            self._telemetry.emit(
-                "sandbox.workspace_sync_failed",
-                attributes={"sandbox_id": self.id},
-            )
-        finally:
-            workspace_close_error = close_workspace_safely(
-                self._workspace,
+                close_provider=lambda: None,
                 telemetry=self._telemetry,
                 sandbox_id=self.id,
+                provider_name="LangSmith",
             )
-            if sync_error is None and workspace_close_error is not None:
-                sync_error = workspace_close_error
+        finally:
             self._closed = True
-        if sync_error is not None:
-            raise SandboxProviderError(
-                f"failed to close Sandbox {self.id}"
-            ) from sync_error
 
     def delete_remote(self) -> None:
         """在会话或应用删除时显式清理远程 Sandbox。"""
@@ -95,10 +84,20 @@ class ManagedLangSmithSandbox(LangSmithSandbox):
         self._remote_deleted = True
 
 
+def delete_sandbox(name: str) -> None:
+    """删除已知名称的会话 Sandbox；不存在视为清理完成。"""
+    from langsmith.sandbox import ResourceNotFoundError, SandboxClient
+
+    try:
+        SandboxClient().delete_sandbox(name)
+    except ResourceNotFoundError:
+        return
+
+
 def create_backend(
     *,
     settings: Any,
-    workspace: AgentWorkspaceBackend,
+    workspace: WorkspaceBackend,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
@@ -188,7 +187,7 @@ def _cleanup_initialization(
     client: Any,
     sandbox: Any | None,
     created: bool,
-    workspace: AgentWorkspaceBackend,
+    workspace: WorkspaceBackend,
     telemetry: AgentTelemetry | None,
 ) -> None:
     """清理 LangSmith 初始化中已创建的远程和本地资源。"""

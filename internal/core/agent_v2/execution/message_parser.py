@@ -1,4 +1,4 @@
-"""LangChain 消息包装和内容的统一解析。"""
+"""Agent 执行中的模型消息和文本解析。"""
 
 from __future__ import annotations
 

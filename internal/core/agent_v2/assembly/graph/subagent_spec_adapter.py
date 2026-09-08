@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 
 from deepagents.middleware.async_subagents import AsyncSubAgent
 from deepagents.middleware.filesystem import FilesystemPermission
@@ -12,6 +11,10 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
 from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
+from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
+from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
+    ToolCallValidationMiddleware,
+)
 
 _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
     {
@@ -28,14 +31,6 @@ _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
 )
 
 
-@dataclass(frozen=True, slots=True)
-class SubAgentRuntimeBinding:
-    """一个同步 SubAgent 在当前 Run 中解析出的依赖覆盖。"""
-
-    tools: tuple[BaseTool, ...] | None = None
-    model: BaseChatModel | str | None = None
-
-
 def validate_agent_tools(
     tools: Sequence[BaseTool],
     *,
@@ -46,6 +41,8 @@ def validate_agent_tools(
     names: set[str] = set()
     duplicates: set[str] = set()
     for tool in resolved:
+        if not isinstance(tool.name, str) or not tool.name.strip():
+            raise ValueError(f"{context} 工具名称不能为空")
         if tool.name in names:
             duplicates.add(tool.name)
         names.add(tool.name)
@@ -110,6 +107,7 @@ def _build_sync_spec(
         "tools": tools,
         # 子 Agent 权限替换父规则，避免继承主 Agent 的 Memory 和 Skill 范围。
         "permissions": _build_subagent_permissions(sources),
+        "middleware": [ToolCallValidationMiddleware()],
     }
     if sources:
         spec["skills"] = sources

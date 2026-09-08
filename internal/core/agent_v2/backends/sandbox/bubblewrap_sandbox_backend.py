@@ -26,7 +26,7 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from internal.core.agent_v2.assembly.observability.telemetry import (
+from internal.core.agent_v2.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
 )
@@ -34,11 +34,14 @@ from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
     SandboxProviderError,
     close_workspace_safely,
     seed_sandbox_workspace,
-    sync_workspace_changes,
+)
+from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
+    close_managed_sandbox,
 )
 from internal.core.agent_v2.backends.workspace.workspace_backend import (
-    AgentWorkspaceBackend,
+    WorkspaceBackend,
 )
+from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
 
 
 class BubblewrapSandboxError(RuntimeError):
@@ -292,7 +295,7 @@ class ManagedBubblewrapSandbox(BubblewrapSandbox):
     def __init__(
         self,
         *,
-        workspace: AgentWorkspaceBackend,
+        workspace: WorkspaceBackend,
         telemetry: AgentTelemetry | None = None,
         allow_network: bool = False,
         timeout: int = 1800,
@@ -306,10 +309,10 @@ class ManagedBubblewrapSandbox(BubblewrapSandbox):
         )
         self._workspace = workspace
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
-        self._baseline_manifest: dict[str, str] = {}
+        self._baseline_manifest: WorkspaceManifest | None = None
         self._managed_closed = False
 
-    def set_workspace_baseline(self, manifest: dict[str, str]) -> None:
+    def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
         """记录运行开始时的权威 Workspace 摘要。"""
         self._baseline_manifest = dict(manifest)
 
@@ -317,43 +320,24 @@ class ManagedBubblewrapSandbox(BubblewrapSandbox):
         """先同步增量产物，再关闭本机目录和 Workspace 会话。"""
         if self._managed_closed:
             return
-        sync_error: Exception | None = None
         try:
-            sync_workspace_changes(
+            close_managed_sandbox(
                 backend=self,
                 workspace=self._workspace,
                 baseline_manifest=self._baseline_manifest,
-            )
-        except Exception as exc:  # noqa: BLE001
-            sync_error = exc
-            self._telemetry.emit(
-                "sandbox.workspace_sync_failed",
-                attributes={"sandbox_id": self.id},
-            )
-        finally:
-            try:
-                super().close()
-            except Exception as exc:  # noqa: BLE001
-                if sync_error is None:
-                    sync_error = exc
-            workspace_close_error = close_workspace_safely(
-                self._workspace,
+                close_provider=lambda: BubblewrapSandbox.close(self),
                 telemetry=self._telemetry,
                 sandbox_id=self.id,
+                provider_name="Bubblewrap",
             )
-            if sync_error is None and workspace_close_error is not None:
-                sync_error = workspace_close_error
+        finally:
             self._managed_closed = True
-        if sync_error is not None:
-            raise SandboxProviderError(
-                f"failed to close Sandbox {self.id}"
-            ) from sync_error
 
 
 def create_backend(
     *,
     settings: Any,
-    workspace: AgentWorkspaceBackend,
+    workspace: WorkspaceBackend,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,

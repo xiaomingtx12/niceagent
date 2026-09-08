@@ -256,6 +256,14 @@ def close_postgres_saver() -> None:
     _provider.close_postgres_saver()
 
 
+def delete_agent_checkpoint(conversation_id: str) -> None:
+    """删除会话的全部 checkpoint；禁用持久化时无需清理。"""
+    checkpointer = get_configured_checkpointer()
+    if checkpointer is False:
+        return
+    checkpointer.delete_thread(conversation_id)
+
+
 def get_postgres_pool_stats() -> dict[str, int]:
     """读取默认 Provider 的连接池指标。"""
     return _provider.get_pool_stats()
@@ -271,6 +279,7 @@ __all__ = [
     "close_connection_pool",
     "close_postgres_saver",
     "create_postgres_saver",
+    "delete_agent_checkpoint",
     "get_configured_checkpointer",
     "get_postgres_pool_stats",
     "get_postgres_saver",

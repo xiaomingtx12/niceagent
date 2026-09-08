@@ -11,9 +11,9 @@ from deepagents.middleware.filesystem import FilesystemPermission
 from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
     build_sandbox_backend,
 )
-from internal.core.agent_v2.backends.workspace.workspace_backend import AgentWorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
 from internal.core.agent_v2.assembly.context.skill_context import SkillProjection
-from internal.core.agent_v2.assembly.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 
 
 @dataclass
@@ -30,7 +30,7 @@ class SandboxContextAssembler:
         self,
         *,
         settings: Any,
-        workspace: AgentWorkspaceBackend,
+        workspace: WorkspaceBackend,
         sandbox_name: str,
         skill_projection: SkillProjection,
         telemetry: AgentTelemetry,

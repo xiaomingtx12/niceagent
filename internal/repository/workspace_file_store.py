@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 from injector import inject
 from sqlalchemy.orm import Session
 
-from internal.core.agent_v2.assembly.observability.telemetry import (
+from internal.core.agent_v2.observability.telemetry import (
     AgentTelemetry,
     NOOP_AGENT_TELEMETRY,
     build_path_digest,
@@ -45,17 +45,21 @@ class WorkspaceFileStore:
         mime_type: str = "application/octet-stream",
         enforce_quota: bool = True,
         telemetry: AgentTelemetry | None = None,
+        expected_revision: int | None = None,
     ) -> WorkspaceFile:
-        """先写唯一对象，再原子更新元数据并清理旧对象。"""
+        """先写唯一对象，再按版本提交；无显式版本时使用本次上传前读到的版本。"""
         encoded = bytes(content)
         digest = sha256(encoded).hexdigest()
-        current = repository.fetch(path)
-        if (
-            current is not None
-            and current.content_sha256 == digest
-            and current.mime_type == mime_type
-        ):
-            return current
+        revision = expected_revision
+        if revision is None:
+            current = repository.fetch(path)
+            if (
+                current is not None
+                and current.content_sha256 == digest
+                and current.mime_type == mime_type
+            ):
+                return current
+            revision = current.revision if current is not None else 0
 
         object_key = self._build_object_key(repository, path)
         try:
@@ -74,6 +78,7 @@ class WorkspaceFileStore:
                 size_bytes=len(encoded),
                 content_sha256=digest,
                 enforce_quota=enforce_quota,
+                expected_revision=revision,
             )
         except Exception:
             self._delete_best_effort(object_key)
@@ -101,6 +106,7 @@ class WorkspaceFileStore:
         mime_type: str = "text/plain",
         enforce_quota: bool = True,
         telemetry: AgentTelemetry | None = None,
+        expected_revision: int | None = None,
     ) -> WorkspaceFile:
         """按 UTF-8 写入文本文件。"""
         return self.write_bytes(
@@ -110,6 +116,7 @@ class WorkspaceFileStore:
             mime_type=mime_type,
             enforce_quota=enforce_quota,
             telemetry=telemetry,
+            expected_revision=expected_revision,
         )
 
     def read_bytes(
@@ -130,9 +137,11 @@ class WorkspaceFileStore:
         self,
         repository: WorkspaceFileRepository,
         path: str,
+        *,
+        expected_revision: int | None = None,
     ) -> None:
-        """先提交删除状态，再清理不再可见的对象。"""
-        object_key = repository.mark_deleted(path)
+        """版本校验成功并提交删除状态后，才清理不再可见的对象。"""
+        object_key = repository.mark_deleted(path, expected_revision=expected_revision)
         if object_key:
             self._delete_best_effort(object_key)
 

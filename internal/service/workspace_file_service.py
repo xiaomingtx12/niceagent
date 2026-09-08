@@ -166,9 +166,11 @@ class WorkspaceFileService:
         row = self._get_file(account_id=account_id, app_id=app_id, path=path)
         repository, _ = self._workspace(account_id=account_id, app_id=app_id)
         try:
-            self.file_store.delete(repository, row.path)
+            self.file_store.delete(repository, row.path, expected_revision=row.revision)
         except WorkspaceStorageError as exc:
             raise FailException("Workspace 文件删除失败，请稍后重试") from exc
+        except WorkspaceFileRevisionConflict as exc:
+            raise FailException("Workspace 文件正在被修改，请重新读取后重试") from exc
 
     def _get_file(
         self,
