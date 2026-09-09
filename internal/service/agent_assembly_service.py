@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import time
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -125,6 +127,7 @@ class AgentAssemblyService:
             created_by=req.created_by,
             principal_id=(req.end_user_id or req.created_by),
             memory_enabled=definition.config.long_term_memory.enable,
+            user_input_enabled=req.user_input_enabled and definition.config.user_input.enable,
         )
         skills = self.skill_service.resolve_enabled_skills(definition.config.skills)
         agent_config = AgentConfig(
@@ -186,6 +189,10 @@ class AgentAssemblyService:
         app_name, app_description, account_id, app_config = (
             self._load_app_configuration(req)
         )
+        if req.definition_fingerprint is not None and req.definition_fingerprint != self._definition_fingerprint(
+            app_name, app_description, app_config,
+        ):
+            raise ValidateErrorException("应用配置已变更，请恢复原配置后继续填写，或创建新会话")
         selected_skills = self._validate_selected_skills(
             app_config,
             req.selected_skills,
@@ -246,6 +253,11 @@ class AgentAssemblyService:
             subagents=tuple(subagents),
             subagent_bindings=bindings,
         )
+
+    def get_definition_fingerprint(self, req: AgentInvocation) -> str:
+        """绑定暂停前的应用配置，避免恢复时使用不同的图装配定义。"""
+        name, description, _, config = self._load_app_configuration(req)
+        return self._definition_fingerprint(name, description, config)
 
     def resolve_workbench_model(self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None = None) -> AppModelConfigReq | None:
         """创建者可覆盖自己的已激活模型；公开入口不能借此选择账号中的其他连接。"""
@@ -336,6 +348,12 @@ class AgentAssemblyService:
         parameters = {key: value for key, value in config.parameters.items()
                       if key not in {"reasoning_effort", "thinking_level", "thinking"}}
         return config.model_copy(update={"parameters": {**parameters, "reasoning_effort": effort}})
+
+    @staticmethod
+    def _definition_fingerprint(name: str, description: str, config: AgentAppConfigReq) -> str:
+        """稳定序列化配置，只持久化摘要，不额外公开模型配置。"""
+        value = json.dumps([name, description, config.model_dump(mode="json")], sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(value.encode()).hexdigest()
 
     def _load_app_configuration(
         self,

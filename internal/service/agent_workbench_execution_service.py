@@ -11,6 +11,8 @@ from typing import Any, ClassVar
 from injector import inject
 from flask import current_app
 from psycopg_pool import PoolTimeout
+from langgraph.types import Command
+from internal.core.agent_v2.entity.user_input import PendingUserInput
 
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
@@ -120,6 +122,12 @@ class AgentWorkbenchRunExecutionService:
                             },
                         ),
                     )
+                    if run.resume is not None:
+                        row = self.run_service.get_run(run.run_id, recover=False)
+                        snapshot = row.state_snapshot if row is not None else {}
+                        self._publish_event(run, projector.generated("values", {
+                            "pending_inputs": [], "input_history": (snapshot or {}).get("input_history", []),
+                        }))
                     try:
                         agent, input_message = self.agent_assembly_service.build_agent(
                             run.spec,
@@ -162,7 +170,7 @@ class AgentWorkbenchRunExecutionService:
                         raise
                     try:
                         result = agent.execute(
-                            {"messages": [input_message]},
+                            Command(resume=run.resume) if run.resume is not None else {"messages": [input_message]},
                             on_event=receive_event,
                             cancel_requested=run.cancel_requested,
                         )
@@ -239,7 +247,10 @@ class AgentWorkbenchRunExecutionService:
         message_updates: dict[str, Any]
         lifecycle: dict[str, Any]
         error_message = str(error) if error is not None else ""
-        if status is WorkbenchRunStatus.COMPLETED:
+        if status is WorkbenchRunStatus.WAITING_INPUT:
+            message_updates = {"status": MessageStatus.NORMAL}
+            lifecycle = {"event": "interrupted", "status": "waiting_input", "reason": "user_input_required"}
+        elif status is WorkbenchRunStatus.COMPLETED:
             message_updates = {"status": MessageStatus.NORMAL, "latency": latency}
             if result.answer:
                 message_updates["answer"] = result.answer
@@ -289,7 +300,17 @@ class AgentWorkbenchRunExecutionService:
                 if key in result.state
             }
         )
-        self._publish_event(run, projector.generated("values", state))
+        pending = [PendingUserInput.model_validate(item).model_dump(mode="json") for item in result.interrupts]
+        row = self.run_service.get_run(run.run_id, recover=False)
+        history = list((row.state_snapshot or {}).get("input_history", [])) if row is not None else []
+        state.update(pending_inputs=pending, input_history=history)
+        # 表单及等待状态在同一事务提交，避免浏览器收到尚不可提交的表单。
+        final_events = [AgentProtocolEventProjector.to_public_event(projector.generated("values", state))]
+        final_events.extend(
+            AgentProtocolEventProjector.to_public_event(projector.generated(
+                "input.requested", {"interrupt_id": item["interrupt_id"], "payload": item["payload"]},
+            )) for item in pending
+        )
 
         # 3.同一事务保存消息、Agent 用量和平台终态。
         if result.answer:
@@ -311,7 +332,8 @@ class AgentWorkbenchRunExecutionService:
             error_message=error_message,
             message_updates=message_updates,
             observability=result.observability,
-            events=[terminal_event] if terminal_event is not None else [],
+            events=[event for event in [*final_events, terminal_event] if event is not None],
+            state_snapshot=state,
         )
         if not committed:
             return
@@ -319,8 +341,9 @@ class AgentWorkbenchRunExecutionService:
 
         # 4.结束事件保存失败只记录日志，不能把成功或取消改成失败。
         try:
-            if terminal_event is not None:
-                self._publish_event(run, terminal_event, persist_database=False)
+            for event in [*final_events, terminal_event]:
+                if event is not None:
+                    self._publish_event(run, event, persist_database=False)
         except Exception:
             logger.exception(
                 "Agent 工作台终态事件发布失败 run_id=%s，保留已持久化终态",

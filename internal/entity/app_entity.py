@@ -46,6 +46,7 @@ DEFAULT_APP_CONFIG = {
     },
     "opening_statement": "",
     "opening_questions": [],
+    "user_input": {"enable": True},
     "speech_to_text": {
         "enable": False,
     },

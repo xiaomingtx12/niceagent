@@ -65,6 +65,7 @@ class BuiltinAppService(BaseService):
                         "long_term_memory",
                         "opening_statement",
                         "opening_questions",
+                        "user_input",
                         "speech_to_text",
                         "text_to_speech",
                         "review_config",

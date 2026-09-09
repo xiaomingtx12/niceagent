@@ -32,6 +32,7 @@ from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
 from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
 from internal.core.agent_v2.middleware.structured_memory_middleware import StructuredMemoryMiddleware
+from internal.core.agent_v2.middleware.context_window_middleware import ContextWindowMiddleware
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.middleware.reloading_skills_middleware import ReloadingSkillsMiddleware
 from internal.core.agent_v2.middleware.runtime_context_middleware import (
@@ -40,6 +41,7 @@ from internal.core.agent_v2.middleware.runtime_context_middleware import (
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
+from internal.core.agent_v2.tools.ask_user import UserInputMiddleware
 
 
 _RETRYABLE_MODEL_STATUS_CODES = frozenset({408, 409, 429})
@@ -82,6 +84,14 @@ def build_deep_agent(
         skill_sources_by_agent=runtime.subagent_skill_sources,
         runtime_bindings=subagent_bindings,
     )
+
+    if runtime.runtime_context.user_input_enabled and runtime.checkpointer:
+        middleware.append(UserInputMiddleware())
+        system_prompt += (
+            "\n当缺少影响任务结果的必要信息时，调用 ask_user 向用户展示表单。"
+            "一次收集相关问题，已有答案不要重复询问。等待用户填写后再继续依赖这些信息的工作。"
+            "需要用户补充的信息由主 Agent 汇总提问。"
+        )
 
     # 3.把模型、工具、权限、持久化和上下文边界编译成运行图。
     return create_deep_agent(
@@ -141,6 +151,7 @@ def _build_platform_middleware(
     ]
     if runtime.memory_sources:
         middleware.append(StructuredMemoryMiddleware())
+    middleware.append(ContextWindowMiddleware())
     return middleware
 
 

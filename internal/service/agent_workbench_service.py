@@ -5,7 +5,9 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -23,6 +25,7 @@ from internal.entity import (
     WorkbenchRunStatus,
 )
 from internal.exception import NotFoundException, ValidateErrorException
+from internal.core.agent_v2.entity.user_input import PendingUserInput
 from internal.extension.logging_extension import logger
 from internal.model import Account, AgentRun, Conversation
 from internal.schema.agent_attachment_schema import dump_agent_attachments
@@ -38,6 +41,7 @@ from internal.schema.agent_workbench_schema import (
     WorkbenchRunMetadataResp,
     WorkbenchStateResp,
     WorkbenchEventStreamReq,
+    WorkbenchInputRespondReq,
 )
 from pkg.sqlalchemy import SQLAlchemy
 
@@ -50,7 +54,7 @@ from .agent_workbench_run_service import (
 )
 from .conversation_service import ConversationService
 
-_STATE_SNAPSHOT_KEYS = ("todos", "files", "async_tasks")
+_STATE_SNAPSHOT_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
 
 
 @inject
@@ -236,7 +240,12 @@ class AgentWorkbenchService:
         return WorkbenchStateResp(
             values=values,
             next=["agent"] if status in WORKBENCH_ACTIVE_STATUSES else [],
-            tasks=[],
+            tasks=[
+                {"id": item["interrupt_id"], "name": "ask_user", "interrupts": [
+                    {"id": item["interrupt_id"], "value": item["payload"], "ns": item.get("namespace", [])}
+                ]}
+                for item in values.get("pending_inputs", [])
+            ] if status == "waiting_input" else [],
             metadata=WorkbenchRunMetadataResp(
                 run_id=run_id,
                 status=status,
@@ -267,6 +276,7 @@ class AgentWorkbenchService:
             and self.run_service.request_cancel(row)
         ):
             cancel_requested = True
+            self.queue_manager.notify_events()
             self.queue_manager.request_cancel(
                 context.conversation_id,
                 row.id,
@@ -278,7 +288,7 @@ class AgentWorkbenchService:
             run_id=row.id,
             status=(
                 WorkbenchRunStatus.CANCELLING.value
-                if cancel_requested
+                if cancel_requested and row.status != "cancelled"
                 else str(row.status)
             ),
         )
@@ -313,10 +323,13 @@ class AgentWorkbenchService:
         self,
         *,
         context: AgentInvocationContext,
-        run_input: WorkbenchRunInput,
+        run_input: WorkbenchRunInput | WorkbenchInputRespondReq,
         command_id: int | None = None,
+        user_input_enabled: bool = True,
     ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
         """锁定会话后完成去重和创建，提交成功才注册并启动后台执行。"""
+        if isinstance(run_input, WorkbenchInputRespondReq):
+            return self.respond_input(context=context, response=run_input, command_id=command_id)
         conversation_id = context.conversation_id
         self.run_service.recover_stale_runs(conversation_id=conversation_id)
 
@@ -362,7 +375,7 @@ class AgentWorkbenchService:
                 self.db.session.query(AgentRun)
                 .filter(
                     AgentRun.conversation_id == conversation_id,
-                    AgentRun.status.in_(WORKBENCH_ACTIVE_STATUSES),
+                    AgentRun.status.in_((*WORKBENCH_ACTIVE_STATUSES, "waiting_input")),
                 )
                 .first()
             )
@@ -379,9 +392,17 @@ class AgentWorkbenchService:
                     message=(
                         "当前任务正在停止，请稍后重试"
                         if cancelling
+                        else "请先完成当前表单" if active_run is not None and active_run.status == "waiting_input"
                         else "当前任务已有正在执行的 Agent"
                     ),
                 )
+
+            previous = (
+                self.db.session.query(AgentRun).filter(AgentRun.conversation_id == conversation_id)
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).first()
+            )
+            if previous is not None and previous.status == "cancelled" and (previous.state_snapshot or {}).get("_interaction", {}).get("cancelled_input"):
+                return WorkbenchCommandErrorResp(id=command_id, message="此任务已在表单处停止，请创建新会话")
 
             # 4.解析附件并创建业务消息，与 Run 一起提交或回滚。
             self.execution_service.agent_assembly_service.validate_workbench_reasoning(context, run_input.reasoning_effort, run_input.model_selection)
@@ -405,7 +426,12 @@ class AgentWorkbenchService:
                 reasoning_effort=run_input.reasoning_effort,
                 model_selection=run_input.model_selection,
                 input_message_id=run_input.input_message_id,
+                user_input_enabled=user_input_enabled,
             )
+            if user_input_enabled:
+                invocation = invocation.model_copy(update={
+                    "definition_fingerprint": self.execution_service.agent_assembly_service.get_definition_fingerprint(invocation),
+                })
             sequence = self.run_service.get_last_event_sequence(
                 conversation_id=conversation_id,
                 invoke_from=context.invoke_from,
@@ -421,6 +447,91 @@ class AgentWorkbenchService:
             self.run_service.add_run(run)
 
         # 5.提交成功后登记本地 Run，并在独立 Flask 上下文中启动执行。
+        self._launch_run(run)
+        return WorkbenchCommandSuccessResp.create(
+            command_id=command_id,
+            run_id=run.run_id,
+            applied_through_sequence=sequence,
+        )
+
+    def respond_input(
+        self,
+        *,
+        context: AgentInvocationContext,
+        response: WorkbenchInputRespondReq,
+        command_id: int | None = None,
+    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
+        """锁定会话与暂停 Run，验证答案并原子认领唯一恢复执行权。"""
+        with self.db.auto_commit():
+            conversation = (
+                self.db.session.query(Conversation.id)
+                .filter(Conversation.id == context.conversation_id,
+                        Conversation.app_id == context.app_id, Conversation.is_deleted.is_(False))
+                .with_for_update().one_or_none()
+            )
+            if conversation is None:
+                raise NotFoundException("会话不存在或已删除")
+            row = (
+                self.db.session.query(AgentRun).populate_existing()
+                .filter(AgentRun.conversation_id == context.conversation_id,
+                        AgentRun.app_id == context.app_id, AgentRun.invoke_from == context.invoke_from.value)
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                .with_for_update().first()
+            )
+            if row is None:
+                raise NotFoundException("待回答任务不存在")
+            snapshot = dict(row.state_snapshot or {})
+            interaction = dict(snapshot.get("_interaction") or {})
+            answers = {item.interrupt_id: item.response for item in response.responses}
+            submissions = list(interaction.get("submissions") or [])
+            for submitted in submissions:
+                if set(submitted["answers"]) == set(answers):
+                    if submitted["answers"] != answers:
+                        raise ValidateErrorException("该表单已提交，不能重复修改")
+                    return WorkbenchCommandSuccessResp.create(
+                        command_id=command_id, run_id=row.id,
+                        applied_through_sequence=submitted["sequence"],
+                    )
+            if row.status != "waiting_input":
+                raise ValidateErrorException("当前任务没有等待填写的表单")
+            pending = [PendingUserInput.model_validate(item) for item in snapshot.get("pending_inputs", [])]
+            if not pending or set(answers) != {item.interrupt_id for item in pending}:
+                raise ValidateErrorException("表单已失效，请刷新后填写所有待回答问题")
+            try:
+                validated = {item.interrupt_id: item.payload.validate_answers(answers[item.interrupt_id]) for item in pending}
+            except ValueError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+            local_run = self.queue_manager.get(context.conversation_id)
+            if local_run is not None and not local_run.done.is_set():
+                return WorkbenchCommandErrorResp(id=command_id, message="任务正在保存，请稍后重试")
+            invocation = AgentInvocation.model_validate(interaction.get("invocation"))
+            # 恢复身份始终取自本次鉴权，保留原始附件与 Skill 选择。
+            invocation = invocation.model_copy(update=context.model_dump())
+            if invocation.definition_fingerprint != self.execution_service.agent_assembly_service.get_definition_fingerprint(invocation):
+                raise ValidateErrorException("应用配置已变更，请恢复原配置后继续填写，或创建新会话")
+            sequence = int(row.last_event_sequence or 0)
+            run = WorkbenchRun(
+                run_id=row.id, conversation_id=context.conversation_id, spec=invocation,
+                initial_event_sequence=sequence, last_event_sequence=sequence, resume=validated,
+            )
+            history = list(snapshot.get("input_history") or [])
+            history.extend({**item.model_dump(mode="json"), "answers": validated[item.interrupt_id]} for item in pending)
+            submissions.append({"answers": deepcopy(answers), "sequence": sequence})
+            row.state_snapshot = {
+                **snapshot, "pending_inputs": [], "input_history": history,
+                "_interaction": {**interaction, "submissions": submissions},
+            }
+            row.status = "queued"
+            row.executor_id = run.executor_id
+            row.heartbeat_at = datetime.now(UTC).replace(tzinfo=None)
+            row.finished_at = None
+        self._launch_run(run)
+        return WorkbenchCommandSuccessResp.create(
+            command_id=command_id, run_id=run.run_id, applied_through_sequence=sequence,
+        )
+
+    def _launch_run(self, run: WorkbenchRun) -> None:
+        """只在事务提交后启动线程，启动失败由原有失败路径收敛。"""
         try:
             self.queue_manager.register(run)
             threading.Thread(
@@ -432,12 +543,6 @@ class AgentWorkbenchService:
         except Exception as exc:
             self._fail_background_run(run, exc)
             raise
-
-        return WorkbenchCommandSuccessResp.create(
-            command_id=command_id,
-            run_id=run.run_id,
-            applied_through_sequence=sequence,
-        )
 
     def _execute_background_run(self, flask_app: Flask, run: WorkbenchRun) -> None:
         """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""

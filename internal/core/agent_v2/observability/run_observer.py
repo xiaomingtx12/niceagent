@@ -15,6 +15,7 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import ToolMessage
 from langchain_core.outputs import LLMResult
+from langgraph.errors import GraphInterrupt
 
 from internal.core.agent_v2.observability.token_usage import (
     normalize_llm_result,
@@ -32,6 +33,7 @@ _MODEL_METADATA_KEYS = (
     "ls_model_name",
     "ls_model_type",
     "ls_provider",
+    "configured_reasoning_effort",
 )
 _TOOL_METADATA_KEYS = (
     "langgraph_node",
@@ -135,6 +137,8 @@ def _response_model_name(response: LLMResult) -> str | None:
 
 def _exception_status(error: BaseException) -> str:
     """区分协作式取消和真正的调用失败。"""
+    if isinstance(error, GraphInterrupt):
+        return "waiting_input"
     if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
         return "cancelled"
     return "error"
@@ -321,7 +325,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
     ) -> None:
         """收敛 Run 终态，并关闭仍未结束的调用 Span。"""
         final_status = (
-            status if status in {"completed", "failed", "cancelled"} else "failed"
+            status if status in {"completed", "failed", "cancelled", "waiting_input"} else "failed"
         )
         with self._lock:
             if self._finished_at is not None:

@@ -455,6 +455,7 @@ class AppService(BaseService):
             long_term_memory=draft_app_config["long_term_memory"],
             opening_statement=draft_app_config["opening_statement"],
             opening_questions=draft_app_config["opening_questions"],
+            user_input=draft_app_config["user_input"],
             speech_to_text=draft_app_config["speech_to_text"],
             text_to_speech=draft_app_config["text_to_speech"],
             suggested_after_answer=draft_app_config["suggested_after_answer"],

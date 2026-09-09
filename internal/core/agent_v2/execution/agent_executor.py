@@ -12,6 +12,8 @@ from langchain_core.runnables.config import merge_configs
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import RunControl
 from langgraph.errors import GraphDrained
+from langgraph.types import Command
+from internal.core.agent_v2.tools.ask_user import UserInputInterruptTracker
 
 from internal.core.agent_v2.assembly.configuration.langgraph_conversation_config import (
     merge_conversation_config,
@@ -62,10 +64,11 @@ class AgentExecutor:
         self._run_lock = Lock()
         self._state = _ExecutorState.READY
         self._run_control: RunControl | None = None
+        self._interrupts: tuple[dict[str, Any], ...] = ()
 
     def execute(
         self,
-        input: dict[str, Any],
+        input: dict[str, Any] | Command,
         *,
         on_event: Callable[[AgentEvent], None],
         cancel_requested: Event,
@@ -168,14 +171,17 @@ class AgentExecutor:
                 answer = message_content_to_text(content)
                 if answer:
                     break
-        status: Literal["completed", "cancelled", "failed"] = "completed"
+        status: Literal["completed", "cancelled", "failed", "waiting_input"] = "completed"
         if error is not None:
             status = "failed"
         elif cancelled or cancel_requested.is_set():
             status = "cancelled"
+        elif self._interrupts:
+            status = "waiting_input"
         self._observer.finish(status, error=error)
         return AgentExecutionResult(
             status=status,
+            interrupts=self._interrupts if status == "waiting_input" else (),
             answer=answer,
             state=state,
             usage=self._observer.build_run_usage(),
@@ -225,12 +231,12 @@ class AgentExecutor:
 
     def stream_events(
         self,
-        input: dict[str, Any],
+        input: dict[str, Any] | Command,
         config: RunnableConfig | None = None,
     ) -> Generator[dict[str, Any], None, None]:
         """直接输出 Deep Agents v3 事件，并在结束时释放运行资源。"""
-        messages = list(input.get("messages", []) or [])
-        if not messages:
+        messages = [] if isinstance(input, Command) else list(input.get("messages", []) or [])
+        if not isinstance(input, Command) and not messages:
             try:
                 self.close()
             except Exception:
@@ -245,26 +251,42 @@ class AgentExecutor:
 
         try:
             run_control = RunControl()
+            interrupt_tracker = UserInputInterruptTracker()
             with self._run_lock:
                 self._run_control = run_control
             effective_config = merge_configs(
                 merge_conversation_config(self._runtime_context, config),
                 {
                     "run_id": self._observer.run_id,
-                    "callbacks": [self._observer],
+                    "callbacks": [self._observer, interrupt_tracker],
                     "metadata": {
                         "trace_id": self._observer.trace_id,
                         "run_id": self._observer.trace_id,
                     },
                 },
             )
-            yield from self._graph.stream_events(
-                {"messages": messages},
+            stream = self._graph.stream_events(
+                input if isinstance(input, Command) else {"messages": messages},
                 config=effective_config,
                 context=self._runtime_context,
                 version="v3",
                 control=run_control,
             )
+            try:
+                for raw in stream:
+                    data = raw.get("params", {}).get("data")
+                    if (raw.get("method") == "tools" and isinstance(data, Mapping)
+                            and data.get("event") == "tool-error"
+                            and interrupt_tracker.is_interrupted(data.get("tool_call_id"))):
+                        continue
+                    yield raw
+            finally:
+                stream.abort()
+            if stream.interrupted:
+                self._interrupts = tuple(
+                    {"interrupt_id": item.id, "namespace": [], "payload": item.value}
+                    for item in stream.interrupts
+                )
         except BaseException:
             self._finish_run(
                 preserve_run_error=True,

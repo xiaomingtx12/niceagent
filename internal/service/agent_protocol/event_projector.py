@@ -12,11 +12,13 @@ from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 
 from internal.schema.agent_workbench_schema import WorkbenchEvent
 from internal.core.agent_v2.entity.agent_event import AgentEvent
+from internal.schema.agent_context_schema import ContextWindowResp
+from pydantic import ValidationError
 
 _TERMINAL_LIFECYCLE_EVENTS = frozenset(
     {"completed", "failed", "interrupted", "drained", "cancelled"}
 )
-_PUBLIC_METHODS = frozenset({"messages", "values", "tools", "lifecycle"})
+_PUBLIC_METHODS = frozenset({"messages", "values", "tools", "lifecycle", "custom", "input.requested"})
 
 
 def _json_value(value: Any) -> Any:
@@ -138,6 +140,14 @@ class AgentProtocolEventProjector:
         method = raw_event.get("method") if isinstance(raw_event, Mapping) else None
         if not isinstance(method, str) or method not in _PUBLIC_METHODS:
             return None
+        if method == "custom":
+            try:
+                custom_data = raw_event.get("params", {}).get("data")
+                payload = custom_data.get("payload") if isinstance(custom_data, Mapping) and custom_data.get("name") == "context_window" else custom_data
+                data = ContextWindowResp.model_validate(payload)
+            except ValidationError:
+                return None
+            raw_event["params"]["data"] = {"name": "context_window", "payload": data.model_dump(mode="json")}
         return WorkbenchEvent.model_validate(raw_event)
 
     def _event(
@@ -216,6 +226,11 @@ class AgentProtocolEventProjector:
         namespace = event.namespace
         timestamp = event.timestamp
         data = event.data
+
+
+        # 待回答事件与等待状态须先原子落库，再由运行服务统一发布。
+        if method == "input.requested":
+            return []
 
         if method != "messages":
             if method == "lifecycle" and isinstance(data, Mapping):

@@ -30,6 +30,9 @@ class BuiltinAppEntity(BaseModel):
     opening_questions: list[str] = Field(
         default_factory=lambda: DEFAULT_APP_CONFIG.get("opening_questions")
     )
+    user_input: dict[str, Any] = Field(
+        default_factory=lambda: dict(DEFAULT_APP_CONFIG["user_input"])
+    )
     speech_to_text: dict[str, Any] = Field(
         default_factory=lambda: DEFAULT_APP_CONFIG.get("speech_to_text")
     )

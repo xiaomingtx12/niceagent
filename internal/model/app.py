@@ -178,6 +178,9 @@ class AppConfig(db.Model):
     opening_questions = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 开场白建议问题列表
+    user_input = Column(
+        JSONB, nullable=False, server_default=text("'{\"enable\": true}'::jsonb")
+    )  # 主 Agent 向用户提问的交互配置
     speech_to_text = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 语音转文本配置
@@ -261,6 +264,9 @@ class AppConfigVersion(db.Model):
     opening_questions = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 开场白建议问题列表
+    user_input = Column(
+        JSONB, nullable=False, server_default=text("'{\"enable\": true}'::jsonb")
+    )  # 主 Agent 向用户提问的交互配置
     speech_to_text = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 语音转文本配置

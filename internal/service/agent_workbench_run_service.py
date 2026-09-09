@@ -29,7 +29,7 @@ from internal.schema.agent_workbench_schema import (
 from pkg.sqlalchemy import SQLAlchemy
 
 _PERSISTED_EVENT_METHODS = ("tools", "lifecycle")
-_STATE_SNAPSHOT_KEYS = ("todos", "files", "async_tasks")
+_STATE_SNAPSHOT_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
 
 
 @inject
@@ -107,6 +107,7 @@ class AgentWorkbenchRunService:
         message_updates: Mapping[str, Any] | None = None,
         observability: Mapping[str, Any] | None = None,
         events: list[WorkbenchEvent] | None = None,
+        state_snapshot: Mapping[str, Any] | None = None,
     ) -> bool:
         """在一个事务中收敛 Run、业务消息和平台观测快照。"""
         # 1.锁定 Run，执行权失效或已写入终态时忽略迟到的结果。
@@ -126,8 +127,10 @@ class AgentWorkbenchRunService:
             # 2.仅第一次成功收敛的调用保存运行结果和结束时间。
             row.status = status.value
             row.error_message = error_message
-            if row.finished_at is None:
+            if row.finished_at is None and status is not WorkbenchRunStatus.WAITING_INPUT:
                 row.finished_at = datetime.now(UTC).replace(tzinfo=None)
+            if state_snapshot is not None:
+                row.state_snapshot = {**(row.state_snapshot or {}), **state_snapshot}
             if observability is not None:
                 row.observability = dict(observability)
 
@@ -136,6 +139,11 @@ class AgentWorkbenchRunService:
                 message = self.db.session.get(Message, run.spec.message_id)
                 if message is not None:
                     for field, value in message_updates.items():
+                        if run.resume is not None and field in {
+                            "latency", "model_call_count", "tool_call_count", "input_token_count",
+                            "output_token_count", "cached_token_count", "reasoning_token_count", "total_token_count",
+                        }:
+                            value += getattr(message, field, 0) or 0
                         setattr(message, field, value)
             if events:
                 row.last_event_sequence = max(
@@ -441,11 +449,32 @@ class AgentWorkbenchRunService:
                 .with_for_update()
                 .filter(
                     AgentRun.id == row.id,
-                    AgentRun.status.in_(WORKBENCH_ACTIVE_STATUSES),
+                    AgentRun.status.in_((*WORKBENCH_ACTIVE_STATUSES, "waiting_input")),
                 )
                 .one_or_none()
             )
             if current is not None:
+                if current.status == "waiting_input":
+                    current.status = "cancelled"
+                    current.finished_at = datetime.now(UTC).replace(tzinfo=None)
+                    snapshot = dict(current.state_snapshot or {})
+                    snapshot["pending_inputs"] = []
+                    snapshot["_interaction"] = {**(snapshot.get("_interaction") or {}), "cancelled_input": True}
+                    current.state_snapshot = snapshot
+                    projector = AgentProtocolEventProjector(current.id, start_sequence=int(current.last_event_sequence or 0))
+                    public_state = {key: snapshot[key] for key in _STATE_SNAPSHOT_KEYS if key in snapshot}
+                    for raw in [projector.generated("values", public_state), projector.generated("lifecycle", {
+                        "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
+                        "message_id": str(current.message_id), "input_message_id": current.input_message_id,
+                    })]:
+                        event = WorkbenchEvent.model_validate(raw)
+                        self.db.session.add(AgentRunEvent(run_id=current.id, sequence=event.seq, payload=event.model_dump(mode="json")))
+                    current.last_event_sequence = projector.last_event_sequence
+                    message = self.db.session.get(Message, current.message_id)
+                    if message is not None:
+                        message.status = "stop"
+                    row.status = "cancelled"
+                    return True
                 current.status = WorkbenchRunStatus.CANCELLING.value
                 updated = True
             else:

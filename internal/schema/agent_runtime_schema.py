@@ -33,6 +33,8 @@ class AgentInvocation(AgentInvocationContext):
     attachments: tuple[AgentAttachment, ...] = Field(default_factory=tuple)
     selected_skills: tuple[str, ...] = Field(default_factory=tuple, max_length=20)
     input_message_id: str | None = None
+    user_input_enabled: bool = False
+    definition_fingerprint: str | None = None
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
     model_selection: WorkbenchModelSelection | None = None
 

@@ -122,6 +122,7 @@ class InternalAgentProtocolService(BaseService):
         started = self.workbench_service.start_run(
             context=context,
             run_input=command_input,
+            user_input_enabled=False,
         )
         if started.type == "error":
             return InternalRunLaunchResp(conflict_message=started.message)

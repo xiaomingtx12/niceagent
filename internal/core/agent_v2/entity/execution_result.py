@@ -8,7 +8,8 @@ from typing import Any, Literal
 class AgentExecutionResult:
     """由执行器交付的结果；调用方负责将其映射为平台状态和存储记录。"""
 
-    status: Literal["completed", "cancelled", "failed"]
+    status: Literal["completed", "cancelled", "failed", "waiting_input"]
+    interrupts: tuple[dict[str, Any], ...] = ()
     answer: str = ""
     state: dict[str, Any] = field(default_factory=dict)
     usage: dict[str, Any] = field(default_factory=dict)

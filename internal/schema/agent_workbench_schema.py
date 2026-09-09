@@ -21,6 +21,7 @@ from pydantic import (
     StrictStr,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from internal.entity import WorkbenchRunInput
@@ -112,6 +113,40 @@ class WorkbenchCommandInputReq(BaseModel):
         )
 
 
+class WorkbenchInputResponseReq(BaseModel):
+    """只接受已知中断的答案，不开放图跳转或状态任意写入。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: list[StrictStr] = Field(default_factory=list, max_length=0)
+    interrupt_id: StrictStr = Field(min_length=1, max_length=255)
+    response: dict[str, Any]
+
+
+class WorkbenchInputRespondReq(BaseModel):
+    """兼容 SDK 单个与批量 input.respond 请求。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    responses: list[WorkbenchInputResponseReq] = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_single(cls, value: Any) -> Any:
+        """将官方单个中断响应转换为统一的批量表示。"""
+        if isinstance(value, Mapping) and "interrupt_id" in value and "responses" not in value:
+            return {"responses": [dict(value)]}
+        return value
+
+    @model_validator(mode="after")
+    def reject_duplicates(self) -> "WorkbenchInputRespondReq":
+        """一条命令中的中断只能出现一次。"""
+        ids = [item.interrupt_id for item in self.responses]
+        if len(ids) != len(set(ids)):
+            raise ValueError("中断 ID 不能重复")
+        return self
+
+
 class WorkbenchCommandReq(BaseModel):
     """工作台当前支持的 Agent Protocol 命令。"""
 
@@ -119,7 +154,7 @@ class WorkbenchCommandReq(BaseModel):
 
     type: StrictStr | None = None
     id: StrictInt | None = None
-    method: Literal["run.start"]
+    method: Literal["run.start", "input.respond"]
     params: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -148,9 +183,18 @@ class WorkbenchCommandReq(BaseModel):
         """返回协议命令 id。"""
         return self.id if isinstance(self.id, int) else None
 
-    def to_run_input(self) -> WorkbenchRunInput:
-        """转换为 Service 可直接使用的可信运行输入。"""
+    def to_run_input(self) -> WorkbenchRunInput | WorkbenchInputRespondReq:
+        """转换为 Service 可直接使用的新消息或中断响应。"""
+        if self.method == "input.respond":
+            return self.to_input_response()
         return self.input_data().to_run_input()
+
+    def to_input_response(self) -> WorkbenchInputRespondReq:
+        """在 HTTP 边界校验 SDK 表单响应。"""
+        try:
+            return WorkbenchInputRespondReq.model_validate(self.params)
+        except ValidationError as exc:
+            raise ValidateErrorException("表单提交格式错误") from exc
 
 
 class WorkbenchEventParams(BaseModel):
@@ -236,7 +280,7 @@ class WorkbenchEvent(BaseModel):
     type: Literal["event"]
     event_id: StrictStr = Field(min_length=1)
     seq: StrictInt = Field(ge=0)
-    method: Literal["messages", "values", "tools", "lifecycle"]
+    method: Literal["messages", "values", "tools", "lifecycle", "custom", "input.requested"]
     params: WorkbenchEventParams
 
 
@@ -259,6 +303,7 @@ class WorkbenchEventStreamReq(BaseModel):
             "lifecycle",
             "input",
             "checkpoints",
+            "custom",
         ]
     ] = Field(default_factory=list)
     namespaces: list[list[StrictStr]] = Field(default_factory=list)
@@ -284,7 +329,8 @@ class WorkbenchEventStreamReq(BaseModel):
 
     def matches(self, event: WorkbenchEvent) -> bool:
         """判断协议事件是否符合订阅过滤条件。"""
-        if self.channels and event.method not in self.channels:
+        channel = "input" if event.method == "input.requested" else event.method
+        if self.channels and channel not in self.channels:
             return False
         namespace = event.params.namespace
         if self.namespaces and not any(

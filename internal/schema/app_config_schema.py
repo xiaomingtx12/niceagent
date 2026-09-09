@@ -242,6 +242,9 @@ class AgentAppConfigReq(BaseModel):
         default_factory=tuple,
         max_length=3,
     )
+    user_input: ToggleConfigReq = Field(
+        default_factory=lambda: ToggleConfigReq(enable=True)
+    )
     speech_to_text: ToggleConfigReq = Field(
         default_factory=lambda: ToggleConfigReq(enable=False)
     )
@@ -318,6 +321,7 @@ class DraftAppConfigPatchReq(BaseModel):
     long_term_memory: LongTermMemoryConfigReq | None = None
     opening_statement: StrictStr | None = Field(default=None, max_length=2000)
     opening_questions: list[StrictStr] | None = Field(default=None, max_length=3)
+    user_input: ToggleConfigReq | None = None
     speech_to_text: ToggleConfigReq | None = None
     text_to_speech: TextToSpeechConfigReq | None = None
     suggested_after_answer: ToggleConfigReq | None = None

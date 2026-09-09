@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
@@ -19,6 +19,7 @@ class WorkbenchRunStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     CANCELLING = "cancelling"
+    WAITING_INPUT = "waiting_input"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -75,6 +76,7 @@ class WorkbenchRun(Generic[_InvocationReqT]):
     error_message: str = ""
     done: threading.Event = field(default_factory=threading.Event)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
+    resume: dict[str, Any] | None = None
 
 
 __all__ = [
