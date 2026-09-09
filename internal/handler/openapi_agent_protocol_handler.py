@@ -6,6 +6,7 @@ from uuid import UUID
 from flask import Response, request
 from flask_login import current_user, login_required
 from injector import inject
+from internal.schema.agent_workbench_read_schema import WorkbenchStateReq
 
 from internal.exception import ValidateErrorException
 from internal.schema import (
@@ -80,6 +81,7 @@ class OpenAPIAgentProtocolHandler:
     def state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """读取开放 API 会话状态。"""
         result = self.service.get_state(
+            view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.conversation_service.get_service_api_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
@@ -88,6 +90,14 @@ class OpenAPIAgentProtocolHandler:
         )
         response = WorkbenchStateResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
+
+    @login_required
+    def model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
+        """开放接口只返回已授权应用的模型配置，不提供账号模型目录。"""
+        result = self.service.get_model_settings(context=self.conversation_service.get_service_api_invocation_context(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        ))
+        return json_response(result.model_dump(mode="json"))
 
     @login_required
     def cancel_run(

@@ -99,6 +99,14 @@ def test_catalog_only_contains_declared_levels(case):
     assert case.service.get_workbench_model_settings(case.context, case.selection).reasoning_levels == []
 
 
+def test_submission_only_resolves_the_selected_model_once(case):
+    """Submitting a message must not build the model-picker catalog or resolve twice."""
+    case.service.validate_workbench_reasoning(case.context, "low", case.selection)
+    case.service.language_model_service.get_language_models.assert_not_called()
+    case.service.language_model_service.get_enabled_model_entity.assert_called_once()
+    case.service._load_app_configuration.assert_called_once()
+
+
 def test_actual_assembly_loads_selected_model(case):
     """检查真实装配方法把覆盖传到模型加载器，而不仅仅保存在 DTO。"""
     service = case.service

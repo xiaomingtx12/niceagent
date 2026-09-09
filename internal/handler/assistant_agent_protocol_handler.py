@@ -6,6 +6,7 @@ from uuid import UUID
 from flask import Response, request
 from flask_login import current_user, login_required
 from injector import inject
+from internal.schema.agent_workbench_read_schema import WorkbenchStateReq
 
 from internal.schema import (
     WorkbenchCancelResp,
@@ -70,6 +71,7 @@ class AssistantAgentProtocolHandler:
     def state(self, conversation_id: UUID) -> Response:
         """读取辅助 Agent 状态。"""
         result = self.service.get_state(
+            view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.assistant_agent_service.get_invocation_context(
                 conversation_id=conversation_id,
                 account=current_user,
@@ -77,6 +79,14 @@ class AssistantAgentProtocolHandler:
         )
         response = WorkbenchStateResp.model_validate(result)
         return json_response(response.model_dump(mode="json"))
+
+    @login_required
+    def model_settings(self, conversation_id: UUID) -> Response:
+        """沿用辅助 Agent 会话权限读取模型选项。"""
+        result = self.service.get_model_settings(context=self.assistant_agent_service.get_invocation_context(
+            conversation_id=conversation_id, account=current_user,
+        ))
+        return json_response(result.model_dump(mode="json"))
 
     @login_required
     def cancel_run(self, conversation_id: UUID, run_id: UUID) -> Response:

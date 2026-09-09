@@ -26,7 +26,7 @@ from internal.core.agent_v2 import (
     AgentSkill,
     SubAgentRuntimeBinding,
 )
-from internal.core.language_model.entities.model_entity import BaseLanguageModel
+from internal.core.language_model.entities.model_entity import BaseLanguageModel, ModelEntity
 from internal.core.language_model.parameters import canonicalize_parameters
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
@@ -261,6 +261,13 @@ class AgentAssemblyService:
 
     def resolve_workbench_model(self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None = None) -> AppModelConfigReq | None:
         """创建者可覆盖自己的已激活模型；公开入口不能借此选择账号中的其他连接。"""
+        config, _ = self._resolve_workbench_model(context, selection)
+        return config
+
+    def _resolve_workbench_model(
+        self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None,
+    ) -> tuple[AppModelConfigReq | None, ModelEntity | None]:
+        """同次解析返回已校验的模型，供强度校验和设置读取复用。"""
         if selection is not None and context.invoke_from not in {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT}:
             raise ValidateErrorException("当前入口不允许切换模型")
         if context.invoke_from is InvokeFrom.ASSISTANT_AGENT:
@@ -270,7 +277,7 @@ class AgentAssemblyService:
             _, _, account_id, app_config = self._load_app_configuration(context)
             config = app_config.model_config_data
         if selection is None:
-            return config
+            return config, None
         if account_id != context.account_id or context.created_by != account_id:
             raise ValidateErrorException("只能选择当前账号的模型")
         model = self.language_model_service.get_enabled_model_entity(
@@ -280,19 +287,19 @@ class AgentAssemblyService:
         if model is None or model.model_type != ModelType.CHAT:
             raise ValidateErrorException("所选模型未激活或不是对话模型")
         if config and config.provider == selection.provider and config.model == selection.model and (not config.provider_connection_id or str(config.provider_connection_id) == str(selection.provider_connection_id)):
-            return config
+            return config, model
         return AppModelConfigReq(**selection.model_dump(), parameters={
             parameter.name: parameter.default for parameter in model.parameters
             if parameter.required and parameter.default is not None
-        })
+        }), model
 
     def get_workbench_model_settings(self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None = None) -> WorkbenchModelSettingsResp:
         """按已授权入口读取草稿或发布模型，只返回可公开的任务选项。"""
-        config = self.resolve_workbench_model(context, selection)
+        config, model = self._resolve_workbench_model(context, selection)
         account_id = context.account_id
         if config is None:
             return WorkbenchModelSettingsResp()
-        model = self.language_model_service.get_enabled_model_entity(
+        model = model or self.language_model_service.get_enabled_model_entity(
             config.provider, config.model, account_id,
             provider_connection_id=str(config.provider_connection_id) if config.provider_connection_id else None,
         )
@@ -335,9 +342,18 @@ class AgentAssemblyService:
 
     def validate_workbench_reasoning(self, context: AgentInvocationContext, effort: str | None, selection: WorkbenchModelSelection | None = None) -> None:
         """任务覆盖只允许当前模型明确声明的等级，在创建消息前拒绝无效选择。"""
-        if selection is not None:
-            self.resolve_workbench_model(context, selection)
-        if effort is not None and effort not in self.get_workbench_model_settings(context, selection).reasoning_levels:
+        if selection is None and effort is None:
+            return
+        config, model = self._resolve_workbench_model(context, selection)
+        if effort is None:
+            return
+        if model is None and config is not None:
+            model = self.language_model_service.get_enabled_model_entity(
+                config.provider, config.model, context.account_id,
+                provider_connection_id=str(config.provider_connection_id) if config.provider_connection_id else None,
+            )
+        parameter = next((item for item in model.parameters if item.name == "reasoning_effort"), None) if model else None
+        if parameter is None or effort not in {option.value for option in parameter.options}:
             raise ValidateErrorException("当前模型不支持所选思考强度，请重新选择")
 
     @staticmethod

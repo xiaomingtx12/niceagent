@@ -62,6 +62,13 @@ def test_progress_is_committed_and_published_before_slow_tool_executes(monkeypat
     def execute(_input, *, on_event, cancel_requested):
         """在模拟慢工具真正执行前检查传输边界，断言失败会随结果传到测试。"""
         on_event(AgentEvent(channel="messages", data=AIMessageChunk(content="已完成第一部分")))
+        assert any(
+            event.method == "messages" and event.params.data["event"] == "content-block-delta"
+            for event in committed
+        ), "The first text chunk must be committed before another chunk or tool callback"
+        first_flush_count = len(committed)
+        on_event(AgentEvent(channel="messages", data=AIMessageChunk(content="，继续检查")))
+        assert len(committed) == first_flush_count, "Later chunks should still be batched"
         on_event(AgentEvent(channel="tools", data={
             "event": "tool-started", "tool_call_id": "slow", "tool_name": "read_file",
             "input": {"file_path": "/workspace/report.md"},

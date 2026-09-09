@@ -16,6 +16,22 @@ def register_agent_workbench_routes(
 ) -> None:
     """注册创建者、发布态和 Run 控制路由。"""
     blueprint.add_url_rule(
+        "/agent-runs/<uuid:run_id>/events",
+        methods=["GET"], view_func=handler.run_events,
+    )
+    blueprint.add_url_rule(
+        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/model-settings",
+        methods=["GET"], view_func=handler.debug_model_settings,
+    )
+    blueprint.add_url_rule(
+        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/model-settings",
+        methods=["GET"], view_func=handler.web_app_model_settings,
+    )
+    blueprint.add_url_rule(
+        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/model-settings",
+        methods=["GET"], view_func=handler.creator_task_model_settings,
+    )
+    blueprint.add_url_rule(
         "/agent-runs/<uuid:run_id>/observability",
         methods=["GET"],
         view_func=handler.run_observability,
@@ -95,6 +111,10 @@ def register_assistant_agent_protocol_routes(
     )
     prefix = "/assistant-agent/conversations/<uuid:conversation_id>"
     blueprint.add_url_rule(
+        f"{prefix}/model-settings", methods=["GET"],
+        endpoint="assistant_agent_model_settings", view_func=handler.model_settings,
+    )
+    blueprint.add_url_rule(
         f"{prefix}/commands", methods=["POST"], view_func=handler.command
     )
     blueprint.add_url_rule(
@@ -115,6 +135,10 @@ def register_openapi_agent_protocol_routes(
 ) -> None:
     """注册服务 API 的 Agent Protocol 路由。"""
     prefix = "/openapi/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(
+        f"{prefix}/model-settings", methods=["GET"],
+        endpoint="openapi_agent_model_settings", view_func=handler.model_settings,
+    )
     blueprint.add_url_rule(
         "/openapi/apps/<uuid:app_id>/conversations",
         methods=["POST"],

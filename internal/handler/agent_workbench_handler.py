@@ -6,6 +6,9 @@ from uuid import UUID
 from flask import Response, request
 from flask_login import current_user, login_required
 from injector import inject
+from internal.exception import ValidateErrorException
+from internal.schema.agent_workbench_read_schema import WorkbenchStateReq
+from pkg.paginator import PaginatorReq
 
 from internal.schema import (
     WorkbenchCancelResp,
@@ -32,6 +35,42 @@ class AgentWorkbenchHandler:
     app_service: AppService
     web_app_service: WebAppService
     creator_task_service: CreatorTaskService
+
+    @login_required
+    def debug_model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
+        """沿用调试会话权限，仅返回模型选项。"""
+        result = self.service.get_model_settings(context=self.app_service.get_debugger_invocation_context(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        ))
+        return json_response(result.model_dump(mode="json"))
+
+    @login_required
+    def web_app_model_settings(self, token: str, conversation_id: UUID) -> Response:
+        """发布态选项沿用会话授权，不暴露创建者可选模型目录。"""
+        result = self.service.get_model_settings(context=self.web_app_service.get_invocation_context(
+            token=token, conversation_id=conversation_id, account=current_user,
+        ))
+        return json_response(result.model_dump(mode="json"))
+
+    @login_required
+    def creator_task_model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
+        """任务中心独立读取当前会话的模型选择。"""
+        result = self.service.get_model_settings(context=self.creator_task_service.get_invocation_context(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        ))
+        return json_response(result.model_dump(mode="json"))
+
+    @login_required
+    def run_events(self, run_id: UUID) -> Response:
+        """分页参数在 HTTP 边界校验，Run 所有权交由服务复核。"""
+        page = PaginatorReq(request.args)
+        if not page.validate():
+            raise ValidateErrorException("执行详情分页参数无效")
+        result = self.service.get_run_events(
+            run_id=run_id, account=current_user,
+            current_page=page.current_page.data, page_size=page.page_size.data,
+        )
+        return json_response(result.model_dump(mode="json"))
 
     @login_required
     def run_observability(self, run_id: UUID) -> Response:
@@ -80,6 +119,7 @@ class AgentWorkbenchHandler:
     def debug_state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """读取调试工作台状态和消息快照。"""
         result = self.service.get_state(
+            view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.app_service.get_debugger_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
@@ -126,6 +166,7 @@ class AgentWorkbenchHandler:
     def web_app_state(self, token: str, conversation_id: UUID) -> Response:
         """读取发布态 WebApp 工作台状态和消息快照。"""
         result = self.service.get_state(
+            view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.web_app_service.get_invocation_context(
                 token=token,
                 conversation_id=conversation_id,
@@ -210,6 +251,7 @@ class AgentWorkbenchHandler:
     def creator_task_state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """Creator 任务中心读取会话状态。"""
         result = self.service.get_state(
+            view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.creator_task_service.get_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,

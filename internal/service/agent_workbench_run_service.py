@@ -9,8 +9,9 @@ from typing import Any, ClassVar
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import defer, load_only
 
 from internal.entity import (
     WORKBENCH_ACTIVE_STATUSES,
@@ -21,15 +22,17 @@ from internal.entity import (
 from internal.service.agent_protocol.event_projector import (
     AgentProtocolEventProjector,
 )
+from internal.service.agent_protocol.state_projector import project_snapshot_values
 from internal.entity.conversation_entity import InvokeFrom
 from internal.model import AgentRun, AgentRunEvent, Message
 from internal.schema.agent_workbench_schema import (
     WorkbenchEvent,
+    WorkbenchRunMetadataResp,
 )
+from internal.schema.agent_workbench_read_schema import WorkbenchEventBatchResp, WorkbenchRunEventsResp
 from pkg.sqlalchemy import SQLAlchemy
 
 _PERSISTED_EVENT_METHODS = ("tools", "lifecycle")
-_STATE_SNAPSHOT_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
 
 
 @inject
@@ -198,8 +201,12 @@ class AgentWorkbenchRunService:
 
         # 2.在一个事务中更新 Run 快照并幂等追加事件。
         with self.db.auto_commit():
+            columns = [AgentRun.executor_id, AgentRun.status, AgentRun.last_event_sequence]
+            if latest_snapshot is not None:
+                columns.append(AgentRun.state_snapshot)
             row = (
                 self.db.session.query(AgentRun)
+                .options(load_only(*columns))
                 .populate_existing()
                 .with_for_update()
                 .filter(AgentRun.id == run.run_id)
@@ -283,8 +290,8 @@ class AgentWorkbenchRunService:
                     message.status = "stop" if cancelled else "error"
                     message.error = row.error_message
 
-    def get_run(self, run_id: UUID, *, recover: bool = True) -> AgentRun | None:
-        """按主键读取 Run；调用方若继续使用 ORM 对象需负责关闭 Session。"""
+    def get_run(self, run_id: UUID, *, recover: bool = False) -> AgentRun | None:
+        """默认只读；调用方确认归属后才能显式恢复，并负责关闭 ORM Session。"""
         if recover:
             self.recover_stale_runs(run_id=run_id)
         return self.db.session.get(AgentRun, run_id, populate_existing=True)
@@ -307,6 +314,10 @@ class AgentWorkbenchRunService:
             .one_or_none()
         )
 
+    def get_run_status(self, run_id: UUID) -> str | None:
+        """取消监控只读取状态列，避免重复传输和解析运行快照。"""
+        return self.db.session.query(AgentRun.status).filter(AgentRun.id == run_id).scalar()
+
     def get_initial_event_sequence(self, run: AgentRun) -> int:
         """重复提交也从本 Run 开头重放，不能把终态游标当作执行起点。"""
         first_sequence = (
@@ -320,26 +331,54 @@ class AgentWorkbenchRunService:
             else int(run.last_event_sequence or 0)
         )
 
-    def list_runs_for_messages(
+    def list_state_runs(
         self,
         *,
         conversation_id: UUID,
         invoke_from: InvokeFrom,
         message_ids: list[UUID],
     ) -> list[AgentRun]:
-        """按当前会话消息读取对应入口的 Run。"""
-        if not message_ids:
-            return []
-        return (
-            self.db.session.query(AgentRun)
+        """一条查询读取消息页关联 Run 及当前入口最新 Run，状态不受消息分页截断。"""
+        latest_run_id = (
+            self.db.session.query(AgentRun.id)
             .filter(
                 AgentRun.conversation_id == conversation_id,
                 AgentRun.invoke_from == invoke_from.value,
-                AgentRun.message_id.in_(message_ids),
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        return (
+            self.db.session.query(AgentRun)
+            .options(defer(AgentRun.observability))
+            .filter(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.invoke_from == invoke_from.value,
+                or_(AgentRun.message_id.in_(message_ids), AgentRun.id == latest_run_id),
             )
             .order_by(AgentRun.created_at.asc(), AgentRun.id.asc())
             .all()
         )
+
+    def get_latest_model_overrides(
+        self, *, conversation_id: UUID, invoke_from: InvokeFrom,
+    ) -> dict[str, Any]:
+        """只投影最近任务的模型字段，避免读取大快照、观测数据及触发状态恢复。"""
+        invocation = AgentRun.state_snapshot["_interaction"]["invocation"]
+        row = (
+            self.db.session.query(
+                invocation["model_selection"].label("model_selection"),
+                invocation["reasoning_effort"].label("reasoning_effort"),
+            )
+            .filter(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.invoke_from == invoke_from.value,
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .first()
+        )
+        return dict(row._mapping) if row is not None else {}
 
     def get_latest_run(
         self,
@@ -385,15 +424,49 @@ class AgentWorkbenchRunService:
             if close_session:
                 self.db.session.close()
 
+    def get_run_metadata(self, *, conversation_id: UUID, invoke_from: InvokeFrom) -> WorkbenchRunMetadataResp:
+        """停止操作只需要运行标识与状态，不读取消息和 JSON 快照。"""
+        row = (
+            self.db.session.query(AgentRun.id, AgentRun.status, AgentRun.last_event_sequence)
+            .filter(AgentRun.conversation_id == conversation_id, AgentRun.invoke_from == invoke_from.value)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .first()
+        )
+        return WorkbenchRunMetadataResp(
+            run_id=row.id, status=row.status, last_event_sequence=row.last_event_sequence,
+        ) if row else WorkbenchRunMetadataResp()
+
+    def get_run_event_page(self, *, run_id: UUID, current_page: int, page_size: int) -> WorkbenchRunEventsResp:
+        """追加式事件按主键序号分页，多取一条判断下一页，不执行总数查询。"""
+        rows = (
+            self.db.session.query(AgentRunEvent.payload)
+            .filter(
+                AgentRunEvent.run_id == run_id,
+                AgentRunEvent.payload["method"].astext.in_(_PERSISTED_EVENT_METHODS),
+            )
+            .order_by(AgentRunEvent.sequence.asc())
+            .offset((current_page - 1) * page_size)
+            .limit(page_size + 1)
+            .all()
+        )
+        events = [
+            event for row in rows[:page_size]
+            if (event := AgentProtocolEventProjector.to_public_event(row.payload)) is not None
+        ]
+        return WorkbenchRunEventsResp(
+            run_id=run_id, events=events,
+            next_page=current_page + 1 if len(rows) > page_size else None,
+        )
+
     def list_events_by_run(
         self,
         run_ids: list[UUID],
     ) -> dict[UUID, list[WorkbenchEvent]]:
-        """批量读取多个 Run 的持久化事件。"""
+        """只读取历史投影需要的列，避免为每个事件构造 ORM 实体。"""
         if not run_ids:
             return {}
         rows = (
-            self.db.session.query(AgentRunEvent)
+            self.db.session.query(AgentRunEvent.run_id, AgentRunEvent.payload)
             .filter(
                 AgentRunEvent.run_id.in_(run_ids),
                 AgentRunEvent.payload["method"].astext.in_(_PERSISTED_EVENT_METHODS),
@@ -418,10 +491,10 @@ class AgentWorkbenchRunService:
         invoke_from: InvokeFrom,
         since: int,
         limit: int = 256,
-    ) -> list[WorkbenchEvent]:
-        """按会话游标分页读取已提交事件，不用合成快照推进传输游标。"""
+    ) -> WorkbenchEventBatchResp:
+        """按落库序号推进扫描游标，避免隐藏事件占满一批后阻断续传。"""
         rows = (
-            self.db.session.query(AgentRunEvent)
+            self.db.session.query(AgentRunEvent.sequence, AgentRunEvent.payload)
             .join(AgentRun, AgentRun.id == AgentRunEvent.run_id)
             .filter(
                 AgentRun.conversation_id == conversation_id,
@@ -437,7 +510,11 @@ class AgentWorkbenchRunService:
             event = AgentProtocolEventProjector.to_public_event(row.payload)
             if event is not None:
                 events.append(event)
-        return events
+        return WorkbenchEventBatchResp(
+            events=events,
+            next_sequence=rows[-1].sequence if rows else since,
+            has_more=len(rows) == limit,
+        )
 
     def request_cancel(self, row: AgentRun) -> bool:
         """仅把活动 Run 标记为 cancelling，避免并发请求复活终态 Run。"""
@@ -462,7 +539,7 @@ class AgentWorkbenchRunService:
                     snapshot["_interaction"] = {**(snapshot.get("_interaction") or {}), "cancelled_input": True}
                     current.state_snapshot = snapshot
                     projector = AgentProtocolEventProjector(current.id, start_sequence=int(current.last_event_sequence or 0))
-                    public_state = {key: snapshot[key] for key in _STATE_SNAPSHOT_KEYS if key in snapshot}
+                    public_state = project_snapshot_values(snapshot)
                     for raw in [projector.generated("values", public_state), projector.generated("lifecycle", {
                         "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
                         "message_id": str(current.message_id), "input_message_id": current.input_message_id,
@@ -491,34 +568,4 @@ class AgentWorkbenchRunService:
         return updated
 
 
-def build_state_snapshot_event(
-    run_id: UUID,
-    sequence: int,
-    snapshot: Mapping[str, Any] | None,
-) -> WorkbenchEvent | None:
-    """把 Run 最新快照压缩成一条历史水合事件。"""
-    if not snapshot:
-        return None
-    data = {key: snapshot[key] for key in _STATE_SNAPSHOT_KEYS if key in snapshot}
-    if not data:
-        return None
-    return WorkbenchEvent(
-        type="event",
-        event_id=f"{run_id}:state-snapshot",
-        seq=max(0, sequence),
-        method="values",
-        params={
-            "namespace": [],
-            "timestamp": None,
-            "data": data,
-            "metadata": {
-                "my_dify": {
-                    "source": "state_hydration",
-                    "run_id": str(run_id),
-                }
-            },
-        },
-    )
-
-
-__all__ = ["AgentWorkbenchRunService", "build_state_snapshot_event"]
+__all__ = ["AgentWorkbenchRunService"]

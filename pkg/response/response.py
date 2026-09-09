@@ -34,22 +34,28 @@ def sse_response(events: Iterable[Any]) -> FlaskResponse:
 
     @stream_with_context
     def generate() -> Generator[str, None, None]:
-        # 立即提交响应头，避免代理等待首个业务事件。
-        yield ": connected\n\n"
-        for event in events:
-            if event is None:
-                yield ": heartbeat\n\n"
-                continue
-            lines: list[str] = []
-            if isinstance(event, dict):
-                event_id = str(event.get("event_id") or "").replace("\n", "")
-                event_name = str(event.get("method") or "").replace("\n", "")
-                if event_id:
-                    lines.append(f"id: {event_id}")
-                if event_name:
-                    lines.append(f"event: {event_name}")
-            lines.append(f"data: {jsonlib.dumps(event, ensure_ascii=True)}")
-            yield "\n".join(lines) + "\n\n"
+        """连接关闭或编码失败时及时释放底层订阅，不依赖垃圾回收。"""
+        iterator = iter(events)
+        try:
+            yield ": connected\n\n"
+            for event in iterator:
+                if event is None:
+                    yield ": heartbeat\n\n"
+                    continue
+                lines: list[str] = []
+                if isinstance(event, dict):
+                    event_id = str(event.get("event_id") or "").replace("\r", "").replace("\n", "")
+                    event_name = str(event.get("method") or "").replace("\r", "").replace("\n", "")
+                    if event_id:
+                        lines.append(f"id: {event_id}")
+                    if event_name:
+                        lines.append(f"event: {event_name}")
+                lines.append(f"data: {jsonlib.dumps(event, ensure_ascii=False, separators=(',', ':'))}")
+                yield "\n".join(lines) + "\n\n"
+        finally:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
 
     return FlaskResponse(
         generate(),

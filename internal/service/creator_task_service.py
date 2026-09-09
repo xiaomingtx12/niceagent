@@ -8,7 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
@@ -136,18 +136,10 @@ class CreatorTaskService(BaseService):
     def _timestamp(value: datetime | None) -> int:
         return int(value.timestamp()) if value else 0
 
-    def _last_run_status(self, conversation_id: UUID) -> str:
-        run = (
-            self.db.session.query(AgentRun.status)
-            .filter(AgentRun.conversation_id == conversation_id)
-            .order_by(desc(AgentRun.created_at))
-            .first()
-        )
-        return str(run[0]) if run else "idle"
-
     def _serialize_conversation(
-        self, conversation: Conversation, app: App
+        self, conversation: Conversation, app: App, *, last_run_status: str = "idle",
     ) -> dict[str, Any]:
+        """序列化已加载的摘要；列表中的运行状态由调用方批量读取。"""
         return {
             "id": str(conversation.id),
             "name": conversation.name or "新的会话",
@@ -155,7 +147,7 @@ class CreatorTaskService(BaseService):
             "is_pinned": bool(conversation.is_pinned),
             "updated_at": self._timestamp(conversation.updated_at),
             "created_at": self._timestamp(conversation.created_at),
-            "last_run_status": self._last_run_status(conversation.id),
+            "last_run_status": last_run_status,
             "agent": {
                 "id": str(app.id),
                 "name": app.name,
@@ -172,33 +164,35 @@ class CreatorTaskService(BaseService):
             .order_by(desc(App.updated_at), desc(App.id))
             .all()
         )
-        results: list[dict[str, Any]] = []
-        for app in apps:
-            count = (
-                self._visible_query(account)
-                .filter(Conversation.app_id == app.id)
-                .count()
+        if not apps:
+            return []
+        # 复用会话可见性条件，统计与最近活动时间在同一次分组查询中取得。
+        summaries = {
+            row.app_id: row
+            for row in self._visible_query(account)
+            .with_entities(
+                Conversation.app_id,
+                func.count(Conversation.id).label("conversation_count"),
+                func.max(Conversation.updated_at).label("last_active_at"),
             )
-            latest = (
-                self._visible_query(account)
-                .filter(Conversation.app_id == app.id)
-                .order_by(desc(Conversation.updated_at), desc(Conversation.id))
-                .first()
-            )
-            results.append(
-                {
-                    "id": str(app.id),
-                    "name": app.name,
-                    "icon": app.icon,
-                    "description": app.description,
-                    "status": app.status,
-                    "conversation_count": count,
-                    "last_active_at": (
-                        self._timestamp(latest[0].updated_at) if latest else 0
-                    ),
-                }
-            )
-        return results
+            .filter(Conversation.app_id.in_([app.id for app in apps]))
+            .group_by(Conversation.app_id)
+            .all()
+        }
+        return [
+            {
+                "id": str(app.id),
+                "name": app.name,
+                "icon": app.icon,
+                "description": app.description,
+                "status": app.status,
+                "conversation_count": summaries[app.id].conversation_count if app.id in summaries else 0,
+                "last_active_at": (
+                    self._timestamp(summaries[app.id].last_active_at) if app.id in summaries else 0
+                ),
+            }
+            for app in apps
+        ]
 
     def get_agent(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """获取任务中心运行所需的已发布 Agent 配置，不返回 WebApp token。"""
@@ -262,9 +256,12 @@ class CreatorTaskService(BaseService):
         )
         has_more = len(rows) > page_size
         rows = rows[:page_size]
+        statuses = self._last_run_statuses([conversation.id for conversation, _ in rows])
         return {
             "list": [
-                self._serialize_conversation(conversation, app)
+                self._serialize_conversation(
+                    conversation, app, last_run_status=statuses.get(conversation.id, "idle"),
+                )
                 for conversation, app in rows
             ],
             "page": {
@@ -283,7 +280,10 @@ class CreatorTaskService(BaseService):
         )
         if row is None:
             raise NotFoundException("会话不存在或无权访问")
-        return self._serialize_conversation(row[0], row[1])
+        statuses = self._last_run_statuses([row[0].id])
+        return self._serialize_conversation(
+            row[0], row[1], last_run_status=statuses.get(row[0].id, "idle"),
+        )
 
     def update_conversation(
         self, conversation_id: UUID, account: Account, **values: Any
@@ -299,7 +299,10 @@ class CreatorTaskService(BaseService):
         for field, value in values.items():
             setattr(conversation, field, value)
         self.db.session.commit()
-        return self._serialize_conversation(conversation, app)
+        statuses = self._last_run_statuses([conversation.id])
+        return self._serialize_conversation(
+            conversation, app, last_run_status=statuses.get(conversation.id, "idle"),
+        )
 
     def delete_conversation(self, conversation_id: UUID, account: Account) -> None:
         row = (
@@ -319,6 +322,19 @@ class CreatorTaskService(BaseService):
         )
         conversation.is_deleted = True
         self.db.session.commit()
+
+    def _last_run_statuses(self, conversation_ids: list[UUID]) -> dict[UUID, str]:
+        """仅为当前页的授权会话批量取最新状态；同时间运行按 ID 稳定排序。"""
+        if not conversation_ids:
+            return {}
+        rows = (
+            self.db.session.query(AgentRun.conversation_id, AgentRun.status)
+            .filter(AgentRun.conversation_id.in_(conversation_ids))
+            .distinct(AgentRun.conversation_id)
+            .order_by(AgentRun.conversation_id, AgentRun.created_at.desc(), AgentRun.id.desc())
+            .all()
+        )
+        return {row.conversation_id: row.status for row in rows}
 
 
 __all__ = ["CreatorTaskService"]

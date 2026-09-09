@@ -173,7 +173,16 @@ class InternalAgentProtocolService(BaseService):
     ) -> InternalRunResp:
         """读取指定内部 Run，禁止跨应用或跨会话访问。"""
         self._get_authorized_account(claims)
-        row = self.run_service.get_run(run_id)
+        row = self.run_service.get_run(run_id, recover=False)
+        if (
+            row is None
+            or row.conversation_id != conversation_id
+            or row.app_id != claims.target_app_id
+            or row.invoke_from != InvokeFrom.CREATOR_TASK.value
+        ):
+            raise NotFoundException("内部 Agent Protocol Run 不存在")
+        # 失联恢复会提交状态和事件，必须在目标 Run 的授权范围确认后执行。
+        row = self.run_service.get_run(run_id, recover=True)
         return self._to_run_response(
             row=row,
             conversation_id=conversation_id,

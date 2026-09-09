@@ -80,17 +80,28 @@ class AgentWorkbenchRunExecutionService:
         )
         pending_events: list[WorkbenchEvent] = []
         last_flush_at = time.monotonic()
+        first_text_published = False
 
         def receive_event(agent_event: AgentEvent) -> None:
             """批量提交所有通道后再通知订阅者，确保实时与重放使用相同事件。"""
-            nonlocal last_flush_at
+            nonlocal last_flush_at, first_text_published
             for projected in projector.project_many(agent_event):
                 event = AgentProtocolEventProjector.to_public_event(projected)
                 if event is None:
                     continue
                 pending_events.append(event)
+                delta = event.params.data.get("delta")
+                first_text = (
+                    not first_text_published
+                    and event.method == "messages"
+                    and event.params.data.get("event") == "content-block-delta"
+                    and isinstance(delta, Mapping)
+                    and delta.get("type") == "text-delta"
+                    and bool(delta.get("text"))
+                )
                 if (
-                    len(pending_events) >= self._persistence_batch_size
+                    first_text
+                    or len(pending_events) >= self._persistence_batch_size
                     or time.monotonic() - last_flush_at >= 0.1
                     # 阶段结束和工具启动前必须刷新，不能把尾批留到慢工具返回。
                     or event.method != "messages"
@@ -99,10 +110,18 @@ class AgentWorkbenchRunExecutionService:
                     }
                 ):
                     self.run_service.record_events(run, pending_events)
-                    for committed in pending_events:
-                        self._publish_event(run, committed, persist_database=False)
+                    run.last_event_sequence = pending_events[-1].seq
+                    self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
                     pending_events.clear()
                     last_flush_at = time.monotonic()
+                    if first_text:
+                        first_text_published = True
+                        duration_ms = (last_flush_at - started_at) * 1000
+                        observer.record_stage("delivery.first_text", duration_ms)
+                        logger.info(
+                            "agent_delivery_timing run_id=%s stage=first_text duration_ms=%.2f",
+                            run.run_id, duration_ms,
+                        )
 
         try:
             # 1.先更新平台运行状态，再装配 Agent，避免取消后重复创建运行资源。
@@ -145,8 +164,8 @@ class AgentWorkbenchRunExecutionService:
                         with flask_app.app_context():
                             while not monitor_done.wait(0.5):
                                 try:
-                                    row = self.run_service.get_run(run.run_id, recover=False)
-                                    if row is not None and row.status == "cancelling":
+                                    status = self.run_service.get_run_status(run.run_id)
+                                    if status == "cancelling":
                                         run.cancel_requested.set()
                                     if run.cancel_requested.is_set():
                                         if agent.request_drain():
@@ -203,8 +222,8 @@ class AgentWorkbenchRunExecutionService:
                         pending_events.append(event)
                 if pending_events:
                     self.run_service.record_events(run, pending_events)
-                    for event in pending_events:
-                        self._publish_event(run, event, persist_database=False)
+                    run.last_event_sequence = pending_events[-1].seq
+                    self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
                     pending_events.clear()
             except Exception as exc:
                 if result.error is not None:
@@ -366,7 +385,7 @@ class AgentWorkbenchRunExecutionService:
             self.run_service.record_events(run, [event])
 
         run.last_event_sequence = event.seq
-        self.queue_manager.notify_events()
+        self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
         return event
 
 

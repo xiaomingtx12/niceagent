@@ -8,6 +8,7 @@ from injector import inject
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import and_, desc, or_
+from sqlalchemy.orm import defer
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import (
@@ -531,13 +532,14 @@ class ConversationService(BaseService):
     ) -> tuple[list[Message], bool, UUID | None]:
         """按 created_at 与消息 ID 的稳定游标读取一页业务消息。"""
         limit = min(max(page_size, 1), 50)
-        query = self.db.session.query(Message).filter(
+        # 历史列表使用 query/answer，原始模型上下文不参与响应。
+        query = self.db.session.query(Message).options(defer(Message.message)).filter(
             Message.conversation_id == conversation_id,
             Message.is_deleted.is_(False),
         )
         if before is not None:
             cursor = (
-                self.db.session.query(Message)
+                self.db.session.query(Message.id, Message.created_at)
                 .filter(
                     Message.id == before,
                     Message.conversation_id == conversation_id,

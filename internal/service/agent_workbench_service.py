@@ -17,6 +17,7 @@ from injector import inject
 from internal.service.agent_protocol.message_projector import (
     project_conversation_messages,
 )
+from internal.service.agent_protocol.state_projector import project_snapshot_values, project_run_history
 from internal.entity import (
     WORKBENCH_ACTIVE_STATUSES,
     WORKBENCH_TERMINAL_STATUSES,
@@ -29,6 +30,7 @@ from internal.core.agent_v2.entity.user_input import PendingUserInput
 from internal.extension.logging_extension import logger
 from internal.model import Account, AgentRun, Conversation
 from internal.schema.agent_attachment_schema import dump_agent_attachments
+from internal.schema.agent_workbench_read_schema import WorkbenchRunEventsResp, WorkbenchStateView
 from internal.schema.agent_runtime_schema import AgentInvocation, AgentInvocationContext, WorkbenchModelSettingsResp
 from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.schema.agent_workbench_schema import (
@@ -48,14 +50,8 @@ from pkg.sqlalchemy import SQLAlchemy
 from .agent_attachment_service import AgentAttachmentService
 from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
 from .agent_workbench_execution_service import AgentWorkbenchRunExecutionService
-from .agent_workbench_run_service import (
-    AgentWorkbenchRunService,
-    build_state_snapshot_event,
-)
+from .agent_workbench_run_service import AgentWorkbenchRunService
 from .conversation_service import ConversationService
-
-_STATE_SNAPSHOT_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
-
 
 @inject
 @dataclass
@@ -76,43 +72,37 @@ class AgentWorkbenchService:
         stream_request: WorkbenchEventStreamReq,
     ) -> Iterator[dict[str, Any] | None]:
         """使用已提交事件续传，跨进程订阅和快速结束的 Run 走同一条路径。"""
-        try:
-            self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
-            replay_events = self.run_service.get_reconnect_events(
-                conversation_id=context.conversation_id,
-                invoke_from=context.invoke_from,
-                since=stream_request.since,
-            )
-        finally:
-            self.db.session.close()
+        # 权限校验已完成；释放其 Session，首批查询延后至 SSE 连接头发出后。
+        self.db.session.close()
 
         def stream_events() -> Iterator[dict[str, Any] | None]:
             """每批读取后释放 Session；过滤事件同样推进内部扫描游标。"""
             cursor = stream_request.since
-            events = replay_events
             heartbeat_at = time.monotonic() + 15
-            recovery_at = time.monotonic() + 10
-            while True:
-                for event in events:
-                    cursor = event.seq
-                    if stream_request.matches(event):
-                        yield event.model_dump(mode="json")
-                if len(events) < 256:
-                    self.queue_manager.wait_for_events(timeout=0.5)
-                if time.monotonic() >= heartbeat_at:
-                    yield None
-                    heartbeat_at = time.monotonic() + 15
-                try:
-                    if time.monotonic() >= recovery_at:
-                        self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
-                        recovery_at = time.monotonic() + 10
-                    events = self.run_service.get_reconnect_events(
-                        conversation_id=context.conversation_id,
-                        invoke_from=context.invoke_from,
-                        since=cursor,
-                    )
-                finally:
-                    self.db.session.close()
+            with self.queue_manager.watch_events(context.conversation_id, context.invoke_from) as signal:
+                while True:
+                    version = signal.snapshot()
+                    try:
+                        batch = signal.read_events(
+                            cursor,
+                            recover=lambda: self.run_service.recover_stale_runs(conversation_id=context.conversation_id),
+                            load=lambda: self.run_service.get_reconnect_events(
+                                conversation_id=context.conversation_id,
+                                invoke_from=context.invoke_from,
+                                since=cursor,
+                            ),
+                        )
+                    finally:
+                        self.db.session.close()
+                    for event in batch.events:
+                        if stream_request.matches(event):
+                            yield event.model_dump(mode="json")
+                    cursor = batch.next_sequence
+                    if time.monotonic() >= heartbeat_at:
+                        yield None
+                        heartbeat_at = time.monotonic() + 15
+                    if not batch.has_more:
+                        signal.wait(version, timeout=0.5)
 
         return stream_events()
 
@@ -120,9 +110,18 @@ class AgentWorkbenchService:
         self,
         *,
         context: AgentInvocationContext,
+        view: WorkbenchStateView = "full",
     ) -> WorkbenchStateResp:
         """使用入口已校验的上下文读取工作台状态。"""
         self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
+        if view == "status":
+            metadata = self.run_service.get_run_metadata(
+                conversation_id=context.conversation_id, invoke_from=context.invoke_from,
+            )
+            return WorkbenchStateResp(
+                metadata=metadata,
+                next=["agent"] if metadata.status in WORKBENCH_ACTIVE_STATUSES else [],
+            )
         # 1.由会话服务读取业务消息和稳定游标，再关联对应的 Agent Run。
         rows, has_more, next_before = self.conversation_service.get_message_page(
             conversation_id=context.conversation_id,
@@ -133,7 +132,7 @@ class AgentWorkbenchService:
             next_before=next_before,
         )
         message_ids = [message.id for message in rows]
-        persisted_runs = self.run_service.list_runs_for_messages(
+        persisted_runs = self.run_service.list_state_runs(
             conversation_id=context.conversation_id,
             invoke_from=context.invoke_from,
             message_ids=message_ids,
@@ -147,11 +146,7 @@ class AgentWorkbenchService:
         source_snapshot: Mapping[str, Any] = {}
         if latest_run is not None and isinstance(latest_run.state_snapshot, Mapping):
             source_snapshot = latest_run.state_snapshot
-        values = {
-            key: source_snapshot[key]
-            for key in _STATE_SNAPSHOT_KEYS
-            if key in source_snapshot
-        }
+        values = project_snapshot_values(source_snapshot)
         values["messages"] = [message.model_dump(mode="json") for message in messages]
         if latest_run is not None and latest_run.status in WORKBENCH_ACTIVE_STATUSES:
             current_ids = {
@@ -168,66 +163,20 @@ class AgentWorkbenchService:
             by_id.update({message["id"]: message for message in pending_messages})
             values["messages"] = list(by_id.values())
         values["message_page"] = message_page.model_dump(mode="json")
-        saved_invocation = source_snapshot.get("_interaction", {}).get("invocation", {})
-        try:
-            saved_model = saved_invocation.get("model_selection")
-            selection = WorkbenchModelSelection.model_validate(saved_model) if saved_model else None
-            model_settings = self.execution_service.agent_assembly_service.get_workbench_model_settings(context, selection)
-        except (NotFoundException, ValidateErrorException, ValueError):
-            # 模型停用或草稿未配置不应阻止读取已有会话历史。
-            try:
-                model_settings = self.execution_service.agent_assembly_service.get_workbench_model_settings(context)
-            except (NotFoundException, ValidateErrorException, ValueError):
-                model_settings = WorkbenchModelSettingsResp()
-        selected_effort = source_snapshot.get("_interaction", {}).get("invocation", {}).get("reasoning_effort")
-        if selected_effort in model_settings.reasoning_levels:
-            model_settings = model_settings.model_copy(update={"selected_reasoning_effort": selected_effort})
-        values["model_settings"] = model_settings.model_dump(mode="json")
 
         # 3.恢复运行详情；合成快照仅用于水合，不参与 SSE 游标。
+        deferred_ids = {
+            run.id for run in persisted_runs
+            if view == "compact" and run.status in WORKBENCH_TERMINAL_STATUSES
+        }
         events_by_run = self.run_service.list_events_by_run(
-            [run.id for run in persisted_runs]
+            [run.id for run in persisted_runs if run.id not in deferred_ids]
         )
-        historical_events: list[WorkbenchEvent] = []
-        for run in persisted_runs:
-            historical_events.extend(events_by_run.get(run.id, []))
-            snapshot_event = build_state_snapshot_event(
-                run.id,
-                int(run.last_event_sequence or 0),
-                run.state_snapshot,
-            )
-            if snapshot_event is not None:
-                historical_events.append(snapshot_event)
-            if run.status in WORKBENCH_TERMINAL_STATUSES:
-                historical_events.append(
-                    WorkbenchEvent(
-                        type="event",
-                        event_id=f"{run.id}:terminal-hydration",
-                        seq=int(run.last_event_sequence or 0),
-                        method="lifecycle",
-                        params={
-                            "data": {
-                                "event": (
-                                    "interrupted"
-                                    if run.status == "cancelled"
-                                    else run.status
-                                ),
-                                "status": run.status,
-                                "message_id": str(run.message_id),
-                                "input_message_id": run.input_message_id,
-                                **(
-                                    {"error": "Agent 运行失败"}
-                                    if run.status == "failed"
-                                    else {}
-                                ),
-                            }
-                        },
-                    )
-                )
-
+        if view == "compact":
+            values["deferred_run_ids"] = [str(run.id) for run in persisted_runs if run.id in deferred_ids]
         values["workbench_events"] = [
             event.model_dump(mode="json")
-            for event in sorted(historical_events, key=lambda item: item.seq)
+            for event in project_run_history(persisted_runs, events_by_run)
         ]
 
         # 4.当前运行优先，找不到运行记录时返回空闲状态。
@@ -253,6 +202,43 @@ class AgentWorkbenchService:
             ),
         )
 
+    def get_run_events(
+        self, *, run_id: UUID, account: Account, current_page: int, page_size: int,
+    ) -> WorkbenchRunEventsResp:
+        """沿用观测接口的会话所有权校验，详情查询不执行失联恢复。"""
+        row = self.db.session.query(AgentRun.app_id, AgentRun.conversation_id).filter(AgentRun.id == run_id).one_or_none()
+        if row is None:
+            raise NotFoundException("Agent Run 不存在")
+        self.conversation_service.get_owned_conversation(
+            conversation_id=row.conversation_id, app_id=row.app_id, account=account,
+        )
+        return self.run_service.get_run_event_page(
+            run_id=run_id, current_page=current_page, page_size=page_size,
+        )
+
+    def get_model_settings(self, *, context: AgentInvocationContext) -> WorkbenchModelSettingsResp:
+        """独立读取当前可用模型配置，恢复最近一次覆盖时不加载消息和运行事件。"""
+        saved = self.run_service.get_latest_model_overrides(
+            conversation_id=context.conversation_id,
+            invoke_from=context.invoke_from,
+        )
+        assembly = self.execution_service.agent_assembly_service
+        try:
+            raw_selection = saved.get("model_selection")
+            selection = WorkbenchModelSelection.model_validate(raw_selection) if raw_selection else None
+            settings = assembly.get_workbench_model_settings(context, selection)
+        except (NotFoundException, ValidateErrorException, ValueError):
+            # 已停用的历史模型不能继续使用，回退到当前应用的授权配置。
+            try:
+                settings = assembly.get_workbench_model_settings(context)
+            except (NotFoundException, ValidateErrorException, ValueError):
+                return WorkbenchModelSettingsResp()
+            return settings
+        effort = saved.get("reasoning_effort")
+        if effort in settings.reasoning_levels:
+            settings = settings.model_copy(update={"selected_reasoning_effort": effort})
+        return settings
+
     def cancel_run(
         self,
         *,
@@ -261,7 +247,7 @@ class AgentWorkbenchService:
     ) -> WorkbenchCancelResp:
         """使用入口已校验的上下文停止指定 Agent Run。"""
         # 1.校验目标 Run 是否属于本次请求的会话和入口。
-        row = self.run_service.get_run(run_id)
+        row = self.run_service.get_run(run_id, recover=False)
         if (
             row is None
             or row.app_id != context.app_id
@@ -269,6 +255,10 @@ class AgentWorkbenchService:
             or row.invoke_from != context.invoke_from.value
         ):
             raise NotFoundException("Agent Run 不存在或不属于当前会话")
+        # 归属确认后才允许恢复失联状态；未授权请求不能触发写入。
+        row = self.run_service.get_run(run_id, recover=True)
+        if row is None:
+            raise NotFoundException("Agent Run 不存在")
         # 2.先提交数据库取消状态，再通知本地执行线程。
         cancel_requested = False
         if (
@@ -276,7 +266,7 @@ class AgentWorkbenchService:
             and self.run_service.request_cancel(row)
         ):
             cancel_requested = True
-            self.queue_manager.notify_events()
+            self.queue_manager.notify_events(context.conversation_id, context.invoke_from)
             self.queue_manager.request_cancel(
                 context.conversation_id,
                 row.id,
@@ -301,7 +291,7 @@ class AgentWorkbenchService:
     ) -> WorkbenchRunObservabilityResp:
         """鉴权后读取平台持久化的 Agent Run 观测链路。"""
         # 1.读取并校验目标 Run 的稳定归属。
-        row = self.run_service.get_run(run_id)
+        row = self.run_service.get_run(run_id, recover=False)
         if row is None:
             raise NotFoundException("Agent Run 不存在")
         self.conversation_service.get_owned_conversation(
@@ -616,7 +606,7 @@ class AgentWorkbenchService:
             if committed:
                 run.status = WorkbenchRunStatus.FAILED
                 run.last_event_sequence = event.seq
-                self.queue_manager.notify_events()
+                self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
         except Exception:
             logger.exception("保存 Agent Run 后台失败状态失败")
         finally:

@@ -424,6 +424,7 @@ class LanguageModelService(BaseService):
         self,
         provider_name: str,
         profiles: list[ProviderApiKey],
+        target_model_name: str | None = None,
     ) -> list[ModelEntity]:
         """从已读取的连接快照还原启用模型，不再发起数据库查询。"""
         if not profiles:
@@ -443,7 +444,8 @@ class LanguageModelService(BaseService):
                     continue
                 model_key = (str(profile.id), model_name)
                 if (
-                    model_key not in seen_models
+                    (target_model_name is None or model_name == target_model_name)
+                    and model_key not in seen_models
                     and model_name in discovered_by_name
                 ):
                     enabled_models.append(
@@ -489,12 +491,15 @@ class LanguageModelService(BaseService):
         provider_connection_id: str | None = None,
     ) -> ModelEntity | None:
         """读取当前账号已激活的指定模型。"""
+        if not account_id:
+            return None
+        profiles = self._get_provider_profiles(
+            provider_name, account_id, provider_api_key_id=provider_connection_id,
+        )
         models = [
                 model
-                for model in self.get_enabled_model_entities(
-                    provider_name,
-                    account_id,
-                    provider_api_key_id=provider_connection_id,
+                for model in self._build_enabled_model_entities(
+                    provider_name, profiles, target_model_name=model_name,
                 )
                 if model.model_name == model_name
                 and (
