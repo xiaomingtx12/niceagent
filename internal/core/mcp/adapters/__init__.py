@@ -1,3 +1,3 @@
-from .langchain_adapter import MCPManagedTool, build_langchain_tool
+"""MCP adapter package reserved for future policy wrappers."""
 
-__all__ = ["MCPManagedTool", "build_langchain_tool"]
+__all__: list[str] = []

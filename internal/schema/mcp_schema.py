@@ -3,12 +3,25 @@ from marshmallow import Schema, fields, pre_dump
 from wtforms import BooleanField, IntegerField, StringField, ValidationError
 from wtforms.validators import DataRequired, Length, NumberRange, Optional, URL
 
-from internal.core.mcp import MCPSecretCipher
 from internal.core.mcp.entities import MCPTransport
 from internal.lib.helper import datetime_to_timestamp
 from internal.model import MCPServer, MCPTool
 from pkg.paginator import PaginatorReq
 from .schema import DictField, ListField
+
+_SECRET_MASK = "********"
+
+
+def _mask_env(env):
+    return {str(key): _SECRET_MASK for key in (env or {})}
+
+
+def _mask_headers(headers):
+    return [
+        {"key": str(item.get("key", "")), "value": _SECRET_MASK}
+        for item in (headers or [])
+        if isinstance(item, dict)
+    ]
 
 
 def _build_tool_inputs(input_schema: dict) -> list[dict]:
@@ -146,8 +159,8 @@ class GetMCPServerResp(Schema):
             "url": data.url,
             "command": data.command,
             "args": data.args,
-            "env": MCPSecretCipher.decrypt_env(data.env),
-            "headers": MCPSecretCipher.decrypt_headers(data.headers),
+            "env": _mask_env(data.env),
+            "headers": _mask_headers(data.headers),
             "timeout": int(data.timeout or 30),
             "tools": [
                 {

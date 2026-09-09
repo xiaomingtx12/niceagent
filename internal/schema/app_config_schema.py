@@ -218,7 +218,7 @@ class AgentAppConfigReq(BaseModel):
     preset_prompt: StrictStr = Field(default="", max_length=2000)
     skills: tuple[SkillBindingReq, ...] = Field(default_factory=tuple)
     subagents: tuple[SubAgentConfig, ...] = Field(default_factory=tuple)
-    tools: tuple[AgentAppToolReq, ...] = Field(default_factory=tuple, max_length=5)
+    tools: tuple[AgentAppToolReq, ...] = Field(default_factory=tuple)
     workflows: tuple[AgentAppResourceReq, ...] = Field(
         default_factory=tuple,
         max_length=5,

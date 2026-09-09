@@ -34,7 +34,27 @@ class MCPService(BaseService):
         return server
 
     @classmethod
-    def _normalize_payload(cls, req: CreateMCPServerReq | UpdateMCPServerReq) -> dict[str, Any]:
+    def _normalize_payload(
+        cls, req: CreateMCPServerReq | UpdateMCPServerReq, existing: MCPServer | None = None
+    ) -> dict[str, Any]:
+        env = req.env.data or {}
+        headers = req.headers.data or []
+        if existing is not None:
+            env = {
+                key: existing.env.get(key, "") if value == "********" else value
+                for key, value in env.items()
+            }
+            headers = [
+                {
+                    "key": item["key"],
+                    "value": next(
+                        (old.get("value", "") for old in (existing.headers or [])
+                         if old.get("key") == item["key"]),
+                        "",
+                    ) if item["value"] == "********" else item["value"],
+                }
+                for item in headers
+            ]
         return {
             "name": req.name.data.strip(),
             "icon": (req.icon.data or "").strip(),
@@ -44,8 +64,8 @@ class MCPService(BaseService):
             "url": (req.url.data or "").strip(),
             "command": (req.command.data or "").strip(),
             "args": req.args.data or [],
-            "env": MCPSecretCipher.encrypt_env(req.env.data or {}),
-            "headers": MCPSecretCipher.encrypt_headers(req.headers.data or []),
+            "env": MCPSecretCipher.encrypt_env(env),
+            "headers": MCPSecretCipher.encrypt_headers(headers),
             "timeout": int(req.timeout.data or 30),
         }
 
@@ -115,7 +135,7 @@ class MCPService(BaseService):
         self, provider_id: UUID, req: UpdateMCPServerReq, account: Account
     ) -> MCPServer:
         server = self._get_server_or_raise(provider_id, account)
-        payload = self._normalize_payload(req)
+        payload = self._normalize_payload(req, existing=server)
         self._check_duplicate_name(account.id, payload["name"], provider_id=server.id)
 
         tool_catalogs = []
