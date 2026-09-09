@@ -10,22 +10,17 @@ from injector import inject
 from internal.core.agent_v2.entity.agent_memory import (
     AgentMemoryFile,
     AgentMemoryIdentity,
+    AgentMemoryConflict,
+    AGENT_MEMORY_INDEX,
     AgentMemoryPathError,
     AgentMemoryQuotaExceeded,
-    DEFAULT_AGENT_MEMORY_LIMITS,
     normalize_agent_memory_path,
-    validate_agent_memory_content,
-    validate_agent_memory_scope,
 )
 from internal.core.agent_v2.persistence.agent_memory_repository import (
     AgentMemoryRepository,
     AgentMemoryStorageError,
 )
 from internal.exception import FailException, ValidateErrorException
-from internal.core.agent_v2.entity.memory_entry import MemoryChange, MemorySource
-from internal.core.agent_v2.persistence.memory_entry_repository import MemoryEntryRepository
-from psycopg import OperationalError, InterfaceError
-from psycopg_pool import PoolTimeout
 
 
 @inject
@@ -34,29 +29,6 @@ class MemoryFileService:
     """协调记忆身份、领域校验、配额和持久化。"""
 
     agent_memory_repository: AgentMemoryRepository
-
-    def list_entries(self, *, account_id: str | UUID, app_id: str | UUID) -> list:
-        """结构化记忆与文件管理共用已鉴权身份，不接受任意命名空间。"""
-        identity = self._identity(account_id, app_id)
-        try:
-            repository = MemoryEntryRepository(self.agent_memory_repository.store_provider())
-            return repository.list_entries(identity)
-        except (OperationalError, InterfaceError, PoolTimeout) as exc:
-            raise FailException("长期记忆存储暂时不可用") from exc
-
-    def change_entry(
-        self, *, account_id: str | UUID, app_id: str | UUID,
-        change: MemoryChange, evidence: str,
-    ) -> dict:
-        """管理界面的明确操作可以恢复候选、暂停或遗忘记忆。"""
-        identity = self._identity(account_id, app_id)
-        try:
-            repository = MemoryEntryRepository(self.agent_memory_repository.store_provider())
-            return repository.change(identity, change, MemorySource(kind="user", evidence=evidence))
-        except ValueError as exc:
-            raise ValidateErrorException(str(exc)) from exc
-        except (OperationalError, InterfaceError, PoolTimeout) as exc:
-            raise FailException("长期记忆存储暂时不可用") from exc
 
     def list_files(
         self,
@@ -98,32 +70,29 @@ class MemoryFileService:
         app_id: str | UUID,
         path: str,
         content: str,
+        original_path: str | None = None,
+        expected_sha256: str | None = None,
     ) -> AgentMemoryFile:
         """按配额新增或覆盖当前账号、应用的 UTF-8 文本记忆。"""
         identity = self._identity(account_id, app_id)
         try:
             normalized_path = normalize_agent_memory_path(path)
-            size = validate_agent_memory_content(content)
-            rows = self.agent_memory_repository.list_files(identity)
-            existing = next(
-                (row for row in rows if row.path == normalized_path),
-                None,
-            )
-            validate_agent_memory_scope(
-                file_count=len(rows) + (0 if existing is not None else 1),
-                total_bytes=(
-                    sum(row.size_bytes for row in rows)
-                    - (existing.size_bytes if existing is not None else 0)
-                    + size
-                ),
-                limits=DEFAULT_AGENT_MEMORY_LIMITS,
-            )
+            if normalized_path == AGENT_MEMORY_INDEX:
+                raise AgentMemoryPathError("记忆索引由系统生成，不能编辑")
+            self.agent_memory_repository.list_files(identity)
             return self.agent_memory_repository.put_file(
                 identity,
                 path=normalized_path,
                 content=content,
+                original_path=original_path or None,
+                expected_sha256=expected_sha256,
             )
-        except (AgentMemoryPathError, AgentMemoryQuotaExceeded, TypeError) as exc:
+        except (
+            AgentMemoryPathError,
+            AgentMemoryQuotaExceeded,
+            AgentMemoryConflict,
+            TypeError,
+        ) as exc:
             message = (
                 exc.user_message
                 if isinstance(exc, AgentMemoryQuotaExceeded)
@@ -139,6 +108,7 @@ class MemoryFileService:
         account_id: str | UUID,
         app_id: str | UUID,
         path: str,
+        expected_sha256: str | None = None,
     ) -> None:
         """删除当前账号、应用的一个长期记忆文件。"""
         identity = self._identity(account_id, app_id)
@@ -147,8 +117,9 @@ class MemoryFileService:
             deleted = self.agent_memory_repository.delete_file(
                 identity,
                 normalized_path,
+                expected_sha256=expected_sha256,
             )
-        except AgentMemoryPathError as exc:
+        except (AgentMemoryPathError, AgentMemoryConflict) as exc:
             raise ValidateErrorException(str(exc)) from exc
         except AgentMemoryStorageError as exc:
             raise FailException(str(exc)) from exc

@@ -17,13 +17,13 @@ from internal.schema.memory_file_schema import (
     WriteMemoryFileReq,
 )
 from internal.model import App
-from internal.service import AppConfigService, AppService, MemoryFileService, WebAppService
-from pkg.response import success_json, success_message, validate_error_json
-from pydantic import ValidationError
-from internal.core.agent_v2.entity.memory_entry import MemoryChange
-from internal.schema.memory_entry_schema import (
-    ListMemoryEntriesResp, MemoryEntryChangeReq, MemoryEntryChangeResp,
+from internal.service import (
+    AppConfigService,
+    AppService,
+    MemoryFileService,
+    WebAppService,
 )
+from pkg.response import success_json, success_message, validate_error_json
 
 
 @inject
@@ -35,49 +35,6 @@ class MemoryFileHandler:
     web_app_service: WebAppService
     memory_file_service: MemoryFileService
     app_config_service: AppConfigService
-
-    @login_required
-    def list_app_memory_entries(self, app_id: UUID):
-        """创建者只能管理自己应用下的记忆条目。"""
-        app = self.app_service.get_app(app_id, current_user)
-        self._ensure_memory_enabled(app, draft=True)
-        rows = self.memory_file_service.list_entries(account_id=current_user.id, app_id=app.id)
-        return success_json(ListMemoryEntriesResp().dump({"items": rows}))
-
-    @login_required
-    def change_app_memory_entry(self, app_id: UUID):
-        """复用应用所有权与能力开关校验。"""
-        app = self.app_service.get_app(app_id, current_user)
-        self._ensure_memory_enabled(app, draft=True)
-        return self._change_entry(app)
-
-    @login_required
-    def list_web_app_memory_entries(self, token: str):
-        """发布态仍以当前登录账号隔离记忆。"""
-        app = self.web_app_service.get_web_app(token)
-        self._ensure_memory_enabled(app, draft=False)
-        rows = self.memory_file_service.list_entries(account_id=current_user.id, app_id=app.id)
-        return success_json(ListMemoryEntriesResp().dump({"items": rows}))
-
-    @login_required
-    def change_web_app_memory_entry(self, token: str):
-        """发布态用户不能通过请求体指定其他账号。"""
-        app = self.web_app_service.get_web_app(token)
-        self._ensure_memory_enabled(app, draft=False)
-        return self._change_entry(app)
-
-    def _change_entry(self, app: App):
-        """协议校验留在 Handler，领域变更交给 Service。"""
-        try:
-            req = MemoryEntryChangeReq.model_validate(request.get_json(silent=True) or {})
-        except ValidationError as exc:
-            return validate_error_json({"memory": [error["msg"] for error in exc.errors()]})
-        result = self.memory_file_service.change_entry(
-            account_id=current_user.id, app_id=app.id,
-            change=MemoryChange.model_validate(req.model_dump(exclude={"evidence"})),
-            evidence=req.evidence,
-        )
-        return success_json(MemoryEntryChangeResp().dump(result))
 
     @login_required
     def list_app_memory_files(self, app_id: UUID):
@@ -133,6 +90,8 @@ class MemoryFileHandler:
             app_id=app.id,
             path=req.path.data,
             content=req.content.data,
+            original_path=req.original_path.data,
+            expected_sha256=req.expected_sha256.data,
         )
         return success_json(MemoryFileContentResp().dump(row))
 
@@ -148,6 +107,7 @@ class MemoryFileHandler:
             account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
+            expected_sha256=req.expected_sha256.data,
         )
         return success_message("记忆文件已删除")
 
@@ -205,6 +165,8 @@ class MemoryFileHandler:
             app_id=app.id,
             path=req.path.data,
             content=req.content.data,
+            original_path=req.original_path.data,
+            expected_sha256=req.expected_sha256.data,
         )
         return success_json(MemoryFileContentResp().dump(row))
 
@@ -220,6 +182,7 @@ class MemoryFileHandler:
             account_id=current_user.id,
             app_id=app.id,
             path=req.path.data,
+            expected_sha256=req.expected_sha256.data,
         )
         return success_message("记忆文件已删除")
 

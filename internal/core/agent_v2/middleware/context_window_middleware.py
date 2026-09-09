@@ -52,7 +52,7 @@ class ContextWindowMiddleware(AgentMiddleware[AgentState, AgentRunContext, Any])
 def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
     """输出固定分类的计数；未知窗口容量或输出上限保持 null，不猜测模型配置。"""
     system = message_content_to_text(request.system_message.content) if request.system_message else ""
-    memory_blocks = re.findall(r"<长期记忆(?:规则|参考)>.*?</长期记忆(?:规则|参考)>", system, re.DOTALL)
+    memory_blocks = re.findall(r"<agent_memory>.*?</agent_memory>|<memory_guidelines>.*?</memory_guidelines>|<长期记忆(?:规则|参考)>.*?</长期记忆(?:规则|参考)>", system, re.DOTALL)
     memory = "\n".join(memory_blocks)
     for block in memory_blocks:
         system = system.replace(block, "", 1)

@@ -29,6 +29,7 @@ _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
         "execute",
         "search_memory",
         "update_memory",
+        "delete_memory_file",
         "ask_user",
     }
 )

@@ -85,7 +85,7 @@ def build_filesystem_permissions(
     ]
     permissions.append(
         FilesystemPermission(
-            operations=["read"],
+            operations=["read", "write"],
             paths=["/memories", "/memories/**"],
             mode="allow" if memory_enabled else "deny",
         )

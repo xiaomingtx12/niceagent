@@ -6,7 +6,7 @@ from flask import request
 from flask_wtf import FlaskForm
 from marshmallow import Schema, fields, pre_dump
 from wtforms import StringField
-from wtforms.validators import DataRequired, Length, ValidationError
+from wtforms.validators import DataRequired, Length, Optional, Regexp, ValidationError
 
 from internal.core.agent_v2.entity.agent_memory import AgentMemoryFile
 
@@ -24,6 +24,12 @@ class WriteMemoryFileReq(ReadMemoryFileReq):
     """写入长期记忆文本请求。"""
 
     content = StringField("content")
+    original_path = StringField(
+        "original_path", validators=[Optional(), Length(max=512)]
+    )
+    expected_sha256 = StringField(
+        "expected_sha256", validators=[Optional(), Regexp(r"^[a-f0-9]{64}$")]
+    )
 
     def validate_content(self, field: StringField) -> None:
         """允许空文本，但不允许缺少字段或传入非字符串。"""
@@ -35,6 +41,10 @@ class WriteMemoryFileReq(ReadMemoryFileReq):
 class DeleteMemoryFileReq(ReadMemoryFileReq):
     """删除长期记忆文件请求。"""
 
+    expected_sha256 = StringField(
+        "expected_sha256", validators=[Optional(), Regexp(r"^[a-f0-9]{64}$")]
+    )
+
 
 class MemoryFileResp(Schema):
     """长期记忆文件元数据响应。"""
@@ -43,6 +53,8 @@ class MemoryFileResp(Schema):
     size_bytes = fields.Integer(required=True)
     created_at = fields.DateTime(allow_none=True)
     updated_at = fields.DateTime(allow_none=True)
+    content_sha256 = fields.String()
+    preview = fields.String()
 
     @pre_dump
     def project_file(self, row: AgentMemoryFile, **kwargs):
@@ -52,6 +64,8 @@ class MemoryFileResp(Schema):
             "size_bytes": row.size_bytes,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
+            "content_sha256": row.content_sha256,
+            "preview": row.preview,
         }
 
 

@@ -11,7 +11,7 @@ from langgraph.store.base import BaseStore
 
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.backends.memory.agent_memory_backend import AgentMemoryBackend
-from internal.core.agent_v2.entity.agent_memory import AGENT_MEMORY_SOURCE
+from internal.core.agent_v2.entity.agent_memory import AGENT_MEMORY_INDEX
 
 
 @dataclass
@@ -53,7 +53,7 @@ class MemoryContextAssembler:
         # 4.CompositeBackend 负责把 /memories/ 转换为 Store 相对 key。
         return MemoryProjection(
             routes={"/memories/": memory_backend},
-            sources=[AGENT_MEMORY_SOURCE],
+            sources=[AGENT_MEMORY_INDEX],
             store=store,
         )
 

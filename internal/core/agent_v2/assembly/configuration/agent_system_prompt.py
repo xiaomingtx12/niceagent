@@ -44,8 +44,9 @@ def build_app_system_prompt(
         preset_prompt=(preset_prompt or "准确理解用户需求并完成任务。").strip(),
         memory_instruction=(
             "- 长期记忆是当前租户、应用和主体隔离的小体量持久文本；"
-            "稳定偏好、事实与经验通过 search_memory / update_memory 查询和更新；"
-            " /memories/ 中的旧文件仅供读取，不使用文件工具写入记忆。"
+            "用文件工具维护 /memories/preferences/（用户偏好）、"
+            "/memories/background/（背景信息）、/memories/experience/（经验方法）中的 Markdown 文件。"
+            "每个文件一个明确主题，先读取再修改，同一主题避免重复创建。"
             if memory_enabled
             else ""
         ),

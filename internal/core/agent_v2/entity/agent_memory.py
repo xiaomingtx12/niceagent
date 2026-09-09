@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 from pathlib import PurePosixPath
 from uuid import UUID
 
@@ -12,6 +13,12 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 AGENT_MEMORY_NAMESPACE_ROOT = ("mydify", "agent-memory")
 AGENT_MEMORY_VIRTUAL_ROOT = "/memories/"
 AGENT_MEMORY_SOURCE = "/memories/MEMORY.md"
+AGENT_MEMORY_INDEX = "/memories/.index.md"
+AGENT_MEMORY_CATEGORIES = {
+    "preferences": "用户偏好",
+    "background": "背景信息",
+    "experience": "经验方法",
+}
 MAX_AGENT_MEMORY_PATH_LENGTH = 512
 
 
@@ -37,6 +44,10 @@ class AgentMemoryQuotaExceeded(ValueError):
             "total_bytes": "记忆总容量不能超过",
         }
         return f"{labels.get(self.limit, '记忆容量不能超过')} {self.maximum}"
+
+
+class AgentMemoryConflict(ValueError):
+    """文件已变化或目标重名，不能覆盖其他用户操作。"""
 
 
 class AgentMemoryIdentity(BaseModel):
@@ -90,6 +101,16 @@ class AgentMemoryFile(BaseModel):
     def size_bytes(self) -> int:
         """返回 UTF-8 编码后的实际字节数。"""
         return len(self.content.encode("utf-8"))
+
+    @property
+    def content_sha256(self) -> str:
+        """用于自动保存的并发校验，不保存修订历史。"""
+        return hashlib.sha256(self.content.encode("utf-8")).hexdigest()
+
+    @property
+    def preview(self) -> str:
+        """列表只返回简短摘要，正文通过读取接口获取。"""
+        return " ".join(self.content.split())[:100]
 
 
 def normalize_agent_memory_path(path: str) -> str:

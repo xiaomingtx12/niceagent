@@ -31,7 +31,7 @@ from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
 from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
-from internal.core.agent_v2.middleware.structured_memory_middleware import StructuredMemoryMiddleware
+from internal.core.agent_v2.middleware.reloading_memory_middleware import ReloadingMemoryMiddleware
 from internal.core.agent_v2.middleware.context_window_middleware import ContextWindowMiddleware
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.middleware.reloading_skills_middleware import ReloadingSkillsMiddleware
@@ -150,7 +150,7 @@ def _build_platform_middleware(
         ),
     ]
     if runtime.memory_sources:
-        middleware.append(StructuredMemoryMiddleware())
+        middleware.append(ReloadingMemoryMiddleware(backend=runtime.backend, sources=list(runtime.memory_sources)))
     middleware.append(ContextWindowMiddleware())
     return middleware
 
