@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from functools import partial
 from typing import Any
 
 from deepagents.backends import LangSmithSandbox
@@ -16,6 +17,7 @@ from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
 from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
     close_managed_sandbox,
 )
+from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import upload_sandbox_skills
 from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
 from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
 from internal.core.agent_v2.observability.telemetry import (
@@ -132,6 +134,7 @@ def create_backend(
             workspace=workspace,
             skill_files=list(skill_files),
             protect_skills=True,
+            skill_uploader=partial(upload_sandbox_skills, backend, telemetry=telemetry),
         )
         return backend
     except Exception as exc:  # noqa: BLE001

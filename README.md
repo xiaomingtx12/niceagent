@@ -141,6 +141,24 @@ DAYTONA_API_URL=https://app.daytona.io/api
 Daytona 按 Run 创建临时 Sandbox，结束时先把 `/workspace` 增量同步回项目 Workspace，
 再调用 `sandbox.stop()`；它不会跨对话复用。Daytona 依赖 `langchain-daytona==0.0.7`
 以匹配当前 `deepagents==0.6.12`，切换 Provider 只需修改 `.env` 并重启服务。
+
+Daytona 和 LangSmith 均按需初始化：普通问答、Skill 阅读以及 `/workspace` 内的文件
+读写不创建远程 Sandbox，也不上传 Skill。首次调用 `execute` 或访问需要沙箱的其他
+文件路径时，才创建或连接 Sandbox，并同步当前 Workspace 和本次授权的完整 Skill 包。
+启动前的附件和文件写入直接保存到 Workspace；启动后的修改沿用运行结束时增量回写的流程。
+这可以减少首次输出前的等待；需要执行命令时，首次初始化和上传的耗时仍然存在。
+
+远程 Skill 包达到 64 KiB 且 ZIP 压缩能节省至少 10% 时，使用单个压缩包上传并在
+沙箱内解包；小包或压缩收益不足时直接上传。解包仅使用 Python 标准库，完成后删除临时包，
+并沿用 Skill 目录只读保护。Workspace 附件保持原有的字节和版本同步方式。
+
+Daytona 现在按「凭据作用域 + 会话 Sandbox 名称」短时复用：同一会话上一轮成功结束后，
+Sandbox 在 `AGENT_SANDBOX_IDLE_TTL_SECONDS` 内保留，下一轮独占租约并重新清空、播种当前
+Workspace；同一会话的并发 Run 会被拒绝，其他会话互不阻塞。同步失败、初始化失败或会话
+删除会立即淘汰实例；Daytona 的自动停止和删除参数仍作为进程异常退出时的远端兜底。
+池默认最多保留 3 个空闲会话实例，超出时按最近使用顺序淘汰；即使清理定时器延迟执行，
+获取租约时仍会检查 TTL，过期实例不会被再次使用。
+
 Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产入口脚本会在启用沙箱时
 检查该可执行文件并执行一次最小 namespace 烟雾检查。
 
@@ -150,6 +168,11 @@ Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产�
 并将调用次数、Token、重试、耗时、错误类型和平台阶段耗时写入
 `agent_run.observability`。Workbench `run_id` 同时作为 `trace_id`，可通过
 `GET /agent-runs/<run_id>/observability` 查询有权限访问的完整链路。
+
+远程沙箱首次启动的耗时另记为 `sandbox.initialize` 遥测事件（单位毫秒），并输出
+`agent_sandbox_timing` 日志；整轮未使用沙箱时记录 `sandbox.initialization_skipped`。
+`sandbox.skill_upload` 事件和 `agent_sandbox_skill_upload` 日志记录 Skill 文件数量、
+原始字节数、实际上传字节数、上传方式和耗时，便于对比压缩传输效果。
 
 该链路不依赖 LangSmith，默认 `LANGSMITH_TRACING=false`。需要额外使用 LangSmith
 外部追踪时可自行开启；这不会改变平台观测数据的采集和持久化。

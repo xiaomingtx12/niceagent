@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from functools import partial
+from hashlib import sha256
+from math import ceil
 from typing import Any
 
-from daytona import Daytona, DaytonaConfig
+from daytona import Daytona, DaytonaConfig, CreateSandboxFromSnapshotParams
 from daytona.common.errors import DaytonaError
 from deepagents.backends.protocol import (
     EditResult,
@@ -28,9 +31,10 @@ from internal.core.agent_v2.observability.telemetry import (
 from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
     SandboxProviderError,
     close_workspace_safely,
-    ensure_sandbox_workspace,
     seed_sandbox_workspace,
 )
+from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import upload_sandbox_skills
+from internal.core.agent_v2.backends.sandbox.session_sandbox_pool import DAYTONA_SESSION_POOL, SandboxLease
 from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
     close_managed_sandbox,
 )
@@ -117,7 +121,7 @@ class ManagedDaytonaSandbox(DaytonaSandbox):
     """一次 Run 独占的 Daytona Sandbox，结束时同步并停止远程资源。
 
     Daytona Sandbox 不跨对话复用；Workspace/COS 是持久化权威来源，远程
-    Sandbox 只承载当前 Run 的临时执行状态。
+    Sandbox 可在同一会话的相邻 Run 间短暂复用，数据库 Session 始终属于当前 Run。
     """
 
     def __init__(
@@ -134,6 +138,8 @@ class ManagedDaytonaSandbox(DaytonaSandbox):
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._baseline_manifest: WorkspaceManifest | None = None
         self._closed = False
+        self._lease: SandboxLease | None = None
+        self._idle_ttl = 600
 
     def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
         """记录运行开始时的权威 Workspace 清单。"""
@@ -266,26 +272,30 @@ class ManagedDaytonaSandbox(DaytonaSandbox):
         ]
 
     def close(self) -> None:
-        """同步 Workspace 后停止 Daytona Sandbox；清理动作幂等。"""
+        """成功同步后归还会话租约；初始化或同步失败的实例直接淘汰。"""
         if self._closed:
             return
+        reusable = False
         try:
             close_managed_sandbox(
                 backend=self,
                 workspace=self._workspace,
                 baseline_manifest=self._baseline_manifest,
-                close_provider=self._sandbox.stop,
+                close_provider=(lambda: None) if self._lease is not None else self._sandbox.stop,
                 telemetry=self._telemetry,
                 sandbox_id=self.id,
                 provider_name="Daytona",
             )
+            reusable = self._baseline_manifest is not None
         finally:
             self._closed = True
+            if self._lease is not None:
+                DAYTONA_SESSION_POOL.release(self._lease, reusable=reusable, ttl=self._idle_ttl)
 
 
 def _ensure_daytona_auxiliary_directories(backend: ManagedDaytonaSandbox) -> None:
-    """创建 Skill 和临时文件的可写目录。"""
-    result = backend.execute("mkdir -p /skills /subagent_skills /tmp")
+    """一次远程调用创建 Workspace、Skill 和临时文件目录。"""
+    result = backend.execute("mkdir -p /workspace /skills /subagent_skills /tmp")
     if result.exit_code not in (0, None):
         detail = str(getattr(result, "output", "") or "").strip()
         message = "failed to create Daytona Sandbox auxiliary directories"
@@ -302,10 +312,10 @@ def create_backend(
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
 ) -> ManagedDaytonaSandbox:
-    """创建一次性 Daytona Sandbox，并播种 Workspace 与 Skill 文件。"""
-    del sandbox_name
+    """独占取得同一会话的 Sandbox，并从权威存储刷新本轮文件投影。"""
     sandbox: Any | None = None
     backend: ManagedDaytonaSandbox | None = None
+    lease: SandboxLease | None = None
     try:
         if getattr(settings, "AGENT_SANDBOX_SNAPSHOT_ID", None):
             raise SandboxProviderError(
@@ -320,7 +330,39 @@ def create_backend(
                 api_url=api_url or None,
             )
         )
-        sandbox = client.create()
+        ttl = int(getattr(settings, "AGENT_SANDBOX_IDLE_TTL_SECONDS", 600))
+        execute_timeout = int(getattr(settings, "AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS", 1800))
+        credential_scope = sha256(f"{api_url}\0{api_key}".encode()).hexdigest()
+        create_params = CreateSandboxFromSnapshotParams(
+            auto_stop_interval=max(ceil(ttl / 60) + 1, ceil(execute_timeout / 60) + 1),
+            auto_delete_interval=0,
+        )
+
+        def create_remote() -> Any:
+            """向新旧 Daytona SDK 兼容地传递自动回收参数。"""
+            try:
+                return client.create(create_params)
+            except TypeError as exc:
+                if "positional" not in str(exc) and "argument" not in str(exc):
+                    raise
+                return client.create()
+
+        def dispose_remote(resource: Any) -> None:
+            """兼容旧 SDK 的 delete 与仅提供 stop 的测试/代理客户端。"""
+            delete = getattr(client, "delete", None)
+            if callable(delete):
+                delete(resource)
+                return
+            stop = getattr(resource, "stop", None)
+            if callable(stop):
+                stop()
+
+        lease, reused = DAYTONA_SESSION_POOL.acquire(
+            (credential_scope, sandbox_name),
+            create=create_remote,
+            dispose=dispose_remote,
+        )
+        sandbox = lease.sandbox
         backend = ManagedDaytonaSandbox(
             sandbox=sandbox,
             workspace=workspace,
@@ -329,13 +371,28 @@ def create_backend(
             ),
             telemetry=telemetry,
         )
-        ensure_sandbox_workspace(backend)
+        backend._lease = lease
+        backend._idle_ttl = ttl
+        (telemetry or NOOP_AGENT_TELEMETRY).emit(
+            "sandbox.session_acquire", attributes={"provider": "daytona", "reused": reused},
+        )
+        if reused:
+            result = backend.execute(
+                "chmod -R u+w /skills /subagent_skills && "
+                "rm -rf -- /workspace /skills /subagent_skills /tmp"
+            )
+            if result.exit_code != 0:
+                raise SandboxProviderError("failed to reset reused Daytona Sandbox")
         _ensure_daytona_auxiliary_directories(backend)
         seed_sandbox_workspace(
             backend,
             workspace=workspace,
             skill_files=skill_files,
             protect_skills=True,
+            skill_uploader=partial(
+                upload_sandbox_skills, backend,
+                projection_root=_DAYTONA_HOME, telemetry=telemetry,
+            ),
         )
         return backend
     except Exception as exc:  # noqa: BLE001
@@ -345,14 +402,8 @@ def create_backend(
             except Exception:
                 pass
         elif sandbox is not None:
-            try:
-                sandbox.stop()
-            except Exception:
-                telemetry_obj = telemetry or NOOP_AGENT_TELEMETRY
-                telemetry_obj.emit(
-                    "sandbox.stop_failed",
-                    attributes={"sandbox_id": getattr(sandbox, "id", None)},
-                )
+            if lease is not None:
+                DAYTONA_SESSION_POOL.release(lease, reusable=False, ttl=0)
             close_workspace_safely(
                 workspace,
                 telemetry=telemetry,
@@ -374,6 +425,11 @@ def create_backend(
                 message = f"{message}: {detail}"
             raise SandboxProviderError(message) from exc
         raise SandboxProviderError("failed to create Daytona Sandbox") from exc
+
+
+def delete_sandbox(name: str) -> None:
+    """由会话删除入口撤销该会话的全部凭据作用域租约。"""
+    DAYTONA_SESSION_POOL.invalidate(name)
 
 
 def _is_daytona_quota_error(exc: DaytonaError, detail: str) -> bool:

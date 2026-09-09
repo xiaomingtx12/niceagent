@@ -14,6 +14,7 @@ from typing import Any
 from deepagents.backends.protocol import SandboxBackendProtocol
 
 from internal.core.agent_v2.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.backends.sandbox.lazy_sandbox_backend import LazySandboxBackend
 from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
     SandboxProviderError,
     close_workspace_safely,
@@ -35,7 +36,7 @@ def build_sandbox_backend(
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
 ) -> SandboxBackendProtocol | None:
-    """按配置选择一个 Provider，并交给其实现完成初始化。
+    """按配置选择 Provider，远程资源延迟到首次需要 Sandbox 时初始化。
 
     入口只处理规范化、禁用值和 Provider 分发。每个 Provider 的可选依赖、
     Workspace 播种和失败清理都隐藏在对应模块中。
@@ -51,23 +52,36 @@ def build_sandbox_backend(
         raise SandboxProviderError(
             f"unsupported AGENT_SANDBOX_PROVIDER: {provider}"
         )
-    # Provider owns cleanup after it accepts the Workspace. Keeping that
-    # ownership in one place prevents double-closing its database Session.
-    creator = _load_provider_creator(canonical_provider, module_path)
-    try:
-        return creator(
-            settings=settings,
-            workspace=workspace,
-            sandbox_name=sandbox_name,
-            skill_files=list(skill_files),
-            telemetry=telemetry,
+    files = list(skill_files)
+
+    def create() -> SandboxBackendProtocol:
+        """SDK 加载前由工厂持有 Workspace，交给 Provider 后沿用其失败清理。"""
+        try:
+            creator = _load_provider_creator(canonical_provider, module_path)
+        except Exception:
+            close_workspace_safely(workspace, telemetry=telemetry)
+            raise
+        try:
+            return creator(
+                settings=settings,
+                workspace=workspace,
+                sandbox_name=sandbox_name,
+                skill_files=files,
+                telemetry=telemetry,
+            )
+        except SandboxProviderError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SandboxProviderError(
+                f"failed to initialize {canonical_provider} Sandbox"
+            ) from exc
+
+    if canonical_provider in {"daytona", "langsmith"}:
+        return LazySandboxBackend(
+            creator=create, workspace=workspace, sandbox_name=sandbox_name,
+            provider=canonical_provider, telemetry=telemetry,
         )
-    except SandboxProviderError:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        raise SandboxProviderError(
-            f"failed to initialize {canonical_provider} Sandbox"
-        ) from exc
+    return create()
 
 
 def _load_provider_creator(
@@ -101,7 +115,7 @@ def delete_agent_sandbox(
 ) -> None:
     """清理会话持有的远程资源；保持与正常运行结束时关闭 Backend 相区分。"""
     provider = _normalize_provider(settings)
-    if provider != "langsmith":
+    if provider not in {"langsmith", "daytona"}:
         return
     name = build_stable_sandbox_name(
         account_id=account_id,

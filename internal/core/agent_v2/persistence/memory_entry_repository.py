@@ -97,6 +97,14 @@ class MemoryEntryRepository:
             if change.action == "correct":
                 if not normalized_memory_text(change.content):
                     raise ValueError("修正记忆必须提供内容")
+                if source.kind == "agent" and entry.status == "active":
+                    raise ValueError("修正已生效记忆需要本轮用户明确纠正，不能用候选经验覆盖")
+                if any(
+                    other.id != entry.id and normalized_memory_text(other.scope) == normalized_memory_text(entry.scope)
+                    and normalized_memory_text(other.content) == normalized_memory_text(change.content)
+                    for other in entries
+                ):
+                    raise MemoryConflict("相同内容已有记忆，请更新原条目，避免重复")
                 entry.content = change.content
                 entry.status = "candidate" if source.kind == "agent" else "active"
             elif change.action == "restore":
@@ -140,5 +148,6 @@ class MemoryEntryRepository:
         connection = self.store.conn
         manager = connection.connection() if isinstance(connection, ConnectionPool) else nullcontext(connection)
         with manager as conn, conn.transaction():
+            conn.execute("SELECT set_config('lock_timeout', '5000', true)")
             conn.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
             yield PostgresStore(conn)

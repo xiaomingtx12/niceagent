@@ -32,6 +32,14 @@ class MemorySource(BaseModel):
     message_id: str = ""
     operation_id: str = ""
 
+    @field_validator("evidence")
+    @classmethod
+    def validate_evidence(cls, value: str) -> str:
+        """来源引用也属于持久内容，不能成为绕过凭据检查的通道。"""
+        if not value.strip():
+            raise ValueError("保存依据不能为空")
+        return MemoryChange.reject_credentials(value.strip())
+
 
 class MemoryRevision(BaseModel):
     """每次变更保留完整快照，撤销仍产生一个新版本。"""

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Any
@@ -68,6 +68,7 @@ def seed_sandbox_workspace(
     workspace: WorkspaceBackend,
     skill_files: list[tuple[str, bytes]],
     protect_skills: bool = False,
+    skill_uploader: Callable[[list[tuple[str, bytes]]], None] | None = None,
 ) -> None:
     """把权威 Workspace 和 Skill 文件播种到一个新 Sandbox。"""
     baseline = sync_workspace_into_sandbox(
@@ -75,8 +76,11 @@ def seed_sandbox_workspace(
         workspace=workspace,
     )
     if skill_files:
-        skill_responses = backend.upload_files(skill_files)
-        raise_for_file_errors(skill_responses, operation="upload Sandbox Skill files")
+        if skill_uploader is not None:
+            skill_uploader(skill_files)
+        else:
+            skill_responses = backend.upload_files(skill_files)
+            raise_for_file_errors(skill_responses, operation="upload Sandbox Skill files")
         if protect_skills:
             make_skill_projection_read_only(backend)
     backend.set_workspace_baseline(baseline)
