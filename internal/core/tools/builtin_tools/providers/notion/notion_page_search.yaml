@@ -1,0 +1,10 @@
+name: notion_page_search
+label: 搜索知识页面
+description: 按标题搜索授权的客户资料、团队知识和项目页面。
+params:
+- name: integration_token
+  label: Integration Token
+  type: string
+  required: true
+  default: ''
+  secret: true

@@ -1,0 +1,16 @@
+name: notion_page_append
+label: 追加跟进记录
+description: 向指定页面追加项目进展、客户跟进或会议记录。
+params:
+- name: integration_token
+  label: Integration Token
+  type: string
+  required: true
+  default: ''
+  secret: true
+- name: parent_page_id
+  label: 目标页面 ID
+  type: string
+  required: true
+  default: ''
+  secret: false

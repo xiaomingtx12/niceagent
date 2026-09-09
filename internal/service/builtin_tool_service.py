@@ -31,6 +31,7 @@ class BuiltinToolService:
             provider_entity = provider.provider_entity
             builtin_tool = {
                 **provider_entity.model_dump(exclude=["icon"]),
+                **self.get_provider_configuration(provider_entity),
                 "tools": [],
             }
 
@@ -68,6 +69,7 @@ class BuiltinToolService:
 
         builtin_tool = {
             "provider": {**provider_entity.model_dump(exclude=["icon", "created_at"])},
+            **self.get_provider_configuration(provider_entity),
             **tool_entity.model_dump(),
             "created_at": provider_entity.created_at,
             "inputs": self.get_tool_inputs(tool),
@@ -128,14 +130,35 @@ class BuiltinToolService:
     def get_tool_inputs(cls, tool) -> list:
         """根据传入的工具获取inputs信息"""
         inputs = []
-        if hasattr(tool, "args_schema") and issubclass(tool.args_schema, BaseModel):
+        schema = getattr(tool, "args_schema", None)
+        if isinstance(schema, type) and issubclass(schema, BaseModel):
+            properties = schema.model_json_schema().get("properties", {})
             for field_name, model_field in tool.args_schema.model_fields.items():
+                definition = properties.get(field_name, {})
+                input_type = definition.get("type") or next(
+                    (item.get("type") for item in definition.get("anyOf", []) if item.get("type") != "null"),
+                    "object",
+                )
                 inputs.append(
                     {
                         "name": field_name,
                         "description": model_field.description or "",
                         "required": model_field.is_required(),
-                        "type": str(model_field.annotation),
+                        "type": {"string": "str", "integer": "int", "number": "float",
+                                 "boolean": "bool", "array": "list", "object": "dict"}.get(input_type, input_type),
                     }
                 )
         return inputs
+
+    @staticmethod
+    def get_provider_configuration(provider) -> dict[str, Any]:
+        """只检查部署配置是否存在，不探测网络或返回密钥值。"""
+        missing = [key for key in provider.required_env if not os.getenv(key, "").strip()]
+        if provider.requires_app_configuration:
+            return {"configuration_status": "configure_in_app", "missing_config": []}
+        return {
+            "configuration_status": "needs_configuration" if missing else (
+                "configured" if provider.required_env else "no_configuration"
+            ),
+            "missing_config": missing,
+        }

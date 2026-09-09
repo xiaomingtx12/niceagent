@@ -1,0 +1,4 @@
+name: feed_read
+label: RSS 与 Atom 订阅读取
+description: 读取产品更新、新闻和行业动态，支持关键词过滤。
+params: []

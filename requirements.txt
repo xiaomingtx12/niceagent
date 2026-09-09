@@ -81,12 +81,15 @@ python-docx==1.1.2
 # HTML/XML处理依赖
 lxml==5.3.0
 beautifulsoup4==4.12.3
+defusedxml==0.7.1
 # 图像处理依赖（用于PDF中的图像提取）
 pillow>=11.1.0
 # 文件类型检测
 python-magic==0.4.27
 
 # 工具库
+ddgs==9.10.0
+tzdata>=2025.1
 aiofiles>=24.1.0
 injector==0.23.0
 jieba==0.42.1

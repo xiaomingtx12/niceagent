@@ -20,6 +20,7 @@ class ToolParam(BaseModel):
     label: str  # 参数的展示标签
     type: ToolParamType  # 参数的类型
     required: bool = False  # 是否必填
+    secret: bool = False  # 编排界面使用密码输入，不作为模型调用参数
     default: Optional[Any] = None  # 默认值
     min: Optional[float] = None  # 最小值
     max: Optional[float] = None  # 最大值

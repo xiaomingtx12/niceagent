@@ -1,0 +1,16 @@
+name: notion_page_create
+label: 创建业务文档
+description: 在指定父页面下创建会议纪要、客户报告或项目文档。
+params:
+- name: integration_token
+  label: Integration Token
+  type: string
+  required: true
+  default: ''
+  secret: true
+- name: parent_page_id
+  label: 目标页面 ID
+  type: string
+  required: true
+  default: ''
+  secret: false

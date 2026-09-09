@@ -1,4 +1,16 @@
 name: duckduckgo_search
 label: DuckDuckGo搜索
 description: 一个注重隐私的搜索引擎。
-params: [ ]
+params:
+- name: max_results
+  label: 最多返回条数
+  type: select
+  required: false
+  default: 5
+  options:
+  - value: 3
+    label: 3 条
+  - value: 5
+    label: 5 条
+  - value: 10
+    label: 10 条

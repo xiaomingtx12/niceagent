@@ -1,64 +1,119 @@
+- name: feishu
+  label: 飞书多维表格
+  description: 面向客户跟进、销售线索、项目和工单的表结构查询、记录筛选与实际读写。
+  icon: icon.svg
+  background: '#eaf6f1'
+  category: tool
+  created_at: 1788998400
+  requires_app_configuration: true
+  setup_hint: 在应用或工作流的工具设置中填写自建应用 App ID、App Secret、app_token 与 table_id。发布应用并授予多维表格相应读写权限，将应用添加为目标表格协作者；只读与写入工具可分别绑定。
+- name: notion
+  label: Notion 工作空间
+  description: 检索团队知识、读取页面正文、创建业务文档和追加客户或项目跟进记录。
+  icon: icon.svg
+  background: '#eaf6f1'
+  category: tool
+  created_at: 1788998400
+  requires_app_configuration: true
+  setup_hint: 在应用或工作流的工具设置中填写 Integration Token，将目标页面连接到该集成。读取需 Read content 权限，创建或追加需 Insert content 权限，并配置目标页面 ID。正文按纯文本段落保存。
+- name: web
+  label: 网页与资料读取
+  description: 读取网页正文、RSS/Atom 更新和公开 PDF 报告，保留来源链接与分页信息。
+  icon: icon.svg
+  background: '#eaf6f1'
+  category: search
+  created_at: 1788998400
+  setup_hint: 无需密钥，仅访问公网标准 HTTP/HTTPS 地址。网页不执行脚本，PDF 扫描件需要文档 OCR 流程。
 - name: searx
   label: Searx搜索
   description: Searx搜索服务提供商，涵盖了Searx搜索等工具。
   icon: icon.svg
-  background: "#E5E7EB"
+  background: '#E5E7EB'
   category: search
   created_at: 1740132000
   available: true
+  required_env:
+  - SEARX_SEARCH_URL
+  network_required: true
+  setup_hint: 由管理员配置 SearxNG 地址并启用 JSON 搜索；搜索引擎可达性由部署网络决定。
 - name: google
   label: Google
   description: 谷歌服务提供商，涵盖了谷歌搜索等工具。
   icon: icon.svg
-  background: "#E5E7EB"
+  background: '#E5E7EB'
   category: search
   created_at: 1740132000
   available: false
+  required_env:
+  - SERPER_API_KEY
+  network_required: true
+  setup_hint: 由管理员配置 Serper API Key，需有服务配额。
 - name: time
   label: 时间
-  description: 一个用于获取当前时间的工具
+  description: 查询指定时区的当前日期、时间与 UTC 偏移。
   icon: icon.svg
-  background: "#E5E7EB"
+  background: '#E5E7EB'
   category: tool
   created_at: 1740132000
   available: true
+  required_env: []
+  network_required: false
+  setup_hint: 无需外部服务，支持 IANA 时区，默认 Asia/Shanghai。
 - name: duckduckgo
   label: DuckDuckGo
   description: 一个注重隐私的搜索引擎。
   icon: icon.svg
-  background: "#FFFFFF"
+  background: '#FFFFFF'
   category: search
   created_at: 1740132000
   available: true
+  required_env: []
+  network_required: true
+  setup_hint: 无需 API Key；需要部署网络能够访问 DuckDuckGo，可能受限流影响。
 - name: dalle
   label: DALLE
   description: DALLE是一个文生图工具。
   icon: icon.png
-  background: "#E5E7EB"
+  background: '#E5E7EB'
   category: image
   created_at: 1740132000
   available: false
+  required_env:
+  - OPENAI_API_KEY
+  network_required: true
+  setup_hint: 兼容既有 DALL-E 3 应用；需有效 API Key、模型权限和可达网络。
 - name: tongyi
   label: 阿里云通义千问
   description: 阿里云通义千问是一个AI绘画创作大模型，支持文生图功能。
   icon: icon.svg
-  background: "#FF6A00"
+  background: '#FF6A00'
   category: image
   created_at: 1740132000
   available: true
+  required_env:
+  - DASHSCOPE_API_KEY
+  network_required: true
+  setup_hint: 由管理员配置 DashScope API Key，需开通对应图像模型。
 - name: gaode
   label: 高德工具包
-  description: 内置了高德天气预报和ip查询功能。
+  description: 查询中国城市天气预报，支持城市名称和行政区编码。
   icon: icon.png
-  background: "#E5E7EB"
+  background: '#E5E7EB'
   category: tool
   created_at: 1740132000
   available: false
+  required_env:
+  - GAODE_API_KEY
+  network_required: true
+  setup_hint: 由管理员配置高德 Web 服务 Key；支持城市天气预报。
 - name: wikipedia
   label: 维基百科
   description: 维基百科是一个由全世界的志愿者创建和编辑的免费在线百科全书。
   icon: icon.svg
-  background: "#FFFFFF"
+  background: '#FFFFFF'
   category: other
   created_at: 1740132000
   available: false
+  required_env: []
+  network_required: true
+  setup_hint: 无需 API Key；需要部署网络能够访问维基百科。

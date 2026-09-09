@@ -27,13 +27,35 @@ class GetBuiltinAppsResp(Schema):
     icon = fields.String(dump_default="")
     description = fields.String(dump_default="")
     model_config = fields.Dict(dump_default={})
+    tags = fields.List(fields.String(), dump_default=[])
+    requirements = fields.List(fields.String(), dump_default=[])
+    skills = fields.List(fields.Dict(), dump_default=[])
+    subagents = fields.List(fields.Dict(), dump_default=[])
+    tools = fields.List(fields.Dict(), dump_default=[])
+    opening_statement = fields.String(dump_default="")
+    opening_questions = fields.List(fields.String(), dump_default=[])
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
     def process_data(self, data: BuiltinAppEntity, **kwargs):
+        """模板预览只返回能力引用，不展示失效的固定模型或运行凭据。"""
         return {
             **data.model_dump(
-                include={"id", "category", "name", "icon", "description", "created_at"}
+                include={
+                    "id",
+                    "category",
+                    "name",
+                    "icon",
+                    "description",
+                    "created_at",
+                    "tags",
+                    "requirements",
+                    "skills",
+                    "subagents",
+                    "tools",
+                    "opening_statement",
+                    "opening_questions",
+                }
             ),
             "model_config": {},
         }
