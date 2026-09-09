@@ -1,12 +1,12 @@
 import os.path
-from typing import Any, Optional, Type
+from typing import Any, Optional
 
 import yaml
 from injector import inject, singleton
 from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from internal.exception import NotFoundException
-from .entities.model_entity import BaseLanguageModel, ModelEntity
+from .entities.model_entity import ModelEntity
 from .entities.provider_entity import Provider, ProviderEntity
 from .model_discovery import ModelDiscoveryClient
 
@@ -56,20 +56,6 @@ class LanguageModelManager(BaseModel):
         """获取所有提供者列表信息"""
         return list(self.provider_map.values())
 
-    def get_model_entities(
-        self,
-        provider_name: str,
-        *,
-        discovered_models: list[ModelEntity] | None = None,
-    ) -> list[ModelEntity]:
-        """读取调用方提供的动态发现模型快照。"""
-        self.get_provider(provider_name)
-        return [
-            model
-            for model in (discovered_models or [])
-            if model.is_dynamic
-        ]
-
     def discover_models(
         self,
         provider_name: str,
@@ -84,42 +70,4 @@ class LanguageModelManager(BaseModel):
             api_key,
             base_url=base_url,
             force_refresh=True,
-        )
-
-    def get_model_entity(
-        self,
-        provider_name: str,
-        model_name: str,
-        *,
-        discovered_models: list[ModelEntity] | None = None,
-    ) -> ModelEntity:
-        """按供应商和模型名读取动态发现模型实体。"""
-        for model in self.get_model_entities(
-            provider_name,
-            discovered_models=discovered_models,
-        ):
-            if model.model_name == model_name:
-                return model
-        raise NotFoundException("该模型实体不存在，请核实后重试")
-
-    def get_model_class_by_provider_and_model(
-        self,
-        provider_name: str,
-        model_name: str,
-        discovered_models: list[ModelEntity] | None = None,
-    ) -> Optional[Type[BaseLanguageModel]]:
-        """根据传递的提供者名字+模型名字获取模型类"""
-        # 1.根据名字获取提供者信息
-        provider = self.get_provider(provider_name)
-
-        # 2.在提供者下获取该模型实体
-        model_entity = self.get_model_entity(
-            provider_name,
-            model_name,
-            discovered_models=discovered_models,
-        )
-
-        return provider.get_model_class(
-            model_entity.model_type,
-            model_entity=model_entity,
         )

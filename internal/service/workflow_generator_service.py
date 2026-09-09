@@ -476,7 +476,7 @@ class WorkflowGeneratorService(BaseService):
                     "model_config": {
                         "provider": "",
                         "model": "",
-                        "parameters": {"temperature": 0.7, "max_tokens": 2000},
+                        "parameters": {},
                     },
                     "inputs": [
                         {

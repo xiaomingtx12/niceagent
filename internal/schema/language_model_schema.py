@@ -2,7 +2,7 @@ from urllib.parse import urlparse
 
 from flask_wtf import FlaskForm
 from wtforms import StringField, ValidationError
-from wtforms.validators import DataRequired, Length, Optional
+from wtforms.validators import DataRequired, Length, Optional, AnyOf, UUID
 
 from internal.core.language_model.entities.model_entity import ModelType
 from .schema import JsonString
@@ -30,6 +30,8 @@ class GetLanguageModelsReq(FlaskForm):
 class DiscoverLanguageModelsReq(FlaskForm):
     """第三方语言模型发现请求。"""
 
+    provider_connection_id = StringField("provider_connection_id", validators=[JsonString("连接ID必须是字符串"), Optional(), UUID()])
+    api_format = StringField("api_format", default="chat_completions", validators=[JsonString("接口格式必须是字符串"), AnyOf(["chat_completions", "responses"])])
     provider_name = StringField(
         "provider_name",
         validators=[
@@ -42,7 +44,6 @@ class DiscoverLanguageModelsReq(FlaskForm):
         "api_key",
         validators=[
             JsonString("API密钥必须是字符串"),
-            DataRequired("API密钥不能为空"),
             Length(max=500),
         ],
     )

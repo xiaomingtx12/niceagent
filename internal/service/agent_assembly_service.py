@@ -25,6 +25,7 @@ from internal.core.agent_v2 import (
     SubAgentRuntimeBinding,
 )
 from internal.core.language_model.entities.model_entity import BaseLanguageModel
+from internal.core.language_model.parameters import canonicalize_parameters
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
@@ -47,7 +48,9 @@ from internal.model import Account, App
 from internal.repository import WorkspaceFileStore
 from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
 from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
-from internal.schema.agent_runtime_schema import AgentInvocation
+from internal.schema.agent_runtime_schema import AgentInvocation, AgentInvocationContext, WorkbenchModelSettingsResp, WorkbenchModelChoiceResp
+from internal.entity.agent_workbench_entity import WorkbenchModelSelection
+from internal.core.language_model.entities.model_entity import ModelType
 from internal.schema.agent_attachment_schema import dump_agent_attachments
 from internal.schema.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
@@ -195,12 +198,19 @@ class AgentAssemblyService:
             account = self.db.session.get(Account, req.account_id)
             if account is None:
                 raise NotFoundException("账号不存在")
-            model, tools = self.assistant_agent_service.build_capabilities(account)
+            override = self.resolve_workbench_model(req, req.model_selection) if req.model_selection else None
+            model, tools = self.assistant_agent_service.build_capabilities(
+                account, reasoning_effort=req.reasoning_effort,
+                model_config_override=override.model_dump(mode="json") if override else None,
+            )
         else:
             if app_config.model_config_data is None:
                 raise ValidateErrorException("Agent 运行配置缺少模型")
             model = self.language_model_service.load_language_model(
-                app_config.model_config_data,
+                self._with_reasoning_override(
+                    self.resolve_workbench_model(req, req.model_selection) if req.model_selection else app_config.model_config_data,
+                    req.reasoning_effort,
+                ),
                 account_id=account_id,
             )
             tools = []
@@ -237,9 +247,99 @@ class AgentAssemblyService:
             subagent_bindings=bindings,
         )
 
+    def resolve_workbench_model(self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None = None) -> AppModelConfigReq | None:
+        """创建者可覆盖自己的已激活模型；公开入口不能借此选择账号中的其他连接。"""
+        if selection is not None and context.invoke_from not in {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT}:
+            raise ValidateErrorException("当前入口不允许切换模型")
+        if context.invoke_from is InvokeFrom.ASSISTANT_AGENT:
+            config = AppModelConfigReq.model_validate(self.language_model_service.get_default_model_config(context.account_id))
+            account_id = context.account_id
+        else:
+            _, _, account_id, app_config = self._load_app_configuration(context)
+            config = app_config.model_config_data
+        if selection is None:
+            return config
+        if account_id != context.account_id or context.created_by != account_id:
+            raise ValidateErrorException("只能选择当前账号的模型")
+        model = self.language_model_service.get_enabled_model_entity(
+            selection.provider, selection.model, account_id,
+            provider_connection_id=str(selection.provider_connection_id),
+        )
+        if model is None or model.model_type != ModelType.CHAT:
+            raise ValidateErrorException("所选模型未激活或不是对话模型")
+        if config and config.provider == selection.provider and config.model == selection.model and (not config.provider_connection_id or str(config.provider_connection_id) == str(selection.provider_connection_id)):
+            return config
+        return AppModelConfigReq(**selection.model_dump(), parameters={
+            parameter.name: parameter.default for parameter in model.parameters
+            if parameter.required and parameter.default is not None
+        })
+
+    def get_workbench_model_settings(self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None = None) -> WorkbenchModelSettingsResp:
+        """按已授权入口读取草稿或发布模型，只返回可公开的任务选项。"""
+        config = self.resolve_workbench_model(context, selection)
+        account_id = context.account_id
+        if config is None:
+            return WorkbenchModelSettingsResp()
+        model = self.language_model_service.get_enabled_model_entity(
+            config.provider, config.model, account_id,
+            provider_connection_id=str(config.provider_connection_id) if config.provider_connection_id else None,
+        )
+        if model is None:
+            return WorkbenchModelSettingsResp()
+        parameter = next((item for item in model.parameters if item.name == "reasoning_effort"), None)
+        parameters = canonicalize_parameters(config.parameters)
+        default = parameters.get("reasoning_effort")
+        if default is None and parameter is not None:
+            default = parameter.default
+        return WorkbenchModelSettingsResp(
+            model=config.model,
+            provider=config.provider,
+            selected_model=selection or (WorkbenchModelSelection(
+                provider=config.provider, model=config.model,
+                provider_connection_id=config.provider_connection_id or model.attributes.get("provider_api_key_id"),
+            ) if context.invoke_from in {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT}
+                and context.created_by == account_id and (config.provider_connection_id or model.attributes.get("provider_api_key_id")) else None),
+            available_models=self._workbench_model_choices(context),
+            reasoning_levels=[option.value for option in parameter.options] if parameter else [],
+            default_reasoning_effort=default,
+        )
+
+    def _workbench_model_choices(self, context: AgentInvocationContext) -> list[WorkbenchModelChoiceResp]:
+        """目录按可信账号和创建者身份过滤，不向 WebApp 或开放 API 暴露。"""
+        if context.invoke_from not in {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT} or context.created_by != context.account_id:
+            return []
+        choices = []
+        for group in self.language_model_service.get_language_models(context.account_id, {ModelType.CHAT}):
+            for model in group["models"]:
+                parameter = next((p for p in model.get("parameters", []) if p["name"] == "reasoning_effort"), None)
+                choices.append(WorkbenchModelChoiceResp(
+                    provider=group["provider_name"], model=model["model_name"],
+                    provider_connection_id=group["connection_id"], label=model.get("label") or model["model_name"],
+                    connection_name=group["connection_name"],
+                    reasoning_levels=[option["value"] for option in parameter.get("options", [])] if parameter else [],
+                    default_reasoning_effort=parameter.get("default") if parameter else None,
+                ))
+        return choices
+
+    def validate_workbench_reasoning(self, context: AgentInvocationContext, effort: str | None, selection: WorkbenchModelSelection | None = None) -> None:
+        """任务覆盖只允许当前模型明确声明的等级，在创建消息前拒绝无效选择。"""
+        if selection is not None:
+            self.resolve_workbench_model(context, selection)
+        if effort is not None and effort not in self.get_workbench_model_settings(context, selection).reasoning_levels:
+            raise ValidateErrorException("当前模型不支持所选思考强度，请重新选择")
+
+    @staticmethod
+    def _with_reasoning_override(config: AppModelConfigReq, effort: str | None) -> AppModelConfigReq:
+        """复制调用参数覆盖单个字段，避免改写草稿、发布配置及旧字段别名冲突。"""
+        if effort is None:
+            return config
+        parameters = {key: value for key, value in config.parameters.items()
+                      if key not in {"reasoning_effort", "thinking_level", "thinking"}}
+        return config.model_copy(update={"parameters": {**parameters, "reasoning_effort": effort}})
+
     def _load_app_configuration(
         self,
-        req: AgentInvocation,
+        req: AgentInvocationContext,
     ) -> tuple[str, str, UUID, AgentAppConfigReq]:
         """在装配时读取唯一应用配置；内置辅助 Agent 使用代码内定义。"""
         # 1.Assistant Agent 不依赖 App 配置，直接返回内置定义。
@@ -537,18 +637,17 @@ class AgentAssemblyService:
     ) -> BaseChatModel | None:
         """解析自定义 SubAgent 的可选模型覆盖。"""
         # 1.没有模型覆盖时，让 DeepAgents 继承主 Agent 模型。
-        model_ref = subagent.model
-        if not model_ref:
+        if subagent.model is None:
             return None
 
-        # 2.解析 provider/model 引用并加载模型实例。
-        provider_name, model_name = model_ref.split("/", 1)
+        # 2.使用领域层规范化后的模型与连接，租户授权由模型服务再次校验。
         return cast(
             BaseChatModel,
             self.language_model_service.load_language_model(
                 AppModelConfigReq(
-                    provider=provider_name,
-                    model=model_name,
+                    provider=cast(str, subagent.model_provider),
+                    model=subagent.model,
+                    provider_connection_id=subagent.model_connection_id,
                     parameters={},
                 ),
                 account_id=account_id,

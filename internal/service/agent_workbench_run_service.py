@@ -57,6 +57,7 @@ class AgentWorkbenchRunService:
             created_at=datetime.now(UTC).replace(tzinfo=None),
             executor_id=run.executor_id,
             heartbeat_at=datetime.now(UTC).replace(tzinfo=None),
+            state_snapshot={"_interaction": {"invocation": run.spec.model_dump(mode="json"), "submissions": []}},
         )
         # 2.交给调用方事务 flush，保证后续事件可以按 Run 主键写入。
         self.db.session.add(row)
@@ -201,7 +202,7 @@ class AgentWorkbenchRunService:
             previous_sequence = int(row.last_event_sequence or 0)
             row.last_event_sequence = max(previous_sequence, latest_sequence)
             if latest_snapshot is not None and snapshot_sequence >= previous_sequence:
-                row.state_snapshot = latest_snapshot
+                row.state_snapshot = {**(row.state_snapshot or {}), **latest_snapshot}
             if persisted_payloads:
                 statement = pg_insert(AgentRunEvent).values(
                     list(persisted_payloads.values())

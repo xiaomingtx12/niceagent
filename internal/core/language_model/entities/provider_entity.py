@@ -1,4 +1,6 @@
 from typing import Optional, Type
+from enum import Enum
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field
 
@@ -8,6 +10,13 @@ from .model_entity import (
     ModelEntity,
     ModelType,
 )
+
+
+class ApiFormat(str, Enum):
+    """连接协议决定模型请求路径和参数映射。"""
+
+    CHAT_COMPLETIONS = "chat_completions"
+    RESPONSES = "responses"
 
 
 class ModelDiscoveryConfig(BaseModel):
@@ -23,8 +32,6 @@ class ModelDiscoveryConfig(BaseModel):
     api_key_header: str = "Authorization"
     api_key_prefix: str = "Bearer "
     model_type: ModelType = ModelType.CHAT
-    default_context_window: int = Field(default=0, ge=0)
-    default_max_output_tokens: int = Field(default=0, ge=0)
 
 
 class ProviderEntity(BaseModel):
@@ -35,12 +42,24 @@ class ProviderEntity(BaseModel):
     description: str = ""
     icon: str = ""
     background: str = ""
-    model_provider: str = "openai"
     base_url: str = ""
+    api_format: ApiFormat = ApiFormat.CHAT_COMPLETIONS
     model_discovery: ModelDiscoveryConfig = Field(
         default_factory=ModelDiscoveryConfig
     )
     supported_model_types: list[ModelType] = Field(default_factory=list)
+
+    def resolve_connection(self, base_url: str = "", api_format: str = "chat_completions") -> tuple[str, ApiFormat]:
+        """内置服务固定协议与端点，自定义连接必须显式提供服务根地址。"""
+        if self.name != "custom":
+            return self.base_url, self.api_format
+        url = base_url.strip().rstrip("/")
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.query or parsed.fragment or parsed.username or parsed.password:
+            raise ValueError("自定义端点必须是有效的 HTTP(S) 服务根地址")
+        if parsed.path.endswith(("/chat/completions", "/responses", "/models")):
+            raise ValueError("请填写服务根地址，不要包含 /chat/completions、/responses 或 /models")
+        return url, ApiFormat(api_format)
 
 
 class Provider(BaseModel):

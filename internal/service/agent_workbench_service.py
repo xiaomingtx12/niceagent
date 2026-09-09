@@ -22,11 +22,12 @@ from internal.entity import (
     WorkbenchRunInput,
     WorkbenchRunStatus,
 )
-from internal.exception import NotFoundException
+from internal.exception import NotFoundException, ValidateErrorException
 from internal.extension.logging_extension import logger
 from internal.model import Account, AgentRun, Conversation
 from internal.schema.agent_attachment_schema import dump_agent_attachments
-from internal.schema.agent_runtime_schema import AgentInvocation, AgentInvocationContext
+from internal.schema.agent_runtime_schema import AgentInvocation, AgentInvocationContext, WorkbenchModelSettingsResp
+from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.schema.agent_workbench_schema import (
     WorkbenchCancelResp,
     WorkbenchCommandErrorResp,
@@ -163,6 +164,21 @@ class AgentWorkbenchService:
             by_id.update({message["id"]: message for message in pending_messages})
             values["messages"] = list(by_id.values())
         values["message_page"] = message_page.model_dump(mode="json")
+        saved_invocation = source_snapshot.get("_interaction", {}).get("invocation", {})
+        try:
+            saved_model = saved_invocation.get("model_selection")
+            selection = WorkbenchModelSelection.model_validate(saved_model) if saved_model else None
+            model_settings = self.execution_service.agent_assembly_service.get_workbench_model_settings(context, selection)
+        except (NotFoundException, ValidateErrorException, ValueError):
+            # 模型停用或草稿未配置不应阻止读取已有会话历史。
+            try:
+                model_settings = self.execution_service.agent_assembly_service.get_workbench_model_settings(context)
+            except (NotFoundException, ValidateErrorException, ValueError):
+                model_settings = WorkbenchModelSettingsResp()
+        selected_effort = source_snapshot.get("_interaction", {}).get("invocation", {}).get("reasoning_effort")
+        if selected_effort in model_settings.reasoning_levels:
+            model_settings = model_settings.model_copy(update={"selected_reasoning_effort": selected_effort})
+        values["model_settings"] = model_settings.model_dump(mode="json")
 
         # 3.恢复运行详情；合成快照仅用于水合，不参与 SSE 游标。
         events_by_run = self.run_service.list_events_by_run(
@@ -368,6 +384,7 @@ class AgentWorkbenchService:
                 )
 
             # 4.解析附件并创建业务消息，与 Run 一起提交或回滚。
+            self.execution_service.agent_assembly_service.validate_workbench_reasoning(context, run_input.reasoning_effort, run_input.model_selection)
             attachments = self.attachment_service.resolve(
                 run_input.file_ids,
                 owner_id=context.account_id,
@@ -385,6 +402,8 @@ class AgentWorkbenchService:
                 image_urls=run_input.image_urls,
                 attachments=attachments,
                 selected_skills=run_input.selected_skills,
+                reasoning_effort=run_input.reasoning_effort,
+                model_selection=run_input.model_selection,
                 input_message_id=run_input.input_message_id,
             )
             sequence = self.run_service.get_last_event_sequence(

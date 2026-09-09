@@ -95,6 +95,9 @@ class AssistantAgentService(BaseService):
     def build_capabilities(
         self,
         account: Account,
+        *,
+        reasoning_effort: str | None = None,
+        model_config_override: dict | None = None,
     ) -> tuple[BaseLanguageModel, list[BaseTool]]:
         """构造辅助 Agent 专属模型与工具，执行仍交给统一装配入口。"""
         from internal.exception import FailException
@@ -106,8 +109,13 @@ class AssistantAgentService(BaseService):
             raise FailException(f"辅助智能体会话依赖初始化失败: {exc}") from exc
 
         # 使用当前账号已激活模型作为辅助 Agent 的模型。
+        model_config = model_config_override or self.language_model_service.get_default_model_config(account.id)
+        if reasoning_effort is not None:
+            parameters = {key: value for key, value in model_config.get("parameters", {}).items()
+                          if key not in {"reasoning_effort", "thinking_level", "thinking"}}
+            model_config = {**model_config, "parameters": {**parameters, "reasoning_effort": reasoning_effort}}
         llm = self.language_model_service.load_language_model(
-            self.language_model_service.get_default_model_config(account.id),
+            model_config,
             account.id,
         )
 

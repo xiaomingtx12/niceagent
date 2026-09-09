@@ -24,6 +24,7 @@ from pydantic import (
 )
 
 from internal.entity import WorkbenchRunInput
+from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.exception import ValidateErrorException
 
 
@@ -58,6 +59,8 @@ class WorkbenchCommandInputReq(BaseModel):
 
     messages: list[WorkbenchCommandMessageReq] = Field(default_factory=list)
     query: StrictStr | None = None
+    reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
+    model_selection: WorkbenchModelSelection | None = None
     image_urls: list[StrictStr] = Field(default_factory=list, max_length=10)
     file_ids: list[UUID] = Field(default_factory=list, max_length=5)
     selected_skills: list[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = (
@@ -104,6 +107,8 @@ class WorkbenchCommandInputReq(BaseModel):
             file_ids=tuple(self.file_ids),
             selected_skills=tuple(self.selected_skills),
             input_message_id=message.id if message else None,
+            reasoning_effort=self.reasoning_effort,
+            model_selection=self.model_selection,
         )
 
 

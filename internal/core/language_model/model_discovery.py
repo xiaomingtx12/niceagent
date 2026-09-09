@@ -13,15 +13,12 @@ import requests
 
 from internal.extension.logging_extension import logger
 
-from .entities.default_model_parameter_template import (
-    DEFAULT_MODEL_PARAMETER_TEMPLATE,
-)
+from .parameters import parse_parameter_definitions
 from .entities.model_entity import (
-    DefaultModelParameterName,
     ModelEntity,
-    ModelParameter,
     ModelModality,
     ModelType,
+    DEFAULT_MAX_OUTPUT_TOKENS,
 )
 from .entities.provider_entity import ModelDiscoveryConfig, ProviderEntity
 
@@ -105,7 +102,7 @@ class ModelDiscoveryClient:
 
         if last_error is not None:
             logger.warning(
-                "动态发现供应商模型失败 provider=%s，保留静态模型或上次发现结果",
+                "动态发现供应商模型失败 provider=%s，保留上次发现结果",
                 provider.name,
             )
         return self._copy_models(stale_models)
@@ -220,6 +217,8 @@ class ModelDiscoveryClient:
         )
 
         metadata: dict[str, Any] = {
+            "parameter_contract_version": 2,
+            "parameters_source": "declared" if record.get("parameters", record.get("supported_parameters")) is not None else "unknown",
             "source": "discovered",
             "model_type_source": model_type_source,
             "input_modalities_source": input_source,
@@ -233,7 +232,7 @@ class ModelDiscoveryClient:
         if isinstance(record.get("pricing"), dict):
             metadata["pricing"] = record["pricing"]
 
-        return ModelEntity(
+        model = ModelEntity(
             model=model_name,
             label=str(record.get("name") or model_name),
             model_type=model_type,
@@ -248,26 +247,34 @@ class ModelDiscoveryClient:
                     "context_window",
                     "context_length",
                     "max_context_length",
-                    "input_token_limit",
                 ),
-                provider.model_discovery.default_context_window,
+                0,
             ),
+            max_input_tokens=self._first_int(record, ("max_input_tokens", "input_token_limit"), 0),
             max_output_tokens=self._first_int(
                 record,
                 ("max_output_tokens", "output_token_limit"),
-                provider.model_discovery.default_max_output_tokens,
+                0,
             ),
             attributes={
                 "model": model_name,
                 "base_url": (base_url or provider.base_url).rstrip("/"),
             },
             parameters=(
-                self._default_parameters()
+                parse_parameter_definitions(record.get("parameters", record.get("supported_parameters")), output_limit=self._first_int(record, ("max_output_tokens", "output_token_limit"), 0))
                 if model_type in {ModelType.CHAT, ModelType.COMPLETION}
                 else []
             ),
             metadata=metadata,
         )
+        if model_type == ModelType.CHAT:
+            if not model.max_output_tokens:
+                model.max_output_tokens = min(DEFAULT_MAX_OUTPUT_TOKENS, model.context_window)
+                model.metadata["max_output_tokens_source"] = "gpt5_preset"
+            if not model.max_input_tokens and model.metadata.get("context_window_source") == "default":
+                model.max_input_tokens = 272000
+                model.metadata["max_input_tokens_source"] = "gpt5_preset"
+        return model
 
     @staticmethod
     def _normalize_modalities(values: Any) -> list[ModelModality]:
@@ -492,26 +499,8 @@ class ModelDiscoveryClient:
         """读取第一个可用的正整数模型限制。"""
         for key in keys:
             value = record.get(key)
-            if isinstance(value, int) and value > 0:
+            if type(value) is int and value > 0:
                 return value
         return default
-
-    @staticmethod
-    def _default_parameters() -> list[ModelParameter]:
-        """为未知模型提供 OpenAI-compatible 通用参数。"""
-        parameters: list[ModelParameter] = []
-        for parameter_name in (
-            DefaultModelParameterName.TEMPERATURE,
-            DefaultModelParameterName.TOP_P,
-            DefaultModelParameterName.PRESENCE_PENALTY,
-            DefaultModelParameterName.FREQUENCY_PENALTY,
-            DefaultModelParameterName.MAX_TOKENS,
-        ):
-            template = DEFAULT_MODEL_PARAMETER_TEMPLATE[parameter_name].copy()
-            if parameter_name == DefaultModelParameterName.MAX_TOKENS:
-                template["default"] = 4096
-            parameters.append(ModelParameter(name=parameter_name.value, **template))
-        return parameters
-
 
 __all__ = ["ModelDiscoveryClient"]

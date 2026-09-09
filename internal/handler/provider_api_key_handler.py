@@ -73,6 +73,12 @@ class ProviderApiKeyHandler:
 
         # 2.构建更新参数（只包含非空字段）
         update_data = {}
+        for name in ("provider_name", "connection_name", "api_format"):
+            if name in payload:
+                update_data[name] = (getattr(req, name).data or "").strip()
+        for name in ("discovered_models", "enabled_models"):
+            if name in payload:
+                update_data[name] = getattr(req, name).data
         
         # 只有当 api_key 字段存在且不为空时才更新
         if req.api_key.data and req.api_key.data.strip():
@@ -84,9 +90,6 @@ class ProviderApiKeyHandler:
         if "is_active" in request.form or "is_active" in payload:
             update_data["is_active"] = req.is_active.data
         
-        # 只有当 remark 字段在请求中存在时才更新
-        if "remark" in request.form or "remark" in payload:
-            update_data["remark"] = req.remark.data or ""
 
         # 3.调用服务更新密钥
         self.provider_api_key_service.update_provider_api_key(

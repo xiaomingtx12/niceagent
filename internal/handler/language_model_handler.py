@@ -51,8 +51,11 @@ class LanguageModelHandler:
         return success_json(
             self.language_model_service.discover_language_models(
                 req.provider_name.data.strip(),
-                req.api_key.data.strip(),
+                (req.api_key.data or "").strip(),
                 base_url=(req.base_url.data or "").strip() or None,
+                api_format=req.api_format.data,
+                provider_connection_id=req.provider_connection_id.data or None,
+                account_id=current_user.id,
             )
         )
 

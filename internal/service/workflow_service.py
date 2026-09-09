@@ -52,6 +52,7 @@ from pkg.paginator import Paginator
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from .language_model_service import LanguageModelService
+from internal.core.language_model.parameters import validate_model_parameters
 
 
 @inject
@@ -210,6 +211,7 @@ class WorkflowService(BaseService):
 
         # 2.校验传递的草稿图配置，因为有可能边有可能还未建立，所以需要校验关联的数据
         validate_draft_graph = self._validate_graph(draft_graph, account)
+        self._validate_model_parameters(validate_draft_graph, account, allow_unconfigured=True)
 
         # 3.判断是否只修改了 position（仅调整节点位置不需要重新调试）
         only_position_changed = self._is_only_position_changed(
@@ -405,6 +407,7 @@ class WorkflowService(BaseService):
         # 1.根据传递的id获取工作流并校验权限
         workflow = self.get_workflow(workflow_id, account)
         draft_graph = self._validate_graph(workflow.draft_graph, account)
+        self._validate_model_parameters(draft_graph, account)
 
         # 2.创建工作流工具
         workflow_tool = WorkflowTool(
@@ -510,6 +513,7 @@ class WorkflowService(BaseService):
         # 1.根据传递的id获取工作流并校验权限
         workflow = self.get_workflow(workflow_id, account)
         draft_graph = self._validate_graph(workflow.draft_graph, account)
+        self._validate_model_parameters(draft_graph, account)
 
         # 2.校验工作流是否调试通过
         if workflow.is_debug_passed is False:
@@ -566,6 +570,32 @@ class WorkflowService(BaseService):
 
         return workflow
 
+    def _validate_model_parameters(self, graph: dict, account: Account, *, allow_unconfigured: bool = False) -> None:
+        """保存和运行检查显式模型参数；读取草稿不重写，不因参数问题静默删除节点。"""
+        for node in graph.get("nodes", []):
+            if node.get("node_type") not in {NodeType.LLM, NodeType.INTENT_CLASSIFIER}:
+                continue
+            config = node.get("model_config", node.get("language_model_config")) or {}
+            if not config.get("provider") or not config.get("model"):
+                if allow_unconfigured:
+                    continue
+                raise ValidateErrorException(f"节点 {node.get('title', '')} 尚未选择模型")
+            model = self.language_model_service.get_enabled_model_entity(
+                config["provider"], config["model"], account.id,
+                provider_connection_id=config.get("provider_connection_id"),
+            )
+            if model is None or model.model_type.value != "chat":
+                raise ValidateErrorException(f"节点 {node.get('title', '')} 的对话模型未激活")
+            try:
+                parameters = validate_model_parameters(model, config.get("parameters", {}))
+            except ValueError as exc:
+                raise ValidateErrorException(f"节点 {node.get('title', '')}：{exc}") from exc
+            node.pop("language_model_config", None)
+            node["model_config"] = {
+                **config, "parameters": parameters,
+                "provider_connection_id": str(model.attributes.get("provider_api_key_id") or ""),
+            }
+
     def _validate_graph(
         self, graph: dict[str, Any], account: Account
     ) -> dict[str, Any]:
@@ -603,21 +633,7 @@ class WorkflowService(BaseService):
                 if node_data_cls is None:
                     raise ValidateErrorException("工作流节点类型出错，请核实后重试")
 
-                if node_type == NodeType.LLM:
-                    model_config = node.get("model_config")
-                    if not isinstance(model_config, dict) or not self.language_model_service.get_enabled_model_entity(
-                        model_config.get("provider", ""),
-                        model_config.get("model", ""),
-                        account.id,
-                        provider_connection_id=model_config.get(
-                            "provider_connection_id"
-                        ),
-                    ):
-                        node["model_config"] = (
-                            self.language_model_service.get_default_model_config(
-                                account.id
-                            )
-                        )
+                # 草稿保留未配置/停用模型，不能读取时替换为另一连接；执行时统一严格校验。
 
                 # 6.实例化节点数据类型，如果出错则跳过当前数据
                 node_data = node_data_cls(**node)

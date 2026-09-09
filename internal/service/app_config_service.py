@@ -20,7 +20,8 @@ from internal.exception import (
     NotFoundException,
     ValidateErrorException,
 )
-from internal.lib.helper import datetime_to_timestamp, get_value_type
+from internal.lib.helper import datetime_to_timestamp
+from internal.core.language_model.parameters import validate_model_parameters
 from internal.model import (
     App,
     ApiTool,
@@ -30,7 +31,6 @@ from internal.model import (
     AppConfig,
     AppConfigVersion,
     AppDatasetJoin,
-    ProviderApiKey,
     Workflow,
 )
 from internal.schema.app_config_schema import (
@@ -44,7 +44,6 @@ from internal.schema.app_config_schema import (
 from pkg.sqlalchemy import SQLAlchemy
 from .base_service import BaseService
 from ..core.language_model import LanguageModelManager
-from ..core.language_model.entities.model_entity import ModelEntity, ModelParameterType
 from ..core.workflow.entities.workflow_entity import WorkflowConfig
 from ..entity.app_entity import AppStatus, DEFAULT_APP_CONFIG
 from ..entity.workflow_entity import WorkflowStatus
@@ -95,6 +94,21 @@ class AppConfigService(BaseService):
             normalized["subagents"] = self._normalize_subagent_configs(
                 draft_app_config.subagents
             )
+            for subagent in normalized["subagents"]:
+                if not subagent.get("model"):
+                    continue
+                model_config = self._validate_strict_model_config(
+                    AppModelConfigReq(
+                        provider=subagent["model_provider"],
+                        model=subagent["model"],
+                        provider_connection_id=subagent.get("model_connection_id"),
+                        parameters={},
+                    ),
+                    account_id=account_id,
+                )
+                # 固定本次授权的连接，避免以后新增同名连接改变子 Agent 的调用目标。
+                if model_config["provider_connection_id"]:
+                    subagent["model_connection_id"] = model_config["provider_connection_id"]
             self.validate_published_agent_references(
                 draft_app_config.subagents,
                 account_id=account_id,
@@ -194,6 +208,9 @@ class AppConfigService(BaseService):
                     )
                 elif config.model is not None:
                     item["model"] = config.model
+                    item["model_provider"] = config.model_provider
+                    if config.model_connection_id is not None:
+                        item["model_connection_id"] = str(config.model_connection_id)
             normalized.append(item)
         return normalized
 
@@ -291,25 +308,10 @@ class AppConfigService(BaseService):
         if model_entity.model_type.value != "chat":
             raise ValidateErrorException("Agent 只能选择对话模型")
 
-        normalized_parameters: dict[str, Any] = {}
-        for parameter in model_entity.parameters:
-            value = model_config.parameters.get(parameter.name, parameter.default)
-            if value is not None and get_value_type(value) != parameter.type.value:
-                value = parameter.default
-            if parameter.required and value is None:
-                value = parameter.default
-            if parameter.options and value not in parameter.options:
-                value = parameter.default
-            if (
-                parameter.type in [ModelParameterType.INT, ModelParameterType.FLOAT]
-                and value is not None
-                and (
-                    (parameter.min is not None and value < parameter.min)
-                    or (parameter.max is not None and value > parameter.max)
-                )
-            ):
-                value = parameter.default
-            normalized_parameters[parameter.name] = value
+        try:
+            normalized_parameters = validate_model_parameters(model_entity, model_config.parameters)
+        except ValueError as exc:
+            raise ValidateErrorException(str(exc)) from exc
 
         return {
             "provider": provider_name,
@@ -507,13 +509,11 @@ class AppConfigService(BaseService):
                 long_term_memory=normalized_long_term_memory,
             )
 
-        # 2.校验模型配置，发现变化时同步更新。
+        # 发布配置只投影当前能力，不在读取时改写已发布快照。
         validate_model_config = self._process_and_validate_model_config(
             app_config.model_config,
             account_id=app.account_id,
         )
-        if app_config.model_config != validate_model_config:
-            self.update(app_config, model_config=validate_model_config)
 
         # 3.校验工具列表并移除已删除的工具。
         tools, validate_tools = self._process_and_validate_tools(
@@ -1036,65 +1036,27 @@ class AppConfigService(BaseService):
             "parameters": dict(parsed.parameters),
         }
 
-        # Provider 或模型在保存后被停用时，选择当前账号的默认模型。
+        # 停用模型保留原引用供界面修复，不静默切换到其他模型执行。
         try:
             self.language_model_manager.get_provider(model_config["provider"])
         except NotFoundException:
-            return default_active_model_config()
+            return dict(origin_model_config)
 
-        model_entity = self.language_model_service.get_enabled_model_entity(
-            model_config["provider"],
-            model_config["model"],
-            account_id,
-            provider_connection_id=model_config["provider_connection_id"],
-        )
-        if not model_entity:
-            return default_active_model_config()
-        if model_entity.model_type.value != "chat":
-            return default_active_model_config()
-
-        # 参数规则来自当前模型实体，过期或越界值回退到模型默认值。
-        parameters = {}
-        for parameter in model_entity.parameters:
-            # 7.读取参数值，不存在时使用默认值。
-            parameter_value = model_config["parameters"].get(
-                parameter.name, parameter.default
+        try:
+            model_entity = self.language_model_service.get_enabled_model_entity(
+                model_config["provider"], model_config["model"], account_id,
+                provider_connection_id=model_config["provider_connection_id"],
             )
+        except ValidateErrorException:
+            # 历史无连接 ID 的同名模型仍可打开配置页修复，运行和保存不会绕过校验。
+            return dict(origin_model_config)
+        if not model_entity:
+            return dict(origin_model_config)
+        if model_entity.model_type.value != "chat":
+            return dict(origin_model_config)
 
-            # 8.校验参数是否必填。
-            if parameter.required:
-                # 9.必填参数为空时使用默认值。
-                if parameter_value is None:
-                    parameter_value = parameter.default
-                else:
-                    # 10.校验已填写参数的数据类型。
-                    if get_value_type(parameter_value) != parameter.type.value:
-                        parameter_value = parameter.default
-            else:
-                # 11.非必填参数仅在有值时校验类型。
-                if parameter_value is not None:
-                    if get_value_type(parameter_value) != parameter.type.value:
-                        parameter_value = parameter.default
-
-            # 12.存在可选值时，参数必须来自可选列表。
-            if parameter.options and parameter_value not in parameter.options:
-                parameter_value = parameter.default
-
-            # 13.数值参数存在最小值或最大值时继续校验。
-            if (
-                parameter.type in [ModelParameterType.INT, ModelParameterType.FLOAT]
-                and parameter_value is not None
-            ):
-                # 14.校验数值范围。
-                if (parameter.min and parameter_value < parameter.min) or (
-                    parameter.max and parameter_value > parameter.max
-                ):
-                    parameter_value = parameter.default
-
-            parameters[parameter.name] = parameter_value
-
-        # 15.保存校验后的参数。
-        model_config["parameters"] = parameters
+        # 读取时保留历史值供用户修复，不静默改变已发布配置；保存和运行执行严格校验。
+        model_config["parameters"] = dict(parsed.parameters)
         model_config["provider_connection_id"] = str(
             model_entity.attributes.get("provider_api_key_id") or ""
         )
@@ -1110,17 +1072,6 @@ class AppConfigService(BaseService):
         model_config["native_file_input"] = model_entity.native_file_input
 
         return model_config
-
-    def _get_enabled_discovered_models(
-        self,
-        provider_name: str,
-        account_id: UUID | None,
-    ) -> list[ModelEntity]:
-        """兼容旧调用名，统一读取当前账号已激活的模型。"""
-        return self.language_model_service.get_enabled_model_entities(
-            provider_name,
-            account_id,
-        )
 
     def _process_and_validate_workflows(
         self,

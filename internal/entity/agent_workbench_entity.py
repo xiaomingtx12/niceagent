@@ -38,6 +38,15 @@ WORKBENCH_TERMINAL_STATUSES = frozenset(
 )
 
 
+class WorkbenchModelSelection(BaseModel):
+    """仅允许引用模型，不接受客户端传入凭证、地址或任意参数。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+    provider: StrictStr = Field(min_length=1, max_length=128)
+    model: StrictStr = Field(min_length=1, max_length=255)
+    provider_connection_id: UUID
+
+
 class WorkbenchRunInput(BaseModel):
     """从 Agent Protocol 命令中提取出的可信运行输入。"""
 
@@ -48,6 +57,8 @@ class WorkbenchRunInput(BaseModel):
     file_ids: tuple[UUID, ...] = Field(default_factory=tuple, max_length=5)
     selected_skills: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=20)
     input_message_id: StrictStr | None = None
+    reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
+    model_selection: WorkbenchModelSelection | None = None
 
 
 @dataclass

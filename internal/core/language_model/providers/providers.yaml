@@ -1,3 +1,13 @@
+- name: custom
+  label: 自定义端点
+  description: 自定义模型服务连接
+  icon: icon.svg
+  background: "#FFFFFF"
+  model_discovery:
+    enabled: true
+  supported_model_types:
+    - chat
+    - embedding
 - name: tongyi
   label: 通义千问
   description: 阿里云通义千问系列模型，包括Qwen3.5-Plus最新旗舰、Qwen-Max、Qwen-Plus及QwQ推理模型。

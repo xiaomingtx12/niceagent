@@ -7,14 +7,8 @@ from langchain_core.messages import HumanMessage
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 
-class DefaultModelParameterName(str, Enum):
-    """默认的参数名字，一般是所有LLM都有的一些参数"""
-
-    TEMPERATURE = "temperature"  # 温度
-    TOP_P = "top_p"  # 核采样率
-    PRESENCE_PENALTY = "presence_penalty"  # 存在惩罚
-    FREQUENCY_PENALTY = "frequency_penalty"  # 频率惩罚
-    MAX_TOKENS = "max_tokens"  # 要生成的内容的最大tokens数
+DEFAULT_CONTEXT_WINDOW = 400000
+DEFAULT_MAX_OUTPUT_TOKENS = 128000
 
 
 class ModelType(str, Enum):
@@ -50,14 +44,15 @@ class ModelParameter(BaseModel):
     """模型参数实体信息"""
 
     name: str = ""  # 参数名字
+    api_name: str = ""  # 供应商 API 字段名，输出上限统一展示为 max_output_tokens
     label: str = ""  # 参数标签
     type: ModelParameterType = ModelParameterType.STRING  # 参数的类型
     help: str = ""  # 帮助信息
     required: bool = False  # 是否必填
     default: Optional[Any] = None  # 默认参数值
-    min: Optional[float] = None  # 最小值
-    max: Optional[float] = None  # 最大值
-    precision: int = 2  # 保留小数的位数
+    min: Optional[float] = Field(default=None, allow_inf_nan=False)
+    max: Optional[float] = Field(default=None, allow_inf_nan=False)
+    precision: int = Field(default=2, ge=0, le=10)
     options: list[ModelParameterOption] = Field(default_factory=list)  # 可选的参数配置
 
 
@@ -113,8 +108,9 @@ class ModelEntity(BaseModel):
     )
     output_modalities: list[ModelModality] = Field(default_factory=list)
     native_file_input: bool = False
-    context_window: int = 0  # 上下文窗口长度(输入+输出的总长度)
-    max_output_tokens: int = 0  # 最大输出内容长度(输出)
+    context_window: int = Field(default=0, ge=0)
+    max_input_tokens: int = Field(default=0, ge=0)
+    max_output_tokens: int = Field(default=0, ge=0)
     attributes: dict[str, Any] = Field(default_factory=dict)  # 模型固定属性字典
     parameters: list[ModelParameter] = Field(
         default_factory=list
@@ -126,6 +122,12 @@ class ModelEntity(BaseModel):
     @model_validator(mode="after")
     def normalize_capabilities(self) -> "ModelEntity":
         """兼容旧快照并补齐与模型用途一致的默认输入输出。"""
+        if self.model_type in {ModelType.CHAT, ModelType.COMPLETION}:
+            if not self.context_window or self.metadata.get("context_window_source") == "default":
+                self.context_window = DEFAULT_CONTEXT_WINDOW
+                self.metadata = {**self.metadata, "context_window_source": "default"}
+            elif not self.metadata.get("context_window_source"):
+                self.metadata = {**self.metadata, "context_window_source": "declared"}
         input_modalities = list(self.input_modalities)
         if ModelModality.FILE in input_modalities:
             self.native_file_input = True
@@ -178,16 +180,6 @@ class BaseLanguageModel(LCBaseLanguageModel, ABC):
     )
     native_file_input: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)  # 模型元数据信息
-
-    def get_pricing(self) -> tuple[float, float, float]:
-        """获取LLM对应的价格信息，返回数据格式为(输入价格, 输出价格, 单位)"""
-        # 1.计算获取输入价格、输出价格、单位
-        input_price = self.metadata.get("pricing", {}).get("input", 0.0)
-        output_price = self.metadata.get("pricing", {}).get("output", 0.0)
-        unit = self.metadata.get("pricing", {}).get("unit", 0.0)
-
-        # 2.返回数据
-        return input_price, output_price, unit
 
     def convert_to_human_message(
         self,

@@ -57,7 +57,9 @@ class SubAgentConfig(BaseModel):
     mode: Literal["sync", "async"] = "sync"
     context_passing: Literal["NONE"] = "NONE"
     source: Literal["custom", "published"] = "custom"
-    model: StrictStr | None = None
+    model: StrictStr | None = Field(default=None, min_length=1)
+    model_provider: StrictStr | None = Field(default=None, min_length=1)
+    model_connection_id: UUID | None = None
     graph_id: StrictStr | None = Field(
         default=None,
         max_length=MAX_SUBAGENT_GRAPH_ID_LENGTH,
@@ -118,19 +120,21 @@ class SubAgentConfig(BaseModel):
             raise ValueError("列表中不允许重复名称")
         return value
 
-    @field_validator("model")
+    @model_validator(mode="before")
     @classmethod
-    def validate_model_reference(
-        cls,
-        value: StrictStr | None,
-    ) -> StrictStr | None:
-        """校验自定义同步 SubAgent 的 provider/model 标识。"""
-        if value is None:
-            return None
-        parts = value.split("/")
-        if len(parts) != 2 or any(not part for part in parts):
-            raise ValueError("model 必须是 provider/model 格式")
-        return "/".join(parts)
+    def normalize_model_reference(cls, value: Any) -> Any:
+        """把旧 provider/model 引用转换为独立字段，保留模型名中的斜杠。"""
+        if not isinstance(value, dict) or value.get("model_provider") is not None:
+            return value
+        model = value.get("model")
+        if not isinstance(model, str) or not model.strip():
+            return value
+        provider, separator, model_name = model.partition("/")
+        if not separator or not provider.strip() or not model_name.strip():
+            raise ValueError(
+                "指定子 Agent 模型时须提供 model_provider；旧配置须使用 provider/model 格式"
+            )
+        return {**value, "model_provider": provider.strip(), "model": model_name.strip()}
 
     @field_validator("url")
     @classmethod
@@ -162,6 +166,12 @@ class SubAgentConfig(BaseModel):
     @model_validator(mode="after")
     def validate_mode_constraints(self) -> "SubAgentConfig":
         """校验同步、异步和发布 Agent 之间的字段约束。"""
+        has_model_override = any(
+            value is not None
+            for value in (self.model, self.model_provider, self.model_connection_id)
+        )
+        if has_model_override and (self.model is None or self.model_provider is None):
+            raise ValueError("独立模型须同时提供 model 和 model_provider")
         if self.mode == "async":
             if self.source == "published":
                 if self.published_app_id is None:
@@ -171,7 +181,7 @@ class SubAgentConfig(BaseModel):
                     raise ValueError("异步发布 SubAgent 的 graph_id 与发布应用不匹配")
             elif not self.graph_id:
                 raise ValueError("异步 SubAgent 缺少 graph_id")
-            if self.system_prompt or self.tools or self.skills or self.model:
+            if self.system_prompt or self.tools or self.skills or has_model_override:
                 raise ValueError(
                     "异步 SubAgent 不支持 system_prompt、tools、skills 或 model"
                 )
@@ -180,6 +190,8 @@ class SubAgentConfig(BaseModel):
                 raise ValueError("同步自定义 SubAgent 缺少 system_prompt")
         elif self.published_app_id is None:
             raise ValueError("发布 SubAgent 缺少 published_app_id")
+        elif has_model_override:
+            raise ValueError("发布 SubAgent 使用其发布模型，不支持独立模型覆盖")
         return self
 
 

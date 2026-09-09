@@ -37,12 +37,11 @@ class ProviderApiKey(db.Model):
     base_url = Column(
         String(1000), nullable=False, server_default=text("''::character varying")
     )  # 用户级 OpenAI-compatible 服务地址，可用于第三方中转站
+    connection_name = Column(String(255), nullable=False)  # 用户可见的服务连接名称
+    api_format = Column(String(32), nullable=False)  # chat_completions 或 responses
     is_active = Column(
         Boolean, nullable=False, server_default=text("true")
     )  # 是否启用
-    remark = Column(
-        String(255), nullable=False, server_default=text("''::character varying")
-    )  # 备注信息
     discovered_models = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 最近一次显式发现的模型快照

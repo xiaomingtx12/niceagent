@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from internal.entity.agent_attachment_entity import AgentAttachment
 from internal.entity.conversation_entity import InvokeFrom
+from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 
 
 class AgentInvocationContext(BaseModel):
@@ -32,6 +33,33 @@ class AgentInvocation(AgentInvocationContext):
     attachments: tuple[AgentAttachment, ...] = Field(default_factory=tuple)
     selected_skills: tuple[str, ...] = Field(default_factory=tuple, max_length=20)
     input_message_id: str | None = None
+    reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
+    model_selection: WorkbenchModelSelection | None = None
+
+
+class WorkbenchModelChoiceResp(BaseModel):
+    """工作台模型目录仅公开标识、名称和推理等级。"""
+
+    provider: str
+    model: str
+    provider_connection_id: str
+    label: str
+    connection_name: str
+    reasoning_levels: list[str] = Field(default_factory=list)
+    default_reasoning_effort: str | None = None
+
+
+class WorkbenchModelSettingsResp(BaseModel):
+    """只有创建者入口公开可切换的模型目录。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    model: str = ""
+    provider: str = ""
+    selected_model: WorkbenchModelSelection | None = None
+    available_models: list[WorkbenchModelChoiceResp] = Field(default_factory=list)
+    reasoning_levels: list[str] = Field(default_factory=list)
+    default_reasoning_effort: str | None = None
+    selected_reasoning_effort: str | None = None
 
 
 class AgentConversationCleanupReq(BaseModel):
