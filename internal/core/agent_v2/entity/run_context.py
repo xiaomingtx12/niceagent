@@ -50,6 +50,7 @@ class AgentRunContext(BaseModel):
     created_by: UUID
     principal_id: UUID
     memory_enabled: bool = Field(default=False, strict=True)
+    planning_enabled: bool = Field(default=False, strict=True)
     user_input_enabled: bool = False
     agent_id: str = Field(default="main", min_length=1, max_length=64)
 

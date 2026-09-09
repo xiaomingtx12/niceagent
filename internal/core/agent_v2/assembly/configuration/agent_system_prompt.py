@@ -53,15 +53,26 @@ def build_app_system_prompt(
     )
 
 
-def build_dynamic_context(*, invoked_at: str) -> str:
-    """构造单次模型调用追加的运行时间上下文。"""
-    return "\n".join(
+def build_dynamic_context(*, invoked_at: str, planning_enabled: bool = False) -> str:
+    """本轮规划偏好随运行上下文注入，避免写入历史消息影响后续轮次。"""
+    context = "\n".join(
         [
             "<运行时上下文>",
             f"当前时间: {invoked_at}",
             "</运行时上下文>",
         ]
     )
+    if planning_enabled:
+        context += (
+            "\n<本轮任务规划>\n"
+            "用户已启用任务规划。开始执行本轮任务前，先调用 write_todos 创建适合本轮任务的计划，"
+            "不要沿用上一轮无关的待办事项。即使任务简单，也创建与实际工作相符的简短计划。"
+            "执行过程中及时用 write_todos 更新 pending、in_progress、completed 状态，"
+            "计划变化时同步调整，只有实际完成的步骤才能标记 completed。"
+            "计划创建后直接继续执行，无需额外等待用户确认；缺少必要信息时按现有规则提问。"
+            "\n</本轮任务规划>"
+        )
+    return context
 
 
 __all__ = [

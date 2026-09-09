@@ -54,6 +54,7 @@ class WorkbenchRunInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     query: StrictStr = Field(min_length=1)
+    planning_enabled: bool = Field(default=False, strict=True)
     image_urls: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=10)
     file_ids: tuple[UUID, ...] = Field(default_factory=tuple, max_length=5)
     selected_skills: tuple[StrictStr, ...] = Field(default_factory=tuple, max_length=20)

@@ -60,6 +60,7 @@ class WorkbenchCommandInputReq(BaseModel):
 
     messages: list[WorkbenchCommandMessageReq] = Field(default_factory=list)
     query: StrictStr | None = None
+    planning_enabled: bool = Field(default=False, strict=True)
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
     model_selection: WorkbenchModelSelection | None = None
     image_urls: list[StrictStr] = Field(default_factory=list, max_length=10)
@@ -104,6 +105,7 @@ class WorkbenchCommandInputReq(BaseModel):
             raise ValidateErrorException("run.start 需要非空的用户输入")
         return WorkbenchRunInput(
             query=query,
+            planning_enabled=self.planning_enabled,
             image_urls=tuple(self.image_urls),
             file_ids=tuple(self.file_ids),
             selected_skills=tuple(self.selected_skills),

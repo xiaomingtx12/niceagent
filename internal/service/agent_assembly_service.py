@@ -127,6 +127,7 @@ class AgentAssemblyService:
             created_by=req.created_by,
             principal_id=(req.end_user_id or req.created_by),
             memory_enabled=definition.config.long_term_memory.enable,
+            planning_enabled=req.planning_enabled,
             user_input_enabled=req.user_input_enabled and definition.config.user_input.enable,
         )
         skills = self.skill_service.resolve_enabled_skills(definition.config.skills)

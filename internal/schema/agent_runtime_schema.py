@@ -29,6 +29,7 @@ class AgentInvocation(AgentInvocationContext):
 
     message_id: UUID
     query: str
+    planning_enabled: bool = Field(default=False, strict=True)
     image_urls: tuple[str, ...] = Field(default_factory=tuple)
     attachments: tuple[AgentAttachment, ...] = Field(default_factory=tuple)
     selected_skills: tuple[str, ...] = Field(default_factory=tuple, max_length=20)

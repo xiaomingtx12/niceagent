@@ -412,6 +412,7 @@ class AgentWorkbenchService:
                 query=run_input.query,
                 image_urls=run_input.image_urls,
                 attachments=attachments,
+                planning_enabled=run_input.planning_enabled,
                 selected_skills=run_input.selected_skills,
                 reasoning_effort=run_input.reasoning_effort,
                 model_selection=run_input.model_selection,
