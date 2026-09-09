@@ -46,7 +46,8 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
-from internal.model import Account, App
+from internal.model import Account, App, AgentRun
+from internal.core.agent_v2.entity.user_input import build_confirmed_input_context
 from internal.repository import WorkspaceFileStore
 from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
 from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
@@ -129,6 +130,7 @@ class AgentAssemblyService:
             memory_enabled=definition.config.long_term_memory.enable,
             planning_enabled=req.planning_enabled,
             user_input_enabled=req.user_input_enabled and definition.config.user_input.enable,
+            confirmed_user_inputs=self._confirmed_input_context(req),
         )
         skills = self.skill_service.resolve_enabled_skills(definition.config.skills)
         agent_config = AgentConfig(
@@ -178,6 +180,17 @@ class AgentAssemblyService:
             raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
         self._log_build_timing(req, "total", build_started_at, observer)
         return agent, input_message
+
+    def _confirmed_input_context(self, req: AgentInvocation) -> str:
+        """只加载同一授权会话入口的近期答案，不从客户端接收或写入长期记忆。"""
+        rows = (
+            self.db.session.query(AgentRun.state_snapshot["input_history"])
+            .filter(AgentRun.conversation_id == req.conversation_id, AgentRun.app_id == req.app_id,
+                    AgentRun.invoke_from == req.invoke_from.value,
+                    AgentRun.state_snapshot["input_history"].astext.isnot(None))
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(8).all()
+        )
+        return build_confirmed_input_context([history for (history,) in rows if isinstance(history, list)])
 
     def _resolve_definition(
         self,

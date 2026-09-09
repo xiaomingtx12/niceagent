@@ -149,6 +149,15 @@ class WorkbenchInputRespondReq(BaseModel):
         return self
 
 
+class WorkbenchInputReopenReq(BaseModel):
+    """用取消事件序号限定恢复批次，防止迟到请求复活后来停止的任务。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    cancellation_sequence: int = Field(gt=0, strict=True)
+
+
 class WorkbenchCommandReq(BaseModel):
     """工作台当前支持的 Agent Protocol 命令。"""
 
@@ -156,7 +165,7 @@ class WorkbenchCommandReq(BaseModel):
 
     type: StrictStr | None = None
     id: StrictInt | None = None
-    method: Literal["run.start", "input.respond"]
+    method: Literal["run.start", "input.respond", "input.reopen"]
     params: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -185,10 +194,15 @@ class WorkbenchCommandReq(BaseModel):
         """返回协议命令 id。"""
         return self.id if isinstance(self.id, int) else None
 
-    def to_run_input(self) -> WorkbenchRunInput | WorkbenchInputRespondReq:
+    def to_run_input(self) -> WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq:
         """转换为 Service 可直接使用的新消息或中断响应。"""
         if self.method == "input.respond":
             return self.to_input_response()
+        if self.method == "input.reopen":
+            try:
+                return WorkbenchInputReopenReq.model_validate(self.params)
+            except ValidationError as exc:
+                raise ValidateErrorException("表单恢复格式错误") from exc
         return self.input_data().to_run_input()
 
     def to_input_response(self) -> WorkbenchInputRespondReq:
@@ -395,6 +409,7 @@ class WorkbenchCommandErrorResp(BaseModel):
     id: int | None = None
     error: Literal["invalid_argument"] = "invalid_argument"
     message: str
+    field_errors: dict[str, dict[str, str]] | None = None
 
 
 class WorkbenchHistoryMessageResp(BaseModel):
@@ -453,6 +468,7 @@ class WorkbenchRunObservabilityResp(BaseModel):
 
 __all__ = [
     "WorkbenchCommandReq",
+    "WorkbenchInputReopenReq",
     "WorkbenchCommandInputReq",
     "WorkbenchCommandMessageReq",
     "WorkbenchEventStreamReq",

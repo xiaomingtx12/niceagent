@@ -8,7 +8,7 @@ from internal.entity import WORKBENCH_TERMINAL_STATUSES
 from internal.model import AgentRun
 from internal.schema.agent_workbench_schema import WorkbenchEvent
 
-_PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
+_PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history", "input_recovery")
 
 
 def project_snapshot_values(snapshot: Mapping[str, Any] | None) -> dict[str, Any]:

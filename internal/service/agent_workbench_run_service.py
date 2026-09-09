@@ -535,8 +535,18 @@ class AgentWorkbenchRunService:
                     current.status = "cancelled"
                     current.finished_at = datetime.now(UTC).replace(tzinfo=None)
                     snapshot = dict(current.state_snapshot or {})
+                    cancelled_inputs = snapshot.get("pending_inputs", [])
+                    cancellation_sequence = int(current.last_event_sequence or 0) + 2
                     snapshot["pending_inputs"] = []
-                    snapshot["_interaction"] = {**(snapshot.get("_interaction") or {}), "cancelled_input": True}
+                    snapshot["input_recovery"] = {
+                        "run_id": str(current.id), "cancellation_sequence": cancellation_sequence,
+                    } if cancelled_inputs else None
+                    snapshot["_interaction"] = {
+                        **(snapshot.get("_interaction") or {}), "cancelled_input": True,
+                        "cancelled_inputs": cancelled_inputs,
+                        "input_cancellation_sequence": cancellation_sequence,
+                    }
+                    current.executor_id = None
                     current.state_snapshot = snapshot
                     projector = AgentProtocolEventProjector(current.id, start_sequence=int(current.last_event_sequence or 0))
                     public_state = project_snapshot_values(snapshot)

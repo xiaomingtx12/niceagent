@@ -3,9 +3,29 @@
 from __future__ import annotations
 
 import math
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, model_validator
+
+
+class UserInputOption(BaseModel):
+    """选项值用于恢复执行，标签和说明只负责展示。"""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    value: StrictStr = Field(min_length=1, max_length=200)
+    label: StrictStr = Field(min_length=1, max_length=200)
+    description: StrictStr = Field(default="", max_length=500)
+    recommended: StrictBool = False
+
+
+class UserInputAnswerError(ValueError):
+    """保留稳定字段名，便于提交边界定位错误而不依赖展示文案。"""
+
+    def __init__(self, field_name: str, message: str):
+        """只携带定位信息，不记录用户答案。"""
+        self.field_name = field_name
+        super().__init__(message)
 
 
 class UserInputField(BaseModel):
@@ -17,19 +37,82 @@ class UserInputField(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     type: Literal["text", "textarea", "select", "multiselect", "number"]
     required: StrictBool = True
-    options: list[StrictStr] = Field(default_factory=list, max_length=20)
+    options: list[StrictStr | UserInputOption] = Field(default_factory=list, max_length=20)
+    description: str = Field(default="", max_length=500)
+    placeholder: str = Field(default="", max_length=200)
+    allow_other: StrictBool = False
+    allow_skip: StrictBool = False
+    allow_unavailable: StrictBool = True
+    allow_delegate: StrictBool = False
+    min_length: int = Field(default=0, ge=0, le=4000, strict=True)
+    max_length: int = Field(default=4000, ge=1, le=4000, strict=True)
+    min_value: float | None = Field(default=None, ge=-1e15, le=1e15, allow_inf_nan=False, strict=True)
+    max_value: float | None = Field(default=None, ge=-1e15, le=1e15, allow_inf_nan=False, strict=True)
+    integer_only: StrictBool = False
 
     @model_validator(mode="after")
     def validate_options(self) -> "UserInputField":
         """选择控件必须有不重复的选项，其余控件不接受选项。"""
         if self.type in {"select", "multiselect"}:
-            if not self.options or len(set(self.options)) != len(self.options):
+            values = self.option_values
+            if not values or len(set(values)) != len(values):
                 raise ValueError("选项不能为空或重复")
-            if any(not option.strip() or len(option) > 200 for option in self.options):
+            if any(not option.strip() or len(option) > 200 for option in values):
                 raise ValueError("选项必须是 1 至 200 字的文本")
-        elif self.options:
-            raise ValueError("只有选择控件支持 options")
+            if sum(isinstance(option, UserInputOption) and option.recommended for option in self.options) > 1:
+                raise ValueError("每题最多标记一个推荐选项")
+        elif self.options or self.allow_other:
+            raise ValueError("只有选择控件支持 options 和 allow_other")
+        if self.min_length > self.max_length:
+            raise ValueError("最短长度不能超过最长长度")
+        if self.min_value is not None and self.max_value is not None and self.min_value > self.max_value:
+            raise ValueError("最小值不能超过最大值")
+        if self.type != "number" and (self.min_value is not None or self.max_value is not None or self.integer_only):
+            raise ValueError("只有数字控件支持数值约束")
         return self
+
+    @property
+    def option_values(self) -> list[str]:
+        """兼容已保存的字符串选项，拒绝把展示标签当作稳定值。"""
+        return [option if isinstance(option, str) else option.value for option in self.options]
+
+    def validate_answer(self, value: Any) -> Any:
+        """结构化状态不能冒充普通答案；自由补充与已有选项分别验证。"""
+        if isinstance(value, dict):
+            status = value.get("status")
+            allowed = {"skipped": self.allow_skip or not self.required,
+                       "unavailable": self.allow_unavailable, "delegate": self.allow_delegate}
+            if isinstance(status, str) and status in allowed and allowed[status] and set(value) == {"status"}:
+                return dict(value)
+            if status == "custom" and self.allow_other and set(value) <= {"status", "text", "selected"}:
+                text = value.get("text")
+                selected = value.get("selected", [])
+                if (isinstance(text, str) and text.strip() and self.min_length <= len(text) <= self.max_length
+                        and isinstance(selected, list) and all(isinstance(item, str) and item in self.option_values for item in selected)
+                        and len(selected) == len(set(selected)) and (self.type == "multiselect" or not selected)):
+                    return {"status": "custom", "text": text, "selected": selected}
+            raise UserInputAnswerError(self.name, f"答案格式不正确：{self.label}")
+        empty = value is None or value == "" or value == [] or (isinstance(value, str) and not value.strip())
+        if empty:
+            if self.required:
+                raise UserInputAnswerError(self.name, f"请填写：{self.label}")
+            return None
+        valid = False
+        if self.type in {"text", "textarea"}:
+            valid = isinstance(value, str) and self.min_length <= len(value) <= self.max_length
+        elif self.type == "number":
+            valid = (type(value) in {int, float} and abs(value) <= 1e15 and math.isfinite(value)
+                     and (self.min_value is None or value >= self.min_value)
+                     and (self.max_value is None or value <= self.max_value)
+                     and (not self.integer_only or value % 1 == 0))
+        elif self.type == "select":
+            valid = isinstance(value, str) and value in self.option_values
+        elif self.type == "multiselect":
+            valid = (isinstance(value, list) and all(isinstance(item, str) and item in self.option_values for item in value)
+                     and len(value) == len(set(value)))
+        if not valid:
+            raise UserInputAnswerError(self.name, f"答案格式不正确：{self.label}")
+        return value
 
 
 class UserInputForm(BaseModel):
@@ -54,30 +137,9 @@ class UserInputForm(BaseModel):
             raise ValueError("答案包含未知字段或不是对象")
         result = {}
         for field in self.fields:
-            value = answers.get(field.name)
-            empty = value is None or value == "" or value == [] or (
-                isinstance(value, str) and not value.strip()
-            )
-            if empty:
-                if field.required:
-                    raise ValueError(f"请填写：{field.label}")
-                continue
-            valid = False
-            if field.type in {"text", "textarea"}:
-                valid = isinstance(value, str) and len(value) <= 4000
-            elif field.type == "number":
-                valid = type(value) in {int, float} and abs(value) <= 1e15 and math.isfinite(value)
-            elif field.type == "select":
-                valid = isinstance(value, str) and value in field.options
-            elif field.type == "multiselect":
-                valid = (
-                    isinstance(value, list)
-                    and all(isinstance(item, str) and item in field.options for item in value)
-                    and len(value) == len(set(value))
-                )
-            if not valid:
-                raise ValueError(f"答案格式不正确：{field.label}")
-            result[field.name] = value
+            value = field.validate_answer(answers.get(field.name))
+            if value is not None:
+                result[field.name] = value
         return result
 
 
@@ -89,3 +151,40 @@ class PendingUserInput(BaseModel):
     interrupt_id: str = Field(min_length=1, max_length=255)
     namespace: list[str] = Field(default_factory=list)
     payload: UserInputForm
+
+
+def build_confirmed_input_context(histories: list[list[dict[str, Any]]]) -> str:
+    """优先保留最近确认记录，按完整字段限制上下文长度，不截断或改写用户答案。"""
+    records: list[str] = []
+    remaining = 11500
+    omitted = 0
+    for history in histories:  # Run 从新到旧提供，表单内部按提交顺序存储。
+        for item in reversed(history):
+            try:
+                form = UserInputForm.model_validate(item["payload"])
+                answers = form.validate_answers(item["answers"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            for field in reversed(form.fields):
+                if field.name not in answers:
+                    continue
+                answer = answers[field.name]
+                selected = answer if isinstance(answer, list) else (
+                    answer.get("selected", []) if isinstance(answer, dict) else [answer]
+                )
+                labels = {
+                    option.value: option.label for option in field.options
+                    if isinstance(option, UserInputOption) and option.value in selected
+                }
+                record = json.dumps({
+                    "form": form.title, "question": field.label, "field": field.name,
+                    "answer": answer, **({"option_labels": labels} if labels else {}),
+                }, ensure_ascii=False, separators=(",", ":"))
+                if len(record) + 2 > remaining or len(records) >= 48:
+                    omitted += 1
+                    continue
+                records.append(record)
+                remaining -= len(record) + 2
+    if not records:
+        return ""
+    return '{"confirmed_answers":[' + ",".join(reversed(records)) + '],"omitted_fields":' + str(omitted) + '}'

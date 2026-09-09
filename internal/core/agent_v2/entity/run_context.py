@@ -52,6 +52,7 @@ class AgentRunContext(BaseModel):
     memory_enabled: bool = Field(default=False, strict=True)
     planning_enabled: bool = Field(default=False, strict=True)
     user_input_enabled: bool = False
+    confirmed_user_inputs: str = Field(default="", max_length=12000, exclude=True, repr=False)
     agent_id: str = Field(default="main", min_length=1, max_length=64)
 
     @property

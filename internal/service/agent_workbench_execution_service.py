@@ -145,7 +145,8 @@ class AgentWorkbenchRunExecutionService:
                         row = self.run_service.get_run(run.run_id, recover=False)
                         snapshot = row.state_snapshot if row is not None else {}
                         self._publish_event(run, projector.generated("values", {
-                            "pending_inputs": [], "input_history": (snapshot or {}).get("input_history", []),
+                            "pending_inputs": [], "input_recovery": None,
+                            "input_history": (snapshot or {}).get("input_history", []),
                         }))
                     try:
                         agent, input_message = self.agent_assembly_service.build_agent(
@@ -322,7 +323,7 @@ class AgentWorkbenchRunExecutionService:
         pending = [PendingUserInput.model_validate(item).model_dump(mode="json") for item in result.interrupts]
         row = self.run_service.get_run(run.run_id, recover=False)
         history = list((row.state_snapshot or {}).get("input_history", [])) if row is not None else []
-        state.update(pending_inputs=pending, input_history=history)
+        state.update(pending_inputs=pending, input_history=history, input_recovery=None)
         # 表单及等待状态在同一事务提交，避免浏览器收到尚不可提交的表单。
         final_events = [AgentProtocolEventProjector.to_public_event(projector.generated("values", state))]
         final_events.extend(

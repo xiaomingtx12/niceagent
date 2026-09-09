@@ -193,6 +193,29 @@ def test_resume_claim_is_idempotent_and_retains_form_history():
     assert service._launch_run.call_args.args[0].resume == {"question": {"audience": "Expert", "length": 500}}
 
 
+def test_resume_field_error_returns_location_without_claiming_execution():
+    """无效答案返回字段定位，原表单保持等待且不会启动后台任务。"""
+    service, row, context, response = paused_service()
+    response.responses[0].response["length"] = True
+    result = service.respond_input(context=context, response=response)
+    assert result.type == "error"
+    assert result.field_errors == {"question": {"length": "答案格式不正确：Length"}}
+    assert row.status == "waiting_input"
+    assert row.state_snapshot["pending_inputs"]
+    service._launch_run.assert_not_called()
+
+
+def test_resume_structured_answer_is_idempotent_and_visible_in_history():
+    """无法回答是明确状态，不能在持久化或恢复时退化为空答案。"""
+    service, row, context, response = paused_service()
+    response.responses[0].response["audience"] = {"status": "unavailable"}
+    service.respond_input(context=context, response=response)
+    service.respond_input(context=context, response=response)
+    assert row.state_snapshot["input_history"][0]["answers"]["audience"] == {"status": "unavailable"}
+    assert service._launch_run.call_args.args[0].resume["question"]["audience"] == {"status": "unavailable"}
+    service._launch_run.assert_called_once()
+
+
 @pytest.mark.parametrize("case", ["changed_answer", "stale_id", "changed_config", "missing_conversation"])
 def test_resume_rejects_invalid_or_stale_requests_without_launch(case):
     """过期表单、配置漂移、越权会话和重复修改不能恢复执行。"""
