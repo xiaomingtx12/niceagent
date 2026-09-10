@@ -6,7 +6,7 @@ from uuid import UUID
 
 from internal.entity import WORKBENCH_TERMINAL_STATUSES
 from internal.model import AgentRun
-from internal.schema.agent_workbench_schema import WorkbenchEvent
+from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
 
 _PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history", "input_recovery")
 

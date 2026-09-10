@@ -10,9 +10,9 @@ from uuid import UUID, uuid4
 from langchain_core.language_models._compat_bridge import message_to_events
 from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 
-from internal.schema.agent_workbench_schema import WorkbenchEvent
+from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
 from internal.core.agent_v2.entity.agent_event import AgentEvent
-from internal.schema.agent_context_schema import ContextWindowResp, ContextCompactionResp
+from internal.schema.agent.agent_context_schema import ContextWindowResp, ContextCompactionResp
 from pydantic import ValidationError
 
 _TERMINAL_LIFECYCLE_EVENTS = frozenset(

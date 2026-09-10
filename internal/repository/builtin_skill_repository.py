@@ -15,7 +15,7 @@ import yaml
 
 from config import Config
 from internal.entity import BuiltinSkill
-from internal.schema.skill_schema import (
+from internal.schema.skill.skill_schema import (
     BuiltinSkillManifestReq,
     normalize_manifest_string_list,
 )

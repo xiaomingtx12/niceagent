@@ -1,20 +1,20 @@
-from .schema import DictField, JsonBoolean, JsonString, ListField
-from .agent_attachment_schema import AgentAttachmentResp
-from .agent_tool_schema import (
+from .common.schema import DictField, JsonBoolean, JsonString, ListField
+from .agent.agent_attachment_schema import AgentAttachmentResp
+from .agent.agent_tool_schema import (
     AppWithWorkflowGeneratorToolReq,
     CreateAppToolReq,
     DatasetRetrievalToolReq,
     WorkflowGeneratorToolReq,
 )
-from .agent_runtime_schema import (
+from .agent.agent_runtime_schema import (
     AgentAppCleanupReq,
     AgentConversationCleanupReq,
     AgentInvocation,
     AgentInvocationContext,
     AgentMessageCleanupReq,
 )
-from .app_config_schema import AgentAppConfigReq, DraftAppConfigPatchReq
-from .agent_workbench_schema import (
+from .app.app_config_schema import AgentAppConfigReq, DraftAppConfigPatchReq
+from .agent.agent_workbench_schema import (
     WorkbenchCancelResp,
     WorkbenchCommandReq,
     WorkbenchCommandInputReq,
@@ -36,7 +36,7 @@ from .agent_workbench_schema import (
     WorkbenchRunObservabilityResp,
     WorkbenchStateResp,
 )
-from .workspace_file_schema import (
+from .file.workspace_file_schema import (
     ConversationWorkspaceFileReq,
     DeleteWorkspaceFileReq,
     ListWorkspaceFilesReq,
@@ -46,7 +46,7 @@ from .workspace_file_schema import (
     WorkspaceFileResp,
     WriteWorkspaceFileReq,
 )
-from .memory_file_schema import (
+from .memory.memory_file_schema import (
     DeleteMemoryFileReq,
     ListMemoryFilesResp,
     MemoryFileContentResp,
@@ -54,7 +54,7 @@ from .memory_file_schema import (
     ReadMemoryFileReq,
     WriteMemoryFileReq,
 )
-from .internal_agent_protocol_schema import (
+from .agent_protocol.internal_agent_protocol_schema import (
     InternalRunCreateReq,
     InternalRunLaunchResp,
     InternalRunResp,

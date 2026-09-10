@@ -15,15 +15,15 @@ from internal.repository import (
     CosObjectStorageRepository,
     WorkspaceFileStore,
 )
-from internal.service.agent_workbench_event_queue import (
+from internal.service.agent.agent_workbench_event_queue import (
     AgentWorkbenchEventQueueManager,
 )
-from internal.service.agent_workbench_execution_service import (
+from internal.service.agent.agent_workbench_execution_service import (
     AgentWorkbenchRunExecutionService,
 )
-from internal.service.agent_workbench_service import AgentWorkbenchService
-from internal.service.embeddings_service import EmbeddingsService
-from internal.service.faiss_service import FaissService
+from internal.service.agent.agent_workbench_service import AgentWorkbenchService
+from internal.service.dataset.embeddings_service import EmbeddingsService
+from internal.service.dataset.faiss_service import FaissService
 from pkg.sqlalchemy import SQLAlchemy
 
 

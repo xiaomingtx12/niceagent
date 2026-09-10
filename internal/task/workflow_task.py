@@ -17,7 +17,7 @@ def auto_generate_workflow(
     """根据需求自动生成工作流"""
     from app.http.module import injector
     from internal.model import Account
-    from internal.service.workflow_generator_service import WorkflowGeneratorService
+    from internal.service.workflow.workflow_generator_service import WorkflowGeneratorService
     try:
         # 1. 获取服务
         workflow_generator_service = injector.get(WorkflowGeneratorService)
@@ -66,8 +66,8 @@ def auto_generate_app_with_workflow(
     from app.http.module import injector
     from internal.model import Account, App, Workflow
     from internal.model.app import AppConfigVersion
-    from internal.service.workflow_generator_service import WorkflowGeneratorService
-    from internal.service.workflow_service import WorkflowService
+    from internal.service.workflow.workflow_generator_service import WorkflowGeneratorService
+    from internal.service.workflow.workflow_service import WorkflowService
     from internal.entity.app_entity import AppStatus, AppConfigType, DEFAULT_APP_CONFIG
     from internal.entity.workflow_entity import WorkflowStatus
     try:
@@ -166,7 +166,7 @@ def auto_generate_app_with_workflow(
         if auto_publish:
             workflow_service.update(workflow, is_debug_passed=True)
             workflow_service.publish_workflow(workflow.id, account)
-            from internal.service.app_service import AppService
+            from internal.service.app.app_service import AppService
             app_service = injector.get(AppService)
             app_service.publish_draft_app_config(app.id, account)
 

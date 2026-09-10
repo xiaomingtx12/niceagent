@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from config.config import Config
 from internal.repository import BuiltinSkillRepository
-from internal.service.skill_service import SkillService
+from internal.service.skill.skill_service import SkillService
 
 EXPECTED_HEAD = "d_v2_008_agent_trace_fields"
 

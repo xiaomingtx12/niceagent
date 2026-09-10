@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 from internal.model import AgentRun, Message
-from internal.schema.agent_workbench_schema import WorkbenchHistoryMessageResp
+from internal.schema.agent.agent_workbench_schema import WorkbenchHistoryMessageResp
 
 
 def project_conversation_messages(

@@ -9,6 +9,6 @@ from celery import shared_task
 def run_agent_evaluation(evaluation_id: str) -> None:
     """沿用应用注入器，在 Celery 的 Flask 上下文内执行。"""
     from app.http.module import injector
-    from internal.service.agent_evaluation_service import AgentEvaluationService
+    from internal.service.agent_evaluation.agent_evaluation_service import AgentEvaluationService
 
     injector.get(AgentEvaluationService).process(UUID(evaluation_id))

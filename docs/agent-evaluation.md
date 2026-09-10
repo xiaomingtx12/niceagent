@@ -33,8 +33,8 @@
 
 ## 代码职责
 
-- `internal/service/agent_evaluation_service.py` 处理授权、快照持久化、幂等提交和任务状态；Worker 仅清理当前记录的超时状态，详情轮询也仅更新指定记录。
-- `internal/service/agent_evaluation_grader.py` 负责模型评分、输出解析、证据校验与汇总，不依赖数据库或 Celery。
+- `internal/service/agent_evaluation/agent_evaluation_service.py` 处理授权、快照持久化、幂等提交和任务状态；Worker 仅清理当前记录的超时状态，详情轮询也仅更新指定记录。
+- `internal/service/agent_evaluation/agent_evaluation_grader.py` 负责模型评分、输出解析、证据校验与汇总，不依赖数据库或 Celery。
 - 前端 `src/hooks/use-agent-evaluation.ts` 管理请求、提交与轮询生命周期；`EvaluationView.vue` 负责页面组合。切换任务只请求新详情，不刷新列表；迟到的提交结果不会覆盖用户后续导航。
 - 测评表的测试镜像保留 ORM 非空约束。另有 PostgreSQL 诊断字段的故障注入测试，区分已知旧库约束、唯一键竞争和其他数据库异常。
 
