@@ -4,9 +4,40 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="refactor(docs): AGENTS.md内容更新">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.workbuddy/memory/2026-08-13.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_evaluation.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_evaluation_runtime.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_startup_latency.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_agent_user_input.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_audio_service.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_builtin_business_tools.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_builtin_catalog_upgrade.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_builtin_skill_repository.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_builtin_web_readers.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_context_compaction.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_context_window.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_daytona_sandbox_backend.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_file_memory.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_language_model_exception_boundary.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_lazy_sandbox_backend.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_model_parameters.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_observability.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_postgres_retry.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_sandbox_skill_upload.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_session_sandbox_pool.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_structured_memory.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_user_input_fields.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workbench_model_selection.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workbench_planning.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workbench_progress_stream.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workspace_connection_lifecycle.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workspace_file_service.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workspace_file_store.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workspace_path.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workspace_quota.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/test_workspace_scope.py" beforeDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
@@ -810,7 +841,15 @@
       <option name="project" value="LOCAL" />
       <updated>1788093620410</updated>
     </task>
-    <option name="localTasksCounter" value="44" />
+    <task id="LOCAL-00044" summary="refactor(docs): AGENTS.md内容更新">
+      <option name="closed" value="true" />
+      <created>1789054431742</created>
+      <option name="number" value="00044" />
+      <option name="presentableId" value="LOCAL-00044" />
+      <option name="project" value="LOCAL" />
+      <updated>1789054431742</updated>
+    </task>
+    <option name="localTasksCounter" value="45" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -828,7 +867,6 @@
     </option>
   </component>
   <component name="VcsManagerConfiguration">
-    <MESSAGE value="feat(nltk_data): 添加多语言缩略词类型词典文件&#10;&#10;- 新增捷克语缩略词类型文件，包含118条缩略词&#10;- 新增丹麦语缩略词类型文件，包含211条缩略词&#10;- 新增荷兰语缩略词类型文件，包含99条缩略词&#10;- 新增英语缩略词类型文件，包含156条缩略词&#10;- 新增爱沙尼亚语缩略词类型文件，包含48条缩略词&#10;- 新增芬兰语缩略词类型文件，包含81条缩略词&#10;- 新增法语缩略词类型文件，包含61条缩略词&#10;- 新增德语缩略词类型文件，包含71条缩略词&#10;- 新增希腊语缩略词类型文件，包含100条缩略词&#10;- 新增意大利语缩略词类型文件，包含125条缩略词&#10;- 新增挪威语缩略词类型文件，包含106条缩略词&#10;- 新增波兰语缩略词类型文件，包含225条缩略词&#10;- 新增葡萄牙语缩略词类型文件，包含72条缩略词&#10;- 新增俄语缩略词类型文件，包含1989条缩略词" />
     <MESSAGE value="feat(app): 替换icon生成模型为通义千问&#10;&#10;- 修改icon描述提示词模板，适配通义千问AI绘画&#10;- 替换app_service.py中DallEAPIWrapper为qwen_image_generation接口&#10;- 更新生成icon链调用方法，使用qwen_image_wrapper._run&#10;- 新增dashscope依赖至requirements.txt&#10;- 在providers.yaml中新增dashscope提供者配置&#10;- 配置文件新增Celery和Redis连接重试及连接池参数&#10;- 调整.idea/workspace.xml，新增Python测试配置和部分环境设置" />
     <MESSAGE value="feat(dashscope): 新增通义千问图像生成工具&#10;&#10;- 添加QwenImageGenerationTool类，实现基于DashScope API的图像生成功能&#10;- 支持输入文本提示，调用qwen-image-max模型生成指定尺寸的图像&#10;- 提供参数模型QwenImageGenerationArgsSchema，定义输入参数格式&#10;- 实现API调用错误处理及响应结果解析，返回生成图像URL或错误信息&#10;- 添加工具注册配置文件positions.yaml及工具描述配置文件qwen_image_generation.yaml&#10;- 支持多种图片尺寸选择，默认1664x928，支持环境变量API密钥配置" />
     <MESSAGE value="feat(core): 支持多用户嵌入模型和Faiss向量库初始化&#10;&#10;- EmbeddingsService新增用户级别初始化方法，支持基于请求上下文缓存用户嵌入模型实例  &#10;- FaissService改为延迟初始化模式，利用用户上下文中的嵌入模型初始化对应Faiss数据库  &#10;- 添加对当前请求上下文用户ID的校验，确保嵌入和Faiss服务可用性  &#10;- AIService、ConversationService、LanguageModelService等服务中集成用户API Key管理，支持加载用户配置模型  &#10;- AIHandler及相关服务支持传入用户账号及应用ID，优化prompt生成和建议问题生成以适配用户模型  &#10;- AssistantAgentService在会话创建时获取用户API Key，支持多用户独立的智能体会话实例  &#10;- AudioService中语音转文本相关调用，新增用户API Key传递以支持个性化请求  &#10;- 完成ProviderApiKey相关模块注册与导出，统一API Key获取接口增强安全性和配置灵活性  &#10;- 高德天气工具支持API Key参数注入，优先使用传入Key，兼容环境变量配置  &#10;- LLM节点和Workflow支持传入用户ID进行模型加载，提高定制化能力和隔离性  &#10;- 修正嵌入模型Token计算逻辑，移除环境变量依赖，确保用户密钥安全  &#10;- 增加异常捕获与日志，优化模型加载失败回退机制及错误提示信息  &#10;- 文档及Handler导入统一ProviderApiKey类，增强代码模块解耦和可维护性" />
@@ -853,7 +891,8 @@
     <MESSAGE value="feat(mcp): 集成并支持 MCP 插件系统&#10;&#10;- 删除无用的 system_model_config 数据库表&#10;- 引入 MCPHandler 并添加至处理器集合&#10;- 扩充模型模块，加入 MCPServer 和 MCPTool 类&#10;- 支持 schema 模块中 DictField 导入&#10;- 实现 MCPService 服务，并加入服务集合&#10;- app_config_service 中集成 MCPRuntimeManager 的工具获取&#10;- 扩展 app_service，支持 MCP 工具参数校验与查询&#10;- 注册 MCPHandler 的路由接口，支持 MCP 服务及工具相关操作&#10;- workflow_service 支持 MCP 工具类型的流程节点元数据填充&#10;- workflow_nodes 中支持 MCP 工具节点的创建及调用逻辑&#10;- 添加依赖 langchain-mcp-adapters 和 mcp，更新requirements.txt&#10;- 更新运行配置，添加 mcp_demo_server 调试环境&#10;- 优化项目配置和排除文件，提升开发体验" />
     <MESSAGE value="test(agent-v2): remove deprecated test files" />
     <MESSAGE value="fix(audio): refine permission validation for different invoke sources" />
-    <option name="LAST_COMMIT_MESSAGE" value="fix(audio): refine permission validation for different invoke sources" />
+    <MESSAGE value="refactor(docs): AGENTS.md内容更新" />
+    <option name="LAST_COMMIT_MESSAGE" value="refactor(docs): AGENTS.md内容更新" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
