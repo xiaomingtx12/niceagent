@@ -52,7 +52,11 @@ class _EventSignal:
             self.condition.wait_for(lambda: self.version != version, timeout=timeout)
 
     def read_events(
-        self, cursor: int, *, load: Callable[[], WorkbenchEventBatchResp], recover: Callable[[], None],
+        self,
+        cursor: int,
+        *,
+        load: Callable[[], WorkbenchEventBatchResp],
+        recover: Callable[[], None] | None = None,
     ) -> WorkbenchEventBatchResp:
         """同游标订阅共享已提交批次；最多保留两批 0.5 秒，通知后立即失效。"""
         with self.read_lock:
@@ -68,7 +72,7 @@ class _EventSignal:
             if cache_valid:
                 return cached.batch
             # 2.多个订阅者共享恢复节流，避免每次轮询都执行失联恢复查询。
-            if now >= self.recovery_at:
+            if recover is not None and now >= self.recovery_at:
                 recover()
                 self.recovery_at = time.monotonic() + 10
             # 3.缓存只保留最近两个游标，连接断开时由 watch_events 回收整个信号。

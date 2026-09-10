@@ -24,6 +24,7 @@ from internal.service.agent_protocol.event_projector import (
 )
 from internal.service.agent_protocol.state_projector import project_snapshot_values
 from internal.entity.conversation_entity import InvokeFrom
+from internal.exception import FailException, ValidateErrorException
 from internal.model import AgentRun, AgentRunEvent, Message
 from internal.schema.agent.agent_workbench_schema import (
     WorkbenchEvent,
@@ -47,7 +48,7 @@ class AgentWorkbenchRunService:
         """在调用方事务中创建平台级 ``AgentRun`` 数据库记录。"""
         # 1.校验运行上下文，建立平台 Run 摘要。
         if run.spec.app_id is None:
-            raise ValueError("工作台 Run 缺少 app_id")
+            raise ValidateErrorException("工作台 Run 缺少 app_id")
         row = AgentRun(
             id=run.run_id,
             app_id=run.spec.app_id,
@@ -85,9 +86,9 @@ class AgentWorkbenchRunService:
                 .one_or_none()
             )
             if row is None or row.executor_id != run.executor_id:
-                raise RuntimeError("Agent Run 执行权已失效")
+                raise FailException("Agent 运行已失效，请重新发送消息")
             if row.status in WORKBENCH_TERMINAL_STATUSES:
-                raise RuntimeError("Agent Run 已结束")
+                raise FailException("Agent 运行已结束，请重新发送消息")
             if (
                 row.status == WorkbenchRunStatus.CANCELLING.value
                 and status is WorkbenchRunStatus.RUNNING
@@ -210,11 +211,11 @@ class AgentWorkbenchRunService:
                 .one_or_none()
             )
             if row is None:
-                raise RuntimeError("Agent Run 执行权已失效，不能继续发布事件")
+                raise FailException("Agent 运行已失效，不能继续发布事件")
             owns_execution = row.executor_id == run.executor_id
             has_finished = row.status in WORKBENCH_TERMINAL_STATUSES
             if not owns_execution or has_finished:
-                raise RuntimeError("Agent Run 执行权已失效，不能继续发布事件")
+                raise FailException("Agent 运行已失效，不能继续发布事件")
             previous_sequence = int(row.last_event_sequence or 0)
             row.last_event_sequence = max(previous_sequence, latest_sequence)
             if latest_snapshot is not None and snapshot_sequence >= previous_sequence:
@@ -249,8 +250,7 @@ class AgentWorkbenchRunService:
         self, *, conversation_id: UUID | None = None, run_id: UUID | None = None
     ) -> None:
         """按访问范围收敛失联 Run；终态、消息和 SSE 事件在同一事务提交。"""
-        if conversation_id is None and run_id is None:
-            raise ValueError("恢复运行必须指定会话或 Run")
+        # 未指定范围时用于后台 sweeper 扫描全局失联 Run；带范围时仅收敛对应记录。
         now = datetime.now(UTC).replace(tzinfo=None)
         with self.db.auto_commit():
             query = self.db.session.query(AgentRun).filter(
@@ -386,9 +386,11 @@ class AgentWorkbenchRunService:
         *,
         conversation_id: UUID,
         invoke_from: InvokeFrom,
+        recover: bool = True,
     ) -> AgentRun | None:
         """读取会话指定来源的最新 Run，并释放只读 Session。"""
-        self.recover_stale_runs(conversation_id=conversation_id)
+        if recover:
+            self.recover_stale_runs(conversation_id=conversation_id)
         try:
             return (
                 self.db.session.query(AgentRun)
@@ -513,11 +515,12 @@ class AgentWorkbenchRunService:
         *,
         conversation_id: UUID,
         invoke_from: InvokeFrom,
+        run_id: UUID | None = None,
         since: int,
         limit: int = 256,
     ) -> WorkbenchEventBatchResp:
         """按落库序号推进扫描游标，避免隐藏事件占满一批后阻断续传。"""
-        rows = (
+        query = (
             self.db.session.query(AgentRunEvent.sequence, AgentRunEvent.payload)
             .join(AgentRun, AgentRun.id == AgentRunEvent.run_id)
             .filter(
@@ -525,6 +528,11 @@ class AgentWorkbenchRunService:
                 AgentRun.invoke_from == invoke_from.value,
                 AgentRunEvent.sequence > since,
             )
+        )
+        if run_id is not None:
+            query = query.filter(AgentRun.id == run_id)
+        rows = (
+            query
             .order_by(AgentRunEvent.sequence.asc())
             .limit(limit)
             .all()

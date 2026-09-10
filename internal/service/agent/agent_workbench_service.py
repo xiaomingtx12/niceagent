@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -17,7 +18,10 @@ from injector import inject
 from internal.service.agent_protocol.message_projector import (
     project_conversation_messages,
 )
-from internal.service.agent_protocol.state_projector import project_snapshot_values, project_run_history
+from internal.service.agent_protocol.state_projector import (
+    project_run_history,
+    project_snapshot_values,
+)
 from internal.entity import (
     WORKBENCH_ACTIVE_STATUSES,
     WORKBENCH_TERMINAL_STATUSES,
@@ -25,14 +29,21 @@ from internal.entity import (
     WorkbenchRunInput,
     WorkbenchRunStatus,
 )
-from internal.exception import NotFoundException, ValidateErrorException
+from internal.exception import FailException, NotFoundException, ValidateErrorException
 from internal.core.agent_v2.entity.user_input import PendingUserInput
 from internal.extension.logging_extension import logger
 from internal.model import Account, AgentRun, AgentRunEvent, Conversation, Message
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
-from internal.schema.agent.agent_workbench_read_schema import WorkbenchRunEventsResp, WorkbenchStateView
-from internal.schema.agent.agent_runtime_schema import AgentInvocation, AgentInvocationContext, WorkbenchModelSettingsResp
+from internal.schema.agent.agent_workbench_read_schema import (
+    WorkbenchRunEventsResp,
+    WorkbenchStateView,
+)
+from internal.schema.agent.agent_runtime_schema import (
+    AgentInvocation,
+    AgentInvocationContext,
+    WorkbenchModelSettingsResp,
+)
 from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.schema.agent.agent_workbench_schema import (
     WorkbenchCancelResp,
@@ -60,6 +71,14 @@ from internal.service.conversation.conversation_service import ConversationServi
 class AgentWorkbenchService:
     """消费可信调用上下文，编排 Run、状态、取消和事件订阅。"""
 
+    _SSE_HEARTBEAT_SECONDS = 15
+    _RUN_WORKERS = 4
+    _run_executor = ThreadPoolExecutor(
+        max_workers=_RUN_WORKERS,
+        thread_name_prefix="agent-workbench",
+    )
+    _run_slots = threading.BoundedSemaphore(_RUN_WORKERS)
+
     db: SQLAlchemy
     run_service: AgentWorkbenchRunService
     queue_manager: AgentWorkbenchEventQueueManager
@@ -73,40 +92,80 @@ class AgentWorkbenchService:
         context: AgentInvocationContext,
         stream_request: WorkbenchEventStreamReq,
     ) -> Iterator[dict[str, Any] | None]:
-        """使用已提交事件续传，跨进程订阅和快速结束的 Run 走同一条路径。"""
-        # 权限校验已完成；释放其 Session，首批查询延后至 SSE 连接头发出后。
+        """创建事件流；数据库 Session 在流开始前释放，避免占用请求连接。"""
+        # 1.权限校验已在 Handler 调用上下文时完成；这里释放请求 Session，避免流连接长期占用。
+        run_id = stream_request.run_id
+        run = self.run_service.get_run(run_id, recover=False)
+        if (
+            run is None
+            or run.app_id != context.app_id
+            or run.conversation_id != context.conversation_id
+            or run.invoke_from != context.invoke_from.value
+        ):
+            raise NotFoundException("Agent Run 不存在或不属于当前会话")
         self.db.session.close()
+        # 2.返回延迟执行的生成器，首批事件会在 SSE 响应开始迭代后读取。
+        return self._stream_events(
+            context=context, stream_request=stream_request, run_id=run_id
+        )
 
-        def stream_events() -> Iterator[dict[str, Any] | None]:
-            """每批读取后释放 Session；过滤事件同样推进内部扫描游标。"""
-            cursor = stream_request.since
-            heartbeat_at = time.monotonic() + 15
-            with self.queue_manager.watch_events(context.conversation_id, context.invoke_from) as signal:
-                while True:
-                    version = signal.snapshot()
-                    try:
-                        batch = signal.read_events(
-                            cursor,
-                            recover=lambda: self.run_service.recover_stale_runs(conversation_id=context.conversation_id),
-                            load=lambda: self.run_service.get_reconnect_events(
-                                conversation_id=context.conversation_id,
-                                invoke_from=context.invoke_from,
-                                since=cursor,
-                            ),
-                        )
-                    finally:
-                        self.db.session.close()
-                    for event in batch.events:
-                        if stream_request.matches(event):
-                            yield event.model_dump(mode="json")
-                    cursor = batch.next_sequence
-                    if time.monotonic() >= heartbeat_at:
-                        yield None
-                        heartbeat_at = time.monotonic() + 15
-                    if not batch.has_more:
-                        signal.wait(version, timeout=0.5)
+    def _stream_events(
+        self,
+        *,
+        context: AgentInvocationContext,
+        stream_request: WorkbenchEventStreamReq,
+        run_id: UUID,
+    ) -> Iterator[dict[str, Any] | None]:
+        """读取已提交事件并产生 SSE 心跳哨兵，队列管理器只负责事件通知。"""
+        # 1.从客户端游标开始续传；游标只根据已扫描的事件批次推进。
+        cursor = stream_request.since
+        heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
+        with self.queue_manager.watch_events(
+            context.conversation_id, context.invoke_from
+        ) as signal:
+            while True:
+                # 2.先记录通知版本，再查询数据库，避免查询期间的提交被漏掉。
+                version = signal.snapshot()
+                try:
+                    # 3.共享已提交事件批次；失联 Run 由后台 sweeper 收敛。
+                    batch = signal.read_events(
+                        cursor,
+                        load=lambda: self.run_service.get_reconnect_events(
+                            conversation_id=context.conversation_id,
+                            invoke_from=context.invoke_from,
+                            run_id=run_id,
+                            since=cursor,
+                        ),
+                    )
+                finally:
+                    # 4.每批查询结束立即释放线程 Session，下一批读取时重新获取连接。
+                    self.db.session.close()
 
-        return stream_events()
+                # 5.过滤只影响发送内容，不影响内部游标，避免被过滤事件反复扫描。
+                for event in batch.events:
+                    if stream_request.matches(event):
+                        yield event.model_dump(mode="json")
+                terminal = any(
+                    event.method == "lifecycle"
+                    and isinstance(event.params.data, Mapping)
+                    and event.params.data.get("status") in WORKBENCH_TERMINAL_STATUSES
+                    for event in batch.events
+                )
+                cursor = batch.next_sequence
+
+                if time.monotonic() >= heartbeat_at:
+                    # 6.心跳仅维持 SSE 连接；None 由响应适配器编码为注释行，不进入业务事件流。
+                    yield None
+                    heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
+                if not batch.has_more:
+                    if terminal:
+                        return
+                    if not batch.events:
+                        status = self.run_service.get_run_status(run_id)
+                        if status in WORKBENCH_TERMINAL_STATUSES:
+                            return
+                    # 7.当前批次已读完才等待通知；仍有后续批次时立即继续读取。
+                    signal.wait(version, timeout=0.5)
 
     def get_state(
         self,
@@ -115,7 +174,6 @@ class AgentWorkbenchService:
         view: WorkbenchStateView = "full",
     ) -> WorkbenchStateResp:
         """使用入口已校验的上下文读取工作台状态。"""
-        self.run_service.recover_stale_runs(conversation_id=context.conversation_id)
         if view == "status":
             metadata = self.run_service.get_run_metadata(
                 conversation_id=context.conversation_id, invoke_from=context.invoke_from,
@@ -149,39 +207,28 @@ class AgentWorkbenchService:
         if latest_run is not None and isinstance(latest_run.state_snapshot, Mapping):
             source_snapshot = latest_run.state_snapshot
         values = project_snapshot_values(source_snapshot)
-        values["messages"] = [message.model_dump(mode="json") for message in messages]
+        values["messages"] = [
+            message.model_dump(mode="json") for message in messages
+        ]
         if latest_run is not None and latest_run.status in WORKBENCH_ACTIVE_STATUSES:
             current_ids = {
                 str(latest_run.input_message_id),
                 f"{latest_run.message_id}:human",
                 f"{latest_run.message_id}:assistant",
             }
-            pending_messages = [
-                message
-                for message in source_snapshot.get("messages", [])
-                if isinstance(message, dict) and message.get("id") in current_ids
-            ]
+            pending_messages = []
+            for message in source_snapshot.get("messages", []):
+                if not isinstance(message, dict):
+                    continue
+                if message.get("id") in current_ids:
+                    pending_messages.append(message)
             by_id = {message["id"]: message for message in values["messages"]}
             by_id.update({message["id"]: message for message in pending_messages})
             values["messages"] = list(by_id.values())
         values["message_page"] = message_page.model_dump(mode="json")
 
         # 3.恢复运行详情；合成快照仅用于水合，不参与 SSE 游标。
-        deferred_ids = {
-            run.id for run in persisted_runs
-            if view == "compact" and run.status in WORKBENCH_TERMINAL_STATUSES
-        }
-        events_by_run = self.run_service.list_events_by_run(
-            [run.id for run in persisted_runs if run.id not in deferred_ids]
-        )
-        if deferred_ids:
-            events_by_run.update(self.run_service.list_context_events_by_run(list(deferred_ids)))
-        if view == "compact":
-            values["deferred_run_ids"] = [str(run.id) for run in persisted_runs if run.id in deferred_ids]
-        values["workbench_events"] = [
-            event.model_dump(mode="json")
-            for event in project_run_history(persisted_runs, events_by_run)
-        ]
+        values.update(self._project_state_events(persisted_runs, view=view))
 
         # 4.当前运行优先，找不到运行记录时返回空闲状态。
         if latest_run is None:
@@ -190,20 +237,8 @@ class AgentWorkbenchService:
             run_id = latest_run.id
             status = str(latest_run.status)
             last_event_sequence = int(latest_run.last_event_sequence or 0)
-        # 5.等待输入时才生成待办表单，先组装字段再构造状态响应。
-        tasks = []
-        if status == "waiting_input":
-            for item in values.get("pending_inputs", []):
-                interrupt = {
-                    "id": item["interrupt_id"],
-                    "value": item["payload"],
-                    "ns": item.get("namespace", []),
-                }
-                tasks.append({
-                    "id": item["interrupt_id"],
-                    "name": "ask_user",
-                    "interrupts": [interrupt],
-                })
+        # 5.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
+        tasks = self._build_pending_tasks(status, values)
         return WorkbenchStateResp(
             values=values,
             next=["agent"] if status in WORKBENCH_ACTIVE_STATUSES else [],
@@ -215,11 +250,75 @@ class AgentWorkbenchService:
             ),
         )
 
+    def _project_state_events(
+        self,
+        persisted_runs: list[AgentRun],
+        *,
+        view: WorkbenchStateView,
+    ) -> dict[str, Any]:
+        """按视图读取运行事件；compact 终态只读取上下文事件摘要。"""
+        deferred_ids: set[UUID] = set()
+        if view == "compact":
+            deferred_ids = {
+                run.id
+                for run in persisted_runs
+                if run.status in WORKBENCH_TERMINAL_STATUSES
+            }
+
+        event_run_ids = [run.id for run in persisted_runs if run.id not in deferred_ids]
+        events_by_run = self.run_service.list_events_by_run(event_run_ids)
+        if deferred_ids:
+            events_by_run.update(
+                self.run_service.list_context_events_by_run(list(deferred_ids))
+            )
+
+        result = {
+            "workbench_events": [
+                event.model_dump(mode="json")
+                for event in project_run_history(persisted_runs, events_by_run)
+            ]
+        }
+        if view == "compact":
+            result["deferred_run_ids"] = [
+                str(run.id) for run in persisted_runs if run.id in deferred_ids
+            ]
+        return result
+
+    @staticmethod
+    def _build_pending_tasks(
+        status: str,
+        values: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """把待输入快照转换为工作台任务，保持客户端表单协议结构。"""
+        if status != "waiting_input":
+            return []
+
+        tasks = []
+        for item in values.get("pending_inputs", []):
+            interrupt_id = item["interrupt_id"]
+            interrupt = {
+                "id": interrupt_id,
+                "value": item["payload"],
+                "ns": item.get("namespace", []),
+            }
+            tasks.append(
+                {
+                    "id": interrupt_id,
+                    "name": "ask_user",
+                    "interrupts": [interrupt],
+                }
+            )
+        return tasks
+
     def get_run_events(
         self, *, run_id: UUID, account: Account, current_page: int, page_size: int,
     ) -> WorkbenchRunEventsResp:
         """沿用观测接口的会话所有权校验，详情查询不执行失联恢复。"""
-        row = self.db.session.query(AgentRun.app_id, AgentRun.conversation_id).filter(AgentRun.id == run_id).one_or_none()
+        row = (
+            self.db.session.query(AgentRun.app_id, AgentRun.conversation_id)
+            .filter(AgentRun.id == run_id)
+            .one_or_none()
+        )
         if row is None:
             raise NotFoundException("Agent Run 不存在")
         self.conversation_service.get_owned_conversation(
@@ -294,14 +393,14 @@ class AgentWorkbenchService:
                 app_id=context.app_id,
                 invoke_from=context.invoke_from,
             )
+        response_status = str(row.status)
+        if cancel_requested and row.status != "cancelled":
+            response_status = WorkbenchRunStatus.CANCELLING.value
+
         return WorkbenchCancelResp(
             cancel_requested=cancel_requested,
             run_id=row.id,
-            status=(
-                WorkbenchRunStatus.CANCELLING.value
-                if cancel_requested and row.status != "cancelled"
-                else str(row.status)
-            ),
+            status=response_status,
         )
 
     def get_run_observability(
@@ -347,133 +446,25 @@ class AgentWorkbenchService:
         self.run_service.recover_stale_runs(conversation_id=conversation_id)
 
         with self.db.auto_commit():
-            # 1.锁定会话行，使同一会话的启动请求按顺序检查和创建。
-            conversation = (
-                self.db.session.query(Conversation.id)
-                .filter(
-                    Conversation.id == conversation_id,
-                    Conversation.app_id == context.app_id,
-                    Conversation.is_deleted.is_(False),
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if conversation is None:
-                raise NotFoundException("会话不存在或已删除")
-
-            # 2.重复提交同一输入时直接返回已有 Run。
-            duplicate_run = self.run_service.get_run_by_input_message(
-                conversation_id=conversation_id,
-                input_message_id=run_input.input_message_id,
-            )
-            if duplicate_run is not None:
-                if duplicate_run.invoke_from != context.invoke_from.value:
-                    return WorkbenchCommandErrorResp(
-                        id=command_id, message="输入消息已用于其他调用入口"
-                    )
-                local_run = self.queue_manager.get(conversation_id)
-                applied_sequence = self.run_service.get_initial_event_sequence(
-                    duplicate_run
-                )
-                if local_run is not None and local_run.run_id == duplicate_run.id:
-                    applied_sequence = local_run.initial_event_sequence
-                return WorkbenchCommandSuccessResp.create(
-                    command_id=command_id,
-                    run_id=duplicate_run.id,
-                    applied_through_sequence=applied_sequence,
-                )
-
-            # 3.取消中的任务仍占用会话；本地资源尚未关闭时也不启动下一轮。
-            active_run = (
-                self.db.session.query(AgentRun)
-                .filter(
-                    AgentRun.conversation_id == conversation_id,
-                    AgentRun.status.in_((*WORKBENCH_ACTIVE_STATUSES, "waiting_input")),
-                )
-                .first()
-            )
-            local_run = self.queue_manager.get(conversation_id)
-            if active_run is not None or (
-                local_run is not None and not local_run.done.is_set()
-            ):
-                # 停止中的任务优先提示等待，其次是待填表单，最后是普通运行占用。
-                stopping = local_run is not None and local_run.cancel_requested.is_set()
-                waiting_input = False
-                if active_run is not None:
-                    stopping = stopping or active_run.status == WorkbenchRunStatus.CANCELLING.value
-                    waiting_input = active_run.status == "waiting_input"
-                if stopping:
-                    reason = "当前任务正在停止，请稍后重试"
-                elif waiting_input:
-                    reason = "请先完成当前表单"
-                else:
-                    reason = "当前任务已有正在执行的 Agent"
-                return WorkbenchCommandErrorResp(id=command_id, message=reason)
-
-            previous = (
-                self.db.session.query(AgentRun)
-                .filter(AgentRun.conversation_id == conversation_id)
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .first()
-            )
-            cancelled_at_input = False
-            has_input_recovery = False
-            if previous is not None and previous.status == "cancelled":
-                snapshot = previous.state_snapshot or {}
-                interaction = snapshot.get("_interaction", {})
-                cancelled_at_input = bool(interaction.get("cancelled_input"))
-                has_input_recovery = bool(snapshot.get("input_recovery"))
-            if cancelled_at_input:
-                if has_input_recovery:
-                    reason = "此任务已在表单处停止，请点击重新填写后继续，或创建新会话"
-                else:
-                    reason = "此任务已在表单处停止，请创建新会话"
-                return WorkbenchCommandErrorResp(id=command_id, message=reason)
-
-            # 4.解析附件并创建业务消息，与 Run 一起提交或回滚。
-            assembly = self.execution_service.agent_assembly_service
-            assembly.validate_workbench_reasoning(
-                context, run_input.reasoning_effort, run_input.model_selection,
-            )
-            attachments = self.attachment_service.resolve(
-                run_input.file_ids,
-                owner_id=context.account_id,
-            )
-            message = self.conversation_service.create_agent_message(
+            self._lock_conversation(context)
+            duplicate_response = self._check_duplicate_start(
                 context=context,
-                query=run_input.query,
-                image_urls=run_input.image_urls,
-                attachments=dump_agent_attachments(attachments),
+                run_input=run_input,
+                command_id=command_id,
             )
-            invocation = AgentInvocation(
-                **context.model_dump(),
-                message_id=message.id,
-                query=run_input.query,
-                image_urls=run_input.image_urls,
-                attachments=attachments,
-                planning_enabled=run_input.planning_enabled,
-                selected_skills=run_input.selected_skills,
-                reasoning_effort=run_input.reasoning_effort,
-                model_selection=run_input.model_selection,
-                input_message_id=run_input.input_message_id,
+            if duplicate_response is not None:
+                return duplicate_response
+            conflict_response = self._check_start_conflict(
+                context=context,
+                command_id=command_id,
+            )
+            if conflict_response is not None:
+                return conflict_response
+            run, sequence = self._create_run(
+                context=context,
+                run_input=run_input,
                 user_input_enabled=user_input_enabled,
             )
-            if user_input_enabled:
-                fingerprint = assembly.get_definition_fingerprint(invocation)
-                invocation = invocation.model_copy(update={"definition_fingerprint": fingerprint})
-            sequence = self.run_service.get_last_event_sequence(
-                conversation_id=conversation_id,
-                invoke_from=context.invoke_from,
-                close_session=False,
-            )
-            run = WorkbenchRun(
-                run_id=uuid4(),
-                conversation_id=conversation_id,
-                spec=invocation,
-                initial_event_sequence=sequence,
-                last_event_sequence=sequence,
-            )
-            self.run_service.add_run(run)
 
         # 5.提交成功后登记本地 Run，并在独立 Flask 上下文中启动执行。
         self._launch_run(run)
@@ -536,8 +527,12 @@ class AgentWorkbenchService:
             # 3.答案必须覆盖全部待填表单；字段错误保留表单标识供客户端定位。
             if row.status != "waiting_input":
                 raise ValidateErrorException("当前任务没有等待填写的表单")
-            pending = [PendingUserInput.model_validate(item) for item in snapshot.get("pending_inputs", [])]
-            if not pending or set(answers) != {item.interrupt_id for item in pending}:
+            pending = [
+                PendingUserInput.model_validate(item)
+                for item in snapshot.get("pending_inputs", [])
+            ]
+            pending_ids = {item.interrupt_id for item in pending}
+            if not pending or set(answers) != pending_ids:
                 raise ValidateErrorException("表单已失效，请刷新后填写所有待回答问题")
             validated = {}
             for item in pending:
@@ -548,7 +543,8 @@ class AgentWorkbenchService:
                     if field_name is None:
                         raise ValidateErrorException(str(exc)) from exc
                     return WorkbenchCommandErrorResp(
-                        id=command_id, message=str(exc),
+                        id=command_id,
+                        message=str(exc),
                         field_errors={item.interrupt_id: {field_name: str(exc)}},
                     )
             # 4.前一执行实例释放资源、配置指纹一致后，才允许认领恢复执行权。
@@ -692,17 +688,172 @@ class AgentWorkbenchService:
             command_id=command_id, run_id=request.run_id, applied_through_sequence=sequence,
         )
 
+    def _lock_conversation(self, context: AgentInvocationContext) -> None:
+        """锁定当前会话，保证同一会话的启动检查和创建串行执行。"""
+        conversation = (
+            self.db.session.query(Conversation.id)
+            .filter(
+                Conversation.id == context.conversation_id,
+                Conversation.app_id == context.app_id,
+                Conversation.is_deleted.is_(False),
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if conversation is None:
+            raise NotFoundException("会话不存在或已删除")
+
+    def _check_duplicate_start(
+        self,
+        *,
+        context: AgentInvocationContext,
+        run_input: WorkbenchRunInput,
+        command_id: int | None,
+    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp | None:
+        """处理同一输入的重复提交，保证重试返回同一个 Run。"""
+        duplicate_run = self.run_service.get_run_by_input_message(
+            conversation_id=context.conversation_id,
+            input_message_id=run_input.input_message_id,
+        )
+        if duplicate_run is None:
+            return None
+        if duplicate_run.invoke_from != context.invoke_from.value:
+            return WorkbenchCommandErrorResp(
+                id=command_id,
+                message="输入消息已用于其他调用入口",
+            )
+
+        local_run = self.queue_manager.get(context.conversation_id)
+        applied_sequence = self.run_service.get_initial_event_sequence(duplicate_run)
+        if local_run is not None and local_run.run_id == duplicate_run.id:
+            applied_sequence = local_run.initial_event_sequence
+        return WorkbenchCommandSuccessResp.create(
+            command_id=command_id,
+            run_id=duplicate_run.id,
+            applied_through_sequence=applied_sequence,
+        )
+
+    def _check_start_conflict(
+        self,
+        *,
+        context: AgentInvocationContext,
+        command_id: int | None,
+    ) -> WorkbenchCommandErrorResp | None:
+        """判断会话是否仍被活动、停止中或待输入的 Run 占用。"""
+        active_run = (
+            self.db.session.query(AgentRun)
+            .filter(
+                AgentRun.conversation_id == context.conversation_id,
+                AgentRun.status.in_((*WORKBENCH_ACTIVE_STATUSES, "waiting_input")),
+            )
+            .first()
+        )
+        local_run = self.queue_manager.get(context.conversation_id)
+        has_active_database_run = active_run is not None
+        has_active_local_run = local_run is not None and not local_run.done.is_set()
+        if has_active_database_run or has_active_local_run:
+            stopping = local_run is not None and local_run.cancel_requested.is_set()
+            waiting_input = False
+            if active_run is not None:
+                stopping = stopping or active_run.status == WorkbenchRunStatus.CANCELLING.value
+                waiting_input = active_run.status == "waiting_input"
+            if stopping:
+                reason = "当前任务正在停止，请稍后重试"
+            elif waiting_input:
+                reason = "请先完成当前表单"
+            else:
+                reason = "当前任务已有正在执行的 Agent"
+            return WorkbenchCommandErrorResp(id=command_id, message=reason)
+
+        previous = (
+            self.db.session.query(AgentRun)
+            .filter(AgentRun.conversation_id == context.conversation_id)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .first()
+        )
+        if previous is None or previous.status != "cancelled":
+            return None
+        snapshot = previous.state_snapshot or {}
+        interaction = snapshot.get("_interaction", {})
+        if not interaction.get("cancelled_input"):
+            return None
+        if snapshot.get("input_recovery"):
+            reason = "此任务已在表单处停止，请点击重新填写后继续，或创建新会话"
+        else:
+            reason = "此任务已在表单处停止，请创建新会话"
+        return WorkbenchCommandErrorResp(id=command_id, message=reason)
+
+    def _create_run(
+        self,
+        *,
+        context: AgentInvocationContext,
+        run_input: WorkbenchRunInput,
+        user_input_enabled: bool,
+    ) -> tuple[WorkbenchRun, int]:
+        """在当前事务中创建消息、Invocation 和本地 Run。"""
+        assembly = self.execution_service.agent_assembly_service
+        assembly.validate_workbench_reasoning(
+            context,
+            run_input.reasoning_effort,
+            run_input.model_selection,
+        )
+        attachments = self.attachment_service.resolve(
+            run_input.file_ids,
+            owner_id=context.account_id,
+        )
+        message = self.conversation_service.create_agent_message(
+            context=context,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
+            attachments=dump_agent_attachments(attachments),
+        )
+        invocation = AgentInvocation(
+            **context.model_dump(),
+            message_id=message.id,
+            query=run_input.query,
+            image_urls=run_input.image_urls,
+            attachments=attachments,
+            planning_enabled=run_input.planning_enabled,
+            selected_skills=run_input.selected_skills,
+            reasoning_effort=run_input.reasoning_effort,
+            model_selection=run_input.model_selection,
+            input_message_id=run_input.input_message_id,
+            user_input_enabled=user_input_enabled,
+        )
+        if user_input_enabled:
+            fingerprint = assembly.get_definition_fingerprint(invocation)
+            invocation = invocation.model_copy(
+                update={"definition_fingerprint": fingerprint}
+            )
+        sequence = self.run_service.get_last_event_sequence(
+            conversation_id=context.conversation_id,
+            invoke_from=context.invoke_from,
+            close_session=False,
+        )
+        run = WorkbenchRun(
+            run_id=uuid4(),
+            conversation_id=context.conversation_id,
+            spec=invocation,
+            initial_event_sequence=sequence,
+            last_event_sequence=sequence,
+        )
+        self.run_service.add_run(run)
+        return run, sequence
+
     def _launch_run(self, run: WorkbenchRun) -> None:
-        """只在事务提交后启动线程，启动失败由原有失败路径收敛。"""
+        """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。"""
         try:
+            if not self._run_slots.acquire(blocking=False):
+                raise FailException("当前 Agent 执行繁忙，请稍后重试")
             self.queue_manager.register(run)
-            threading.Thread(
-                target=self._execute_background_run,
-                args=(current_app._get_current_object(), run),
-                name=f"agent-workbench-{run.run_id}",
-                daemon=True,
-            ).start()
+            self._run_executor.submit(
+                self._execute_background_run,
+                current_app._get_current_object(),
+                run,
+            )
         except Exception as exc:
+            if self.queue_manager.get(run.conversation_id) is run:
+                self._run_slots.release()
             self._fail_background_run(run, exc)
             raise
 
@@ -718,7 +869,7 @@ class AgentWorkbenchService:
             )
             try:
                 if not self.run_service.renew_lease(run):
-                    raise RuntimeError("Agent Run 执行权已失效")
+                    raise FailException("Agent Run 执行权已失效")
                 lease_monitor.start()
                 self.execution_service.execute(run)
             except Exception as exc:
@@ -728,6 +879,7 @@ class AgentWorkbenchService:
                 if lease_monitor.ident is not None:
                     lease_monitor.join(timeout=1)
                 self.db.session.remove()
+                self._run_slots.release()
 
     def _watch_run_lease(
         self, flask_app: Flask, run: WorkbenchRun, done: threading.Event

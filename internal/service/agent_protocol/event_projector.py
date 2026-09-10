@@ -12,13 +12,22 @@ from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
 from internal.core.agent_v2.entity.agent_event import AgentEvent
-from internal.schema.agent.agent_context_schema import ContextWindowResp, ContextCompactionResp
+from internal.schema.agent.agent_context_schema import (
+    ContextCompactionResp,
+    ContextWindowResp,
+)
 from pydantic import ValidationError
 
 _TERMINAL_LIFECYCLE_EVENTS = frozenset(
     {"completed", "failed", "interrupted", "drained", "cancelled"}
 )
-_PUBLIC_METHODS = frozenset({"messages", "values", "tools", "lifecycle", "custom", "input.requested"})
+_PUBLIC_METHODS = frozenset(
+    {"messages", "values", "tools", "lifecycle", "custom", "input.requested"}
+)
+_CUSTOM_EVENT_SCHEMAS = {
+    "context_window": ContextWindowResp,
+    "context_compaction": ContextCompactionResp,
+}
 
 
 def _json_value(value: Any) -> Any:
@@ -105,6 +114,36 @@ def project_public_state(value: Mapping[str, Any]) -> dict[str, Any]:
     return projected
 
 
+def _project_custom_event_data(event: Mapping[str, Any]) -> dict[str, Any] | None:
+    """校验公开 custom 事件，只允许已定义的上下文观测载荷。"""
+    params = event.get("params")
+    if not isinstance(params, Mapping):
+        return None
+    custom_data = params.get("data")
+    payload = custom_data
+    has_named_payload = (
+        isinstance(custom_data, Mapping)
+        and custom_data.get("name") in _CUSTOM_EVENT_SCHEMAS
+    )
+    if has_named_payload:
+        payload = custom_data.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+
+    schema_type = payload.get("type")
+    schema = _CUSTOM_EVENT_SCHEMAS.get(schema_type)
+    if schema is None:
+        return None
+    try:
+        validated = schema.model_validate(payload)
+    except ValidationError:
+        return None
+    return {
+        "name": validated.type,
+        "payload": validated.model_dump(mode="json"),
+    }
+
+
 class AgentProtocolEventProjector:
     """把一次 DeepAgents v3 运行转换成有序的 Agent Protocol 事件流。
 
@@ -141,18 +180,10 @@ class AgentProtocolEventProjector:
         if not isinstance(method, str) or method not in _PUBLIC_METHODS:
             return None
         if method == "custom":
-            try:
-                custom_data = raw_event.get("params", {}).get("data")
-                schemas = {
-                    "context_window": ContextWindowResp,
-                    "context_compaction": ContextCompactionResp,
-                }
-                payload = custom_data.get("payload") if isinstance(custom_data, Mapping) and custom_data.get("name") in schemas else custom_data
-                schema = schemas.get(payload.get("type"), ContextWindowResp) if isinstance(payload, Mapping) else ContextWindowResp
-                data = schema.model_validate(payload)
-            except ValidationError:
+            public_data = _project_custom_event_data(raw_event)
+            if public_data is None:
                 return None
-            raw_event["params"]["data"] = {"name": data.type, "payload": data.model_dump(mode="json")}
+            raw_event["params"]["data"] = public_data
         return WorkbenchEvent.model_validate(raw_event)
 
     def _event(
@@ -231,7 +262,6 @@ class AgentProtocolEventProjector:
         namespace = event.namespace
         timestamp = event.timestamp
         data = event.data
-
 
         # 待回答事件与等待状态须先原子落库，再由运行服务统一发布。
         if method == "input.requested":

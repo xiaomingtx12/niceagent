@@ -191,6 +191,13 @@ class Config:
             },
             "redis_socket_timeout": 30,
             "redis_socket_connect_timeout": 10,
+            # 运行维护任务由 Celery Beat 定期触发，避免依赖用户读请求做恢复。
+            "beat_schedule": {
+                "recover-stale-agent-runs": {
+                    "task": "internal.task.agent_workbench_task.recover_stale_agent_runs",
+                    "schedule": 30.0,
+                },
+            },
         }
 
         # 辅助Agent应用id标识

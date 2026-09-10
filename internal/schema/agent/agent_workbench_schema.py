@@ -310,6 +310,7 @@ class WorkbenchEventStreamReq(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    run_id: UUID
     since: StrictInt = Field(default=0, ge=0)
     channels: list[
         Literal[
