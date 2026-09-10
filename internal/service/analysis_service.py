@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -11,6 +11,30 @@ from internal.model import Account, App, Message
 from pkg.sqlalchemy import SQLAlchemy
 from .app_service import AppService
 from .base_service import BaseService
+
+
+# 汇总与趋势共用同一组字段，避免新增指标时漏改另一条计算路径。
+_SUM_FIELDS = (
+    "total_token_count",
+    "input_token_count",
+    "output_token_count",
+    "cached_token_count",
+    "reasoning_token_count",
+    "model_call_count",
+    "tool_call_count",
+)
+_OVERVIEW_FIELDS = (
+    "total_messages",
+    "active_accounts",
+    "avg_of_conversation_messages",
+    "average_latency",
+    "token_output_rate",
+    "cost_consumption",
+    *_SUM_FIELDS,
+)
+_TREND_FIELDS = tuple(
+    field for field in _OVERVIEW_FIELDS if field != "token_output_rate"
+)
 
 
 @inject
@@ -34,8 +58,8 @@ class AnalysisService(BaseService):
         fourteen_days_ago = today_midnight - timedelta(days=14)
 
         # 3.计算统计分析数据的缓存键
-        # 升级缓存版本，避免部署后继续返回不含新 Token 字段的旧结果。
-        cache_key = f"analysis_v2:{today.strftime('%Y_%m_%d')}:{str(app.id)}"
+        # 升级缓存版本，避免继续返回旧吞吐口径及缺少平均耗时的缓存。
+        cache_key = f"analysis_v3:{today.strftime('%Y_%m_%d')}:{str(app.id)}"
 
         # 4.从缓存中获取指定的结果，如果存在则直接返回
         try:
@@ -75,23 +99,7 @@ class AnalysisService(BaseService):
             fourteen_days_messages
         )
 
-        # 11.定义5个指标字段名称
-        fields = [
-            "total_messages",
-            "active_accounts",
-            "avg_of_conversation_messages",
-            "token_output_rate",
-            "cost_consumption",
-            "total_token_count",
-            "input_token_count",
-            "output_token_count",
-            "cached_token_count",
-            "reasoning_token_count",
-            "model_call_count",
-            "tool_call_count",
-        ]
-
-        # 12.构建应用分析字典
+        # 11.构建应用分析字典
         app_analysis = {
             **trend,
             **{
@@ -99,7 +107,7 @@ class AnalysisService(BaseService):
                     "data": seven_overview_indicators.get(field),
                     "pop": pop.get(field),
                 }
-                for field in fields
+                for field in _OVERVIEW_FIELDS
             },
             "model_usage": {
                 "data": model_usage,
@@ -110,7 +118,7 @@ class AnalysisService(BaseService):
             },
         }
 
-        # 13.将数据存储到redis缓存中，并设置过期时间为1天
+        # 12.将数据存储到redis缓存中，并设置过期时间为1天
         self.redis_client.setex(cache_key, 24 * 60 * 60, json.dumps(app_analysis))
 
         return app_analysis
@@ -150,104 +158,50 @@ class AnalysisService(BaseService):
     def calculate_overview_indicators_by_messages(
         cls, messages: list[Message]
     ) -> dict[str, Any]:
-        """根据传递的消息列表计算概览指标，涵盖全部会话数、激活用户数、平均会话互动数、Token输出速度、费用消耗"""
-        # 1.计算全部会话数，使用消息总数来计算
-        total_messages = len(messages)
-
-        # 2.计算激活用户数，使用唯一用户数判断
-        active_accounts = len({message.created_by for message in messages})
-
-        # 3.平均会话互动数，使用消息总数/会话总数，涉及除法要做/0判断
-        avg_of_conversation_messages = 0
+        """仅统计有回复的消息；耗时包含工具等待，吞吐不代表模型生成速度。"""
+        message_count = len(messages)
         conversation_count = len({message.conversation_id for message in messages})
-        if conversation_count != 0:
-            avg_of_conversation_messages = total_messages / conversation_count
-
-        # 4.Token输出速度，使用总token数/总耗时，涉及除法要做/0判断
-        token_output_rate = 0
         latency_sum = sum(cls._metric(message, "latency") for message in messages)
-        if latency_sum != 0:
-            token_output_rate = (
-                sum(
-                    cls._metric(message, "total_token_count")
-                    for message in messages
-                )
-                / latency_sum
-            )
-
-        # 5.计算费用消耗，使用总花费进行求和
-        cost_consumption = sum(
-            cls._metric(message, "total_price") for message in messages
-        )
-
-        # 6.返回数据，并且对于小数型数据，如果数值过小，需要转换成float，避免Python使用科学计数法进行展示
+        totals = {
+            field: sum(cls._metric(message, field) for message in messages)
+            for field in _SUM_FIELDS
+        }
         return {
-            "total_messages": total_messages,
-            "active_accounts": active_accounts,
-            "avg_of_conversation_messages": float(avg_of_conversation_messages),
-            "token_output_rate": float(token_output_rate),
-            "cost_consumption": float(cost_consumption),
-            "total_token_count": sum(
-                cls._metric(message, "total_token_count") for message in messages
+            "total_messages": message_count,
+            "active_accounts": len({message.created_by for message in messages}),
+            "avg_of_conversation_messages": (
+                message_count / conversation_count if conversation_count else 0.0
             ),
-            "input_token_count": sum(
-                cls._metric(message, "input_token_count") for message in messages
+            "average_latency": (
+                float(latency_sum / message_count) if message_count else 0.0
             ),
-            "output_token_count": sum(
-                cls._metric(message, "output_token_count") for message in messages
+            "token_output_rate": (
+                float(totals["output_token_count"] / latency_sum)
+                if latency_sum
+                else 0.0
             ),
-            "cached_token_count": sum(
-                cls._metric(message, "cached_token_count") for message in messages
+            "cost_consumption": float(
+                sum(cls._metric(message, "total_price") for message in messages)
             ),
-            "reasoning_token_count": sum(
-                cls._metric(message, "reasoning_token_count")
-                for message in messages
-            ),
-            "model_call_count": sum(
-                cls._metric(message, "model_call_count") for message in messages
-            ),
-            "tool_call_count": sum(
-                cls._metric(message, "tool_call_count") for message in messages
-            ),
+            **totals,
         }
 
     @classmethod
     def calculate_pop_by_overview_indicators(
         cls, current_data: dict[str, Any], previous_data: dict[str, Any]
     ) -> dict[str, Any]:
-        """根据传递的当前数据+相邻时期的数据计算环比增长"""
-        # 1.初始化环比字典
-        pop = {}
-
-        # 2.定义需要计算环比的字段
-        fields = [
-            "total_messages",
-            "active_accounts",
-            "avg_of_conversation_messages",
-            "token_output_rate",
-            "cost_consumption",
-            "total_token_count",
-            "input_token_count",
-            "output_token_count",
-            "cached_token_count",
-            "reasoning_token_count",
-            "model_call_count",
-            "tool_call_count",
-        ]
-
-        # 3.循环遍历字段计算环比增长
-        for field in fields:
-            current_value = current_data.get(field)
-            previous_value = previous_data.get(field)
-
-            # 4.确保上一时期的数据不为0，避免/0错误
-            if previous_value != 0:
-                pop[field] = float((current_value - previous_value) / previous_value)
-            else:
-                # 5.如果前一期数据为0，则直接设置环比为0
-                pop[field] = 0
-
-        return pop
+        """上一周期为零时沿用零环比约定，不产生无穷大。"""
+        return {
+            field: (
+                float(
+                    (current_data.get(field, 0) - previous_data.get(field, 0))
+                    / previous_data[field]
+                )
+                if previous_data.get(field)
+                else 0.0
+            )
+            for field in _OVERVIEW_FIELDS
+        }
 
     @classmethod
     def calculate_model_usage_by_messages(
@@ -328,110 +282,25 @@ class AnalysisService(BaseService):
         days_ago: int,
         messages: list[Message],
     ) -> dict[str, Any]:
-        """根据传递的结束时间、回退天数、消息列表计算对应指标的趋势数据"""
-        # 1.重新计算end_at为午夜时间
+        """按日分组一次，复用概览口径，日期区间为左闭右开。"""
         end_at = datetime.combine(end_at, datetime.min.time())
-
-        # 2.定义初始数据
-        total_messages_trend = {"x_axis": [], "y_axis": []}
-        active_accounts_trend = {"x_axis": [], "y_axis": []}
-        avg_of_conversation_messages_trend = {"x_axis": [], "y_axis": []}
-        cost_consumption_trend = {"x_axis": [], "y_axis": []}
-        token_trends = {
-            field: {"x_axis": [], "y_axis": []}
-            for field in (
-                "total_token_count",
-                "input_token_count",
-                "output_token_count",
-                "cached_token_count",
-                "reasoning_token_count",
-                "model_call_count",
-                "tool_call_count",
-            )
+        start_at = end_at - timedelta(days=days_ago)
+        daily_messages: dict[date, list[Message]] = {}
+        for message in messages:
+            if start_at <= message.created_at < end_at:
+                daily_messages.setdefault(message.created_at.date(), []).append(message)
+        trends = {
+            f"{field}_trend": {"x_axis": [], "y_axis": []} for field in _TREND_FIELDS
         }
-
-        # 3.循环遍历计算并提取数据
         for day in range(days_ago):
-            # 4.计算起点和终点时间
-            trend_start_at = end_at - timedelta(days_ago - day)
-            trend_end_at = end_at - timedelta(days_ago - day - 1)
-
-            # 5.计算全部会话趋势
-            total_messages_trend_y_axis = len(
-                [
-                    message
-                    for message in messages
-                    if trend_start_at <= message.created_at < trend_end_at
-                ]
+            day_start = start_at + timedelta(days=day)
+            indicators = cls.calculate_overview_indicators_by_messages(
+                daily_messages.get(day_start.date(), [])
             )
-            total_messages_trend["x_axis"].append(int(trend_start_at.timestamp()))
-            total_messages_trend["y_axis"].append(total_messages_trend_y_axis)
-
-            # 6.计算激活用户趋势数据
-            active_accounts_trend_y_axis = len(
-                {
-                    message.created_by
-                    for message in messages
-                    if trend_start_at <= message.created_at < trend_end_at
-                }
-            )
-            active_accounts_trend["x_axis"].append(int(trend_start_at.timestamp()))
-            active_accounts_trend["y_axis"].append(active_accounts_trend_y_axis)
-
-            # 7.计算平均会话互动趋势
-            avg_of_conversation_messages_trend_y_axis = 0
-            conversation_count = len(
-                {
-                    message.conversation_id
-                    for message in messages
-                    if trend_start_at <= message.created_at < trend_end_at
-                }
-            )
-            if conversation_count != 0:
-                avg_of_conversation_messages_trend_y_axis = (
-                    total_messages_trend_y_axis / conversation_count
-                )
-            avg_of_conversation_messages_trend["x_axis"].append(
-                int(trend_start_at.timestamp())
-            )
-            avg_of_conversation_messages_trend["y_axis"].append(
-                float(avg_of_conversation_messages_trend_y_axis)
-            )
-
-            # 8.计算费用消耗趋势
-            cost_consumption_trend_y_axis = sum(
-                cls._metric(message, "total_price")
-                for message in messages
-                if trend_start_at <= message.created_at < trend_end_at
-            )
-            cost_consumption_trend["x_axis"].append(int(trend_start_at.timestamp()))
-            cost_consumption_trend["y_axis"].append(
-                float(cost_consumption_trend_y_axis)
-            )
-
-            # 9.计算 Run 级 Token 和调用次数趋势，兼容历史消息。
-            day_messages = [
-                message
-                for message in messages
-                if trend_start_at <= message.created_at < trend_end_at
-            ]
-            for field, trend_data in token_trends.items():
-                trend_data["x_axis"].append(int(trend_start_at.timestamp()))
-                trend_data["y_axis"].append(
-                    sum(cls._metric(message, field) for message in day_messages)
-                )
-
-        # 10.返回数据
-        return {
-            "total_messages_trend": total_messages_trend,
-            "active_accounts_trend": active_accounts_trend,
-            "avg_of_conversation_messages_trend": avg_of_conversation_messages_trend,
-            "cost_consumption_trend": cost_consumption_trend,
-            **{
-                f"{field}_trend": trend_data
-                for field, trend_data in token_trends.items()
-            },
-        }
+            for field in _TREND_FIELDS:
+                trends[f"{field}_trend"]["x_axis"].append(int(day_start.timestamp()))
+                trends[f"{field}_trend"]["y_axis"].append(indicators[field])
+        return trends
 
     @staticmethod
     def _metric(message: Message, field: str) -> int | float:
