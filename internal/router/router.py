@@ -36,6 +36,7 @@ from internal.handler import (
     InternalAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
     CreatorTaskHandler,
+    AgentEvaluationHandler,
 )
 from .agent_workbench_routes import (
     register_agent_workbench_routes,
@@ -85,6 +86,7 @@ class Router:
     internal_agent_protocol_handler: InternalAgentProtocolHandler
     openapi_agent_protocol_handler: OpenAPIAgentProtocolHandler
     creator_task_handler: CreatorTaskHandler
+    agent_evaluation_handler: AgentEvaluationHandler
 
     def register_router(self, app: Flask):
         """注册路由"""
@@ -95,6 +97,12 @@ class Router:
 
         # 2.将url与对应的控制器方法做绑定
         register_app_routes(bp, self.app_handler)
+        evaluation = self.agent_evaluation_handler
+        bp.add_url_rule("/apps/<uuid:app_id>/evaluation-sources", view_func=evaluation.evaluation_sources)
+        bp.add_url_rule("/apps/<uuid:app_id>/evaluation-sources/<uuid:run_id>", view_func=evaluation.evaluation_source)
+        bp.add_url_rule("/apps/<uuid:app_id>/evaluations", methods=["POST"], view_func=evaluation.create_evaluation)
+        bp.add_url_rule("/apps/<uuid:app_id>/evaluations", methods=["GET"], view_func=evaluation.evaluation_history)
+        bp.add_url_rule("/apps/<uuid:app_id>/evaluations/<uuid:evaluation_id>", view_func=evaluation.evaluation_detail)
         # endregion
 
         # region 内置插件广场

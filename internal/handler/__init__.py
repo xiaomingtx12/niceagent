@@ -30,6 +30,7 @@ from .assistant_agent_protocol_handler import AssistantAgentProtocolHandler
 from .internal_agent_protocol_handler import InternalAgentProtocolHandler
 from .openapi_agent_protocol_handler import OpenAPIAgentProtocolHandler
 from .creator_task_handler import CreatorTaskHandler
+from .agent_evaluation_handler import AgentEvaluationHandler
 
 __all__ = [
     "AppHandler",
@@ -64,4 +65,5 @@ __all__ = [
     "InternalAgentProtocolHandler",
     "OpenAPIAgentProtocolHandler",
     "CreatorTaskHandler",
+    "AgentEvaluationHandler",
 ]
