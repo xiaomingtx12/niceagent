@@ -260,7 +260,7 @@ def test_real_agent_graph_initializes_sandbox_only_for_execute(sandbox_setup, us
         runtime=AgentRuntimeResources(
             checkpointer=InMemorySaver(), backend=sandbox_setup.backend,
             permissions=build_filesystem_permissions(), skill_sources=["/skills/"],
-            memory_sources=[], subagent_skill_sources={}, telemetry=AgentTelemetry(),
+            memory_sources=[], subagent_skill_sources={},
             runtime_context=context,
         ),
     )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -15,7 +14,6 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import ToolMessage
 from langchain_core.outputs import LLMResult
-from langgraph.errors import GraphInterrupt
 
 from internal.core.agent_v2.observability.token_usage import (
     normalize_llm_result,
@@ -25,146 +23,27 @@ from internal.core.agent_v2.entity.telemetry import (
     TelemetryValue,
 )
 from internal.core.agent_v2.entity.token_usage import AgentTokenUsageSummary
+from internal.core.agent_v2.observability.callback_metadata import (
+    _TOOL_METADATA_KEYS,
+    _async_subagent_attributes,
+    _bounded_text,
+    _exception_status,
+    _model_identity,
+    _response_model_name,
+    _safe_attributes,
+    _serialized_name,
+)
+from internal.core.agent_v2.observability.summary_progress import (
+    SummaryProgressPublisher,
+)
 
 
-_MODEL_METADATA_KEYS = (
-    "langgraph_node",
-    "lc_agent_name",
-    "ls_model_name",
-    "ls_model_type",
-    "ls_provider",
-    "configured_reasoning_effort",
-)
-_TOOL_METADATA_KEYS = (
-    "langgraph_node",
-    "lc_agent_name",
-)
 _SUBAGENT_TOOL_NAMES = frozenset({"task", "start_async_task"})
 
 
 def _utc_now() -> datetime:
     """返回带 UTC 时区的当前时间。"""
     return datetime.now(UTC)
-
-
-def _bounded_text(value: Any, *, default: str = "unknown") -> str:
-    """把观测标识转换为有界文本，避免业务载荷进入 Trace。"""
-    if not isinstance(value, (str, int, float, bool, UUID)):
-        return default
-    text = str(value).strip()
-    return text[:128] if text else default
-
-
-def _safe_attributes(
-    values: Mapping[str, Any] | None,
-    *,
-    allowed_keys: tuple[str, ...] | None = None,
-) -> dict[str, TelemetryValue]:
-    """只保留有界标量属性。"""
-    if not isinstance(values, Mapping):
-        return {}
-    keys = allowed_keys or tuple(str(key) for key in values)
-    attributes: dict[str, TelemetryValue] = {}
-    for key in keys:
-        value = values.get(key)
-        if isinstance(value, bool):
-            attributes[str(key)] = value
-        elif isinstance(value, (int, float)):
-            attributes[str(key)] = value
-        elif isinstance(value, str) and value:
-            attributes[str(key)] = value[:256]
-    return attributes
-
-
-def _serialized_name(serialized: Mapping[str, Any] | None) -> str:
-    """从框架序列化信息中提取运行对象名称。"""
-    if not isinstance(serialized, Mapping):
-        return "unknown"
-    name = serialized.get("name")
-    if isinstance(name, str) and name:
-        return _bounded_text(name)
-    identifier = serialized.get("id")
-    if isinstance(identifier, (list, tuple)) and identifier:
-        return _bounded_text(identifier[-1])
-    return "unknown"
-
-
-def _model_identity(
-    serialized: Mapping[str, Any] | None,
-    metadata: Mapping[str, Any] | None,
-    kwargs: Mapping[str, Any],
-) -> tuple[str, dict[str, TelemetryValue]]:
-    """从模型开始事件提取名称、Provider 和框架节点。"""
-    attributes = _safe_attributes(metadata, allowed_keys=_MODEL_METADATA_KEYS)
-    invocation = kwargs.get("invocation_params")
-    if isinstance(invocation, Mapping):
-        for key in ("model", "model_name", "model_id"):
-            value = invocation.get(key)
-            if isinstance(value, str) and value:
-                attributes.setdefault("model_name", _bounded_text(value))
-                break
-    model_name = _bounded_text(
-        attributes.get("model_name")
-        or attributes.get("ls_model_name")
-        or _serialized_name(serialized)
-    )
-    attributes["model_name"] = model_name
-    if "model_provider" not in attributes and "ls_provider" in attributes:
-        attributes["model_provider"] = attributes["ls_provider"]
-    return model_name, attributes
-
-
-def _response_model_name(response: LLMResult) -> str | None:
-    """从模型结果元数据读取实际模型名，不读取回复正文。"""
-    for generations in response.generations:
-        for generation in generations:
-            message = getattr(generation, "message", None)
-            metadata = getattr(message, "response_metadata", None)
-            if not isinstance(metadata, Mapping):
-                continue
-            for key in ("model_name", "model", "model_id"):
-                value = metadata.get(key)
-                if isinstance(value, str) and value:
-                    return _bounded_text(value)
-    llm_output = response.llm_output
-    if isinstance(llm_output, Mapping):
-        for key in ("model_name", "model", "model_id"):
-            value = llm_output.get(key)
-            if isinstance(value, str) and value:
-                return _bounded_text(value)
-    return None
-
-
-def _exception_status(error: BaseException) -> str:
-    """区分协作式取消和真正的调用失败。"""
-    if isinstance(error, GraphInterrupt):
-        return "waiting_input"
-    if isinstance(error, (asyncio.CancelledError, GeneratorExit)):
-        return "cancelled"
-    return "error"
-
-
-def _async_subagent_attributes(output: Any) -> dict[str, TelemetryValue]:
-    """从异步 SubAgent 的 Command 中提取子 Trace 标识，不读取结果正文。"""
-    update = getattr(output, "update", None)
-    if not isinstance(update, Mapping):
-        return {}
-    tasks = update.get("async_tasks")
-    if not isinstance(tasks, Mapping) or len(tasks) != 1:
-        return {}
-    task_id, task = next(iter(tasks.items()))
-    if not isinstance(task, Mapping):
-        return {}
-    attributes: dict[str, TelemetryValue] = {
-        "async_task_id": _bounded_text(task_id),
-    }
-    child_run_id = task.get("run_id")
-    if isinstance(child_run_id, (str, UUID)):
-        attributes["child_trace_id"] = _bounded_text(child_run_id)
-    child_conversation_id = task.get("conversation_id", task.get("thread_id"))
-    if isinstance(child_conversation_id, (str, UUID)):
-        attributes["child_conversation_id"] = _bounded_text(child_conversation_id)
-    return attributes
 
 
 @dataclass(slots=True)
@@ -178,7 +57,6 @@ class _ObservedSpan:
     name: str
     started_at: datetime
     started_monotonic: float
-    retry_key: tuple[str, str, str]
     attributes: dict[str, TelemetryValue] = field(default_factory=dict)
     retry_number: int = 0
     status: str = "running"
@@ -257,12 +135,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         self._error_type: str | None = None
         self._parents: dict[str, str | None] = {}
         self._active_spans: dict[str, _ObservedSpan] = {}
+        self._summary_progress = SummaryProgressPublisher()
         self._observable_spans: dict[str, _ObservedSpan] = {}
         self._spans: list[_ObservedSpan] = []
         self._stages: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
         self._usage = AgentTokenUsageSummary()
-        self._retry_candidates: dict[tuple[str, str, str], int] = {}
         self._model_names: set[str] = set()
         self._counters = {
             "model_call_count": 0,
@@ -325,7 +203,9 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
     ) -> None:
         """收敛 Run 终态，并关闭仍未结束的调用 Span。"""
         final_status = (
-            status if status in {"completed", "failed", "cancelled", "waiting_input"} else "failed"
+            status
+            if status in {"completed", "failed", "cancelled", "waiting_input"}
+            else "failed"
         )
         with self._lock:
             if self._finished_at is not None:
@@ -354,6 +234,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 elif unfinished_status == "cancelled":
                     self._counters["cancelled_call_count"] += 1
             self._active_spans.clear()
+            self._summary_progress.clear()
             self._parents.clear()
 
     def build_run_usage(self) -> dict[str, Any]:
@@ -443,6 +324,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             name=name,
             attributes=attributes,
         )
+        self._summary_progress.start(run_id, metadata)
 
     def on_llm_start(
         self,
@@ -466,6 +348,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             name=name,
             attributes=attributes,
         )
+        self._summary_progress.start(run_id, metadata)
 
     def on_llm_end(
         self,
@@ -482,17 +365,23 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         model_name = _response_model_name(response)
         with self._lock:
             span = self._active_spans.get(str(run_id))
-            if model_name is None and span is not None:
+            if span is None:
+                return
+            if model_name is None:
                 model_name = _bounded_text(span.attributes.get("model_name"))
             if model_name is not None:
                 self._model_names.add(model_name)
             if usage.present:
                 self._usage.add(usage, model_name=model_name)
-        self._finish_span(
-            run_id,
-            status="ok",
-            usage=usage.to_dict() if usage.present else None,
-            model_name=model_name,
+            # 消费活动调用与累计用量必须在同一把锁内，防止重复结束并发计费。
+            self._finish_span(
+                run_id,
+                status="ok",
+                usage=usage.to_dict() if usage.present else None,
+                model_name=model_name,
+            )
+        self._summary_progress.finish(
+            run_id, "completed", usage=usage.to_dict() if usage.present else None
         )
 
     def on_llm_error(
@@ -506,6 +395,9 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
     ) -> Any:
         """结束失败或取消的模型 Span。"""
         del parent_run_id, tags, kwargs
+        self._summary_progress.finish(
+            run_id, "cancelled" if _exception_status(error) == "cancelled" else "failed"
+        )
         self._finish_span(
             run_id,
             status=_exception_status(error),
@@ -588,7 +480,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         parent_run_id: UUID | None = None,
         **kwargs: Any,
     ) -> Any:
-        """统计 Provider 内部重试，并关联到当前活动 Span。"""
+        """仅统计框架实际发出的重试回调，不推测未上报的重试。"""
         del retry_state, parent_run_id, kwargs
         with self._lock:
             self._counters["retry_count"] += 1
@@ -650,19 +542,13 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         name: str,
         attributes: dict[str, TelemetryValue],
     ) -> None:
-        """创建一次可观测调用，并识别框架重试中间件的新尝试。"""
+        """创建一次真实调用；相同名称再次调用不等于发生重试。"""
         span_id = str(run_id)
         parent_id = str(parent_run_id) if parent_run_id is not None else None
         with self._lock:
             if span_id in self._active_spans:
                 return
             self._parents[span_id] = parent_id
-            retry_key = (category, parent_id or "", name)
-            retry_number = 0
-            candidate_retry = self._retry_candidates.pop(retry_key, None)
-            if candidate_retry is not None:
-                retry_number = candidate_retry
-                self._counters["retry_count"] += 1
             if category == "model":
                 self._counters["model_call_count"] += 1
                 self._model_names.add(name)
@@ -678,9 +564,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 name=name,
                 started_at=_utc_now(),
                 started_monotonic=monotonic(),
-                retry_key=retry_key,
                 attributes=attributes,
-                retry_number=retry_number,
             )
             self._active_spans[span_id] = span
             if len(self._spans) >= self._max_spans:
@@ -699,7 +583,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         model_name: str | None = None,
         attributes: Mapping[str, TelemetryValue] | None = None,
     ) -> None:
-        """完成活动 Span，并为框架中间件重试登记候选调用。"""
+        """关闭活动调用并累计状态；Span 达到保存上限后仍保留汇总计数。"""
         span_id = str(run_id)
         with self._lock:
             span = self._active_spans.pop(span_id, None)
@@ -712,10 +596,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             if attributes:
                 span.attributes.update(attributes)
             span.finish(status=status, error_type=error_type, usage=usage)
-            if status == "error" and error_type != "ToolMessageError":
-                self._counters["error_count"] += 1
-                self._retry_candidates[span.retry_key] = span.retry_number + 1
-            elif status == "error":
+            if status == "error":
                 self._counters["error_count"] += 1
             elif status == "cancelled":
                 self._counters["cancelled_call_count"] += 1

@@ -99,6 +99,7 @@ def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
         "type": "context_window", "call_id": str(uuid4()), "status": "running",
         "model": str(getattr(request.model, "model_name", None) or getattr(request.model, "model", None) or request.model.__class__.__name__),
         "context_limit": window or input_limit, "limit_kind": "context" if window else "input",
+        "max_input_tokens": input_limit,
         "output_reserve": reserved, "estimated_input_tokens": sum(section["tokens"] for section in sections.values()),
         "actual_input_tokens": None, "sections": list(sections.values()), "has_multimodal": multimodal,
     }

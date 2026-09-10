@@ -174,6 +174,8 @@ class AgentWorkbenchService:
         events_by_run = self.run_service.list_events_by_run(
             [run.id for run in persisted_runs if run.id not in deferred_ids]
         )
+        if deferred_ids:
+            events_by_run.update(self.run_service.list_context_events_by_run(list(deferred_ids)))
         if view == "compact":
             values["deferred_run_ids"] = [str(run.id) for run in persisted_runs if run.id in deferred_ids]
         values["workbench_events"] = [

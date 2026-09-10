@@ -32,7 +32,7 @@ from internal.schema.agent_workbench_schema import (
 from internal.schema.agent_workbench_read_schema import WorkbenchEventBatchResp, WorkbenchRunEventsResp
 from pkg.sqlalchemy import SQLAlchemy
 
-_PERSISTED_EVENT_METHODS = ("tools", "lifecycle")
+_PERSISTED_EVENT_METHODS = ("tools", "lifecycle", "custom")
 
 
 @inject
@@ -482,6 +482,29 @@ class AgentWorkbenchRunService:
             visible = AgentProtocolEventProjector.to_public_event(row.payload)
             if visible is not None:
                 events.setdefault(row.run_id, []).append(visible)
+        return events
+
+    def list_context_events_by_run(self, run_ids: list[UUID]) -> dict[UUID, list[WorkbenchEvent]]:
+        """Restore at most 64 lightweight context events per deferred run."""
+        if not run_ids:
+            return {}
+        ranked = self.db.session.query(
+            AgentRunEvent.run_id, AgentRunEvent.payload, AgentRunEvent.sequence,
+            func.row_number().over(
+                partition_by=AgentRunEvent.run_id, order_by=AgentRunEvent.sequence.desc(),
+            ).label("position"),
+        ).filter(
+            AgentRunEvent.run_id.in_(run_ids),
+            AgentRunEvent.payload["method"].astext == "custom",
+        ).subquery()
+        rows = self.db.session.query(ranked.c.run_id, ranked.c.payload).filter(
+            ranked.c.position <= 64,
+        ).order_by(ranked.c.run_id, ranked.c.sequence).all()
+        events: dict[UUID, list[WorkbenchEvent]] = {}
+        for row in rows:
+            event = AgentProtocolEventProjector.to_public_event(row.payload)
+            if event is not None:
+                events.setdefault(row.run_id, []).append(event)
         return events
 
     def get_reconnect_events(

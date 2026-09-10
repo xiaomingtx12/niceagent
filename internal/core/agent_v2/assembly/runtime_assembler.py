@@ -63,7 +63,7 @@ class AgentRuntimeAssembler:
         skill_projection = None
         phase_started_at = time.monotonic()
         try:
-            telemetry = AgentTelemetry(observer, attributes=context.telemetry_attributes)
+            telemetry = AgentTelemetry(observer.record, attributes=context.telemetry_attributes)
             workspace = self.workspace_factory(context, telemetry)
             skill_projection = SkillContextAssembler().build(
                 skills=list(definition.skills),
@@ -104,7 +104,6 @@ class AgentRuntimeAssembler:
                 skill_sources=skill_projection.sources,
                 memory_sources=memory.sources,
                 subagent_skill_sources=skill_projection.subagent_sources,
-                telemetry=telemetry,
                 store=memory.store,
                 runtime_context=context,
             )

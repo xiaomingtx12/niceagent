@@ -16,14 +16,5 @@ class AgentTelemetryEvent:
     attributes: Mapping[str, TelemetryValue] = field(default_factory=dict)
     occurred_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    def to_dict(self) -> dict[str, object]:
-        """序列化为日志或指标数据。"""
-        return {
-            "name": self.name,
-            "value": self.value,
-            "attributes": dict(self.attributes),
-            "occurred_at": self.occurred_at.isoformat(),
-        }
-
 
 __all__ = ["AgentTelemetryEvent", "TelemetryValue"]

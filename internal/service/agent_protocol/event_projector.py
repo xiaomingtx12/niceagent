@@ -12,7 +12,7 @@ from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 
 from internal.schema.agent_workbench_schema import WorkbenchEvent
 from internal.core.agent_v2.entity.agent_event import AgentEvent
-from internal.schema.agent_context_schema import ContextWindowResp
+from internal.schema.agent_context_schema import ContextWindowResp, ContextCompactionResp
 from pydantic import ValidationError
 
 _TERMINAL_LIFECYCLE_EVENTS = frozenset(
@@ -143,11 +143,16 @@ class AgentProtocolEventProjector:
         if method == "custom":
             try:
                 custom_data = raw_event.get("params", {}).get("data")
-                payload = custom_data.get("payload") if isinstance(custom_data, Mapping) and custom_data.get("name") == "context_window" else custom_data
-                data = ContextWindowResp.model_validate(payload)
+                schemas = {
+                    "context_window": ContextWindowResp,
+                    "context_compaction": ContextCompactionResp,
+                }
+                payload = custom_data.get("payload") if isinstance(custom_data, Mapping) and custom_data.get("name") in schemas else custom_data
+                schema = schemas.get(payload.get("type"), ContextWindowResp) if isinstance(payload, Mapping) else ContextWindowResp
+                data = schema.model_validate(payload)
             except ValidationError:
                 return None
-            raw_event["params"]["data"] = {"name": "context_window", "payload": data.model_dump(mode="json")}
+            raw_event["params"]["data"] = {"name": data.type, "payload": data.model_dump(mode="json")}
         return WorkbenchEvent.model_validate(raw_event)
 
     def _event(
@@ -286,6 +291,9 @@ class AgentProtocolEventProjector:
             payload = data[0]
             if isinstance(data[1], Mapping):
                 metadata = data[1]
+        # Framework summary calls are internal context work, not assistant answers.
+        if metadata.get("lc_source") == "summarization":
+            return []
         node_value = metadata.get("langgraph_node")
         node = node_value if isinstance(node_value, str) and node_value else None
         if isinstance(payload, Mapping) and payload.get("event"):
