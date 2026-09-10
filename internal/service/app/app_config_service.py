@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, cast, Union
 from uuid import UUID
@@ -45,7 +46,7 @@ from pkg.sqlalchemy import SQLAlchemy
 from internal.service.common.base_service import BaseService
 from internal.core.language_model import LanguageModelManager
 from internal.core.workflow.entities.workflow_entity import WorkflowConfig
-from internal.entity.app_entity import AppStatus, DEFAULT_APP_CONFIG
+from internal.entity.app_entity import AppConfigType, AppStatus, DEFAULT_APP_CONFIG
 from internal.entity.workflow_entity import WorkflowStatus
 from internal.service.skill.skill_service import SkillService
 from internal.service.language_model.language_model_service import LanguageModelService
@@ -560,6 +561,40 @@ class AppConfigService(BaseService):
             datasets,
             app_config,
         )
+
+    def get_draft_agent_runtime_config(self, app: App) -> AgentAppConfigReq:
+        """只投影草稿的有效能力，不创建草稿或提交调用方的会话事务。"""
+        draft = (
+            self.db.session.query(AppConfigVersion)
+            .filter(
+                AppConfigVersion.app_id == app.id,
+                AppConfigVersion.config_type == AppConfigType.DRAFT,
+            )
+            .one_or_none()
+        )
+        if draft is None:
+            # 新应用的默认配置仅存在于本次读取中，持久化仍由管理入口负责。
+            draft = AppConfigVersion(
+                **deepcopy(DEFAULT_APP_CONFIG),
+                suggested_after_answer={"enable": True},
+            )
+        model_config = self._process_and_validate_model_config(
+            draft.model_config, account_id=app.account_id,
+        )
+        tools, _ = self._process_and_validate_tools(
+            draft.tools, account_id=app.account_id,
+        )
+        datasets, _ = self._process_and_validate_datasets(
+            draft.datasets, account_id=app.account_id,
+        )
+        workflows, _ = self._process_and_validate_workflows(
+            draft.workflows, account_id=app.account_id,
+        )
+        payload = self._process_and_transformer_app_config(
+            model_config, tools, workflows, datasets, draft,
+        )
+        payload["id"] = draft.id
+        return AgentAppConfigReq.model_validate(payload)
 
     def get_agent_runtime_config(self, app: App) -> AgentAppConfigReq:
         """只读加载已发布配置，跳过面向管理页面的重复清理和展示转换。"""

@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
 from injector import inject
-from flask import current_app
+from flask import Flask, current_app
 from psycopg_pool import PoolTimeout
 from langgraph.types import Command
 from internal.core.agent_v2.entity.user_input import PendingUserInput
@@ -17,7 +17,7 @@ from internal.core.agent_v2.entity.user_input import PendingUserInput
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
-from internal.core.agent_v2 import AgentEvent, AgentExecutionResult
+from internal.core.agent_v2 import AgentExecutor, AgentExecutionResult
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     AgentMessageError,
 )
@@ -41,6 +41,7 @@ from pkg.response import HttpCode
 from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_assembly_service import AgentAssemblyService
+from .agent_workbench_event_buffer import AgentWorkbenchEventBuffer
 from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
 from .agent_workbench_run_service import AgentWorkbenchRunService
 from internal.service.conversation.conversation_service import ConversationService
@@ -62,7 +63,7 @@ class AgentWorkbenchRunExecutionService:
     _persistence_batch_size: ClassVar[int] = 8
 
     def execute(self, run: WorkbenchRun) -> None:
-        """创建平台运行上下文，接收 Agent 事件并保存其执行结果。"""
+        """编排执行、尾批交付和终态保存，本地登记始终由最外层清理。"""
         started_at = time.monotonic()
         observer = PlatformAgentRunObserver(
             run.run_id,
@@ -78,135 +79,15 @@ class AgentWorkbenchRunExecutionService:
             start_sequence=run.initial_event_sequence,
             root_message_id=f"{run.spec.message_id}:assistant",
         )
-        pending_events: list[WorkbenchEvent] = []
-        last_flush_at = time.monotonic()
-        first_text_published = False
-
-        def receive_event(agent_event: AgentEvent) -> None:
-            """批量提交所有通道后再通知订阅者，确保实时与重放使用相同事件。"""
-            nonlocal last_flush_at, first_text_published
-            for projected in projector.project_many(agent_event):
-                event = AgentProtocolEventProjector.to_public_event(projected)
-                if event is None:
-                    continue
-                pending_events.append(event)
-                delta = event.params.data.get("delta")
-                first_text = (
-                    not first_text_published
-                    and event.method == "messages"
-                    and event.params.data.get("event") == "content-block-delta"
-                    and isinstance(delta, Mapping)
-                    and delta.get("type") == "text-delta"
-                    and bool(delta.get("text"))
-                )
-                if (
-                    first_text
-                    or len(pending_events) >= self._persistence_batch_size
-                    or time.monotonic() - last_flush_at >= 0.1
-                    # 阶段结束和工具启动前必须刷新，不能把尾批留到慢工具返回。
-                    or event.method != "messages"
-                    or event.params.data.get("event") in {
-                        "content-block-finish", "message-finish"
-                    }
-                ):
-                    self.run_service.record_events(run, pending_events)
-                    run.last_event_sequence = pending_events[-1].seq
-                    self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
-                    pending_events.clear()
-                    last_flush_at = time.monotonic()
-                    if first_text:
-                        first_text_published = True
-                        duration_ms = (last_flush_at - started_at) * 1000
-                        observer.record_stage("delivery.first_text", duration_ms)
-                        logger.info(
-                            "agent_delivery_timing run_id=%s stage=first_text duration_ms=%.2f",
-                            run.run_id, duration_ms,
-                        )
-
+        events = AgentWorkbenchEventBuffer(
+            run, projector, observer, self.run_service, self.queue_manager,
+            started_at=started_at, batch_size=self._persistence_batch_size,
+        )
         try:
-            # 1.先更新平台运行状态，再装配 Agent，避免取消后重复创建运行资源。
+            # 1.启动或执行失败也转成结果，后续仍需刷新尾批、保存终态。
             try:
-                if not run.cancel_requested.is_set():
-                    run.status = WorkbenchRunStatus.RUNNING
-                    self.run_service.set_status(run, WorkbenchRunStatus.RUNNING)
-                if not run.cancel_requested.is_set():
-                    self._publish_event(
-                        run,
-                        projector.generated(
-                            "lifecycle",
-                            {
-                                "event": "running",
-                                "message_id": str(run.spec.message_id),
-                                "input_message_id": run.spec.input_message_id,
-                            },
-                        ),
-                    )
-                    if run.resume is not None:
-                        row = self.run_service.get_run(run.run_id, recover=False)
-                        snapshot = row.state_snapshot if row is not None else {}
-                        self._publish_event(run, projector.generated("values", {
-                            "pending_inputs": [], "input_recovery": None,
-                            "input_history": (snapshot or {}).get("input_history", []),
-                        }))
-                    try:
-                        agent, input_message = self.agent_assembly_service.build_agent(
-                            run.spec,
-                            observer=observer,
-                        )
-                    finally:
-                        self.db.session.close()
-
-                    # 2.Agent 负责执行控制和资源释放，平台负责协议适配。
-                    monitor_done = threading.Event()
-                    flask_app = current_app._get_current_object()
-
-                    def watch_cancel() -> None:
-                        """独立 Session 读取跨进程取消，模型无输出时也能请求协作退出。"""
-                        with flask_app.app_context():
-                            while not monitor_done.wait(0.5):
-                                try:
-                                    status = self.run_service.get_run_status(run.run_id)
-                                    if status == "cancelling":
-                                        run.cancel_requested.set()
-                                    if run.cancel_requested.is_set():
-                                        if agent.request_drain():
-                                            return
-                                except Exception:
-                                    logger.exception(
-                                        "读取 Agent 取消状态失败 run_id=%s", run.run_id
-                                    )
-                                finally:
-                                    self.db.session.remove()
-
-                    monitor = threading.Thread(
-                        target=watch_cancel,
-                        daemon=True,
-                        name=f"agent-cancel-{run.run_id}",
-                    )
-                    try:
-                        monitor.start()
-                    except Exception:
-                        agent.close()
-                        raise
-                    try:
-                        result = agent.execute(
-                            Command(resume=run.resume) if run.resume is not None else {"messages": [input_message]},
-                            on_event=receive_event,
-                            cancel_requested=run.cancel_requested,
-                        )
-                    finally:
-                        monitor_done.set()
-                        if monitor.ident is not None:
-                            monitor.join()
-                else:
-                    observer.finish("cancelled")
-                    result = AgentExecutionResult(
-                        status="cancelled",
-                        usage=observer.build_run_usage(),
-                        observability=observer.snapshot(),
-                    )
+                result = self._execute_agent(run, observer, projector, events)
             except Exception as exc:
-                # 尚未拿到执行结果时，平台兜底记录启动或结果交付失败。
                 observer.finish("failed", error=exc)
                 result = AgentExecutionResult(
                     status="failed",
@@ -215,17 +96,9 @@ class AgentWorkbenchRunExecutionService:
                     observability=observer.snapshot(),
                 )
 
-            # 3.补齐工作台消息分片，再刷新平台历史尾批。
+            # 2.补齐消息结束分片；尾批失败不能掩盖原始执行错误。
             try:
-                for raw in projector.finish_pending_messages():
-                    event = AgentProtocolEventProjector.to_public_event(raw)
-                    if event is not None:
-                        pending_events.append(event)
-                if pending_events:
-                    self.run_service.record_events(run, pending_events)
-                    run.last_event_sequence = pending_events[-1].seq
-                    self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
-                    pending_events.clear()
+                events.finish()
             except Exception as exc:
                 if result.error is not None:
                     logger.exception("刷新 Agent 事件批次失败，保留原始执行错误")
@@ -242,7 +115,7 @@ class AgentWorkbenchRunExecutionService:
                         },
                     )
 
-            # 4.把 Agent 结果映射到业务消息和 Run，成功落库后才发送平台终态。
+            # 3.一次提交消息、运行状态和结束事件，成功后再通知订阅者。
             self._finish_run(
                 run,
                 projector,
@@ -250,7 +123,89 @@ class AgentWorkbenchRunExecutionService:
                 latency=max(0.0, time.monotonic() - started_at),
             )
         finally:
+            # 4.即使结果保存失败，也必须释放当前进程的运行登记。
             self.queue_manager.finish(run)
+
+    def _execute_agent(
+        self,
+        run: WorkbenchRun,
+        observer: PlatformAgentRunObserver,
+        projector: AgentProtocolEventProjector,
+        events: AgentWorkbenchEventBuffer,
+    ) -> AgentExecutionResult:
+        """集中完成启动、装配和执行；提前取消只结束本阶段，不跳过外层结果保存。"""
+        # 1.写入运行状态后再次检查取消，覆盖数据库写入期间到达的取消请求。
+        if not run.cancel_requested.is_set():
+            run.status = WorkbenchRunStatus.RUNNING
+            self.run_service.set_status(run, WorkbenchRunStatus.RUNNING)
+        if run.cancel_requested.is_set():
+            observer.finish("cancelled")
+            return AgentExecutionResult(
+                status="cancelled",
+                usage=observer.build_run_usage(),
+                observability=observer.snapshot(),
+            )
+
+        # 2.先公开运行状态；恢复执行时清空待填表单，保留已提交回答。
+        self._publish_event(run, projector.generated("lifecycle", {
+            "event": "running",
+            "message_id": str(run.spec.message_id),
+            "input_message_id": run.spec.input_message_id,
+        }))
+        if run.resume is not None:
+            row = self.run_service.get_run(run.run_id, recover=False)
+            snapshot = {}
+            if row is not None:
+                snapshot = row.state_snapshot or {}
+            self._publish_event(run, projector.generated("values", {
+                "pending_inputs": [],
+                "input_recovery": None,
+                "input_history": snapshot.get("input_history", []),
+            }))
+
+        # 3.装配完成后释放查询 Session，避免模型执行期间占用数据库连接。
+        try:
+            agent, input_message = self.agent_assembly_service.build_agent(
+                run.spec, observer=observer,
+            )
+        finally:
+            self.db.session.close()
+
+        # 4.取消监控使用独立线程和 Session；它启动失败时必须释放已装配资源。
+        done = threading.Event()
+        monitor = threading.Thread(
+            target=self._watch_cancel,
+            args=(current_app._get_current_object(), run, agent, done),
+            daemon=True,
+            name=f"agent-cancel-{run.run_id}",
+        )
+        try:
+            monitor.start()
+        except Exception:
+            try:
+                agent.close()
+            except Exception:
+                logger.exception("取消监控启动失败后释放 Agent 资源失败 run_id=%s", run.run_id)
+            raise
+
+        # 5.恢复命令与首次消息分别构造；Core 负责执行结束后的 Agent 资源释放。
+        try:
+            if run.resume is not None:
+                graph_input = Command(resume=run.resume)
+            else:
+                graph_input = {"messages": [input_message]}
+            return agent.execute(
+                graph_input,
+                on_event=events.receive,
+                cancel_requested=run.cancel_requested,
+            )
+        finally:
+            # 6.停止监控，但不让阻塞的状态查询无限拖住结果落库。
+            # 尚未退出的监控会在查询返回后检测 done 并释放自己的 Session。
+            done.set()
+            monitor.join(timeout=1)
+            if monitor.is_alive():
+                logger.warning("取消监控尚未退出，待当前查询返回后清理 run_id=%s", run.run_id)
 
     def _finish_run(
         self,
@@ -260,20 +215,17 @@ class AgentWorkbenchRunExecutionService:
         result: AgentExecutionResult,
         latency: float,
     ) -> None:
-        """保存消息和 Run 终态后再发结束事件，事件发送失败不能改写已保存结果。"""
-        # 1.将 Agent 结果映射为平台消息状态和对外终态。
+        """在同一事务中保存消息、快照和终态事件，提交后通知失败不改写结果。"""
+        # 1.按执行结果确定消息状态和公开提示；未知异常详情只用于内部排障。
         status = WorkbenchRunStatus(result.status)
         error = result.error
         message_updates: dict[str, Any]
         lifecycle: dict[str, Any]
-        error_message = str(error) if error is not None else ""
         if status is WorkbenchRunStatus.WAITING_INPUT:
             message_updates = {"status": MessageStatus.NORMAL}
             lifecycle = {"event": "interrupted", "status": "waiting_input", "reason": "user_input_required"}
         elif status is WorkbenchRunStatus.COMPLETED:
-            message_updates = {"status": MessageStatus.NORMAL, "latency": latency}
-            if result.answer:
-                message_updates["answer"] = result.answer
+            message_updates = {"status": MessageStatus.NORMAL}
             lifecycle = {"event": "completed", "status": "completed"}
         elif status is WorkbenchRunStatus.CANCELLED:
             message_updates = {"status": MessageStatus.STOP}
@@ -299,7 +251,7 @@ class AgentWorkbenchRunExecutionService:
                 "code": error_code,
                 "error": public_error,
             }
-            run.error_message = error_message
+            run.error_message = str(error) if error is not None else ""
             if isinstance(error, _AGENT_PERSISTENCE_ERRORS):
                 logger.error(
                     "Agent PostgreSQL 持久化失败 error_type=%s checkpoint_pool_stats=%s",
@@ -312,63 +264,93 @@ class AgentWorkbenchRunExecutionService:
                     exc_info=(type(error), error, error.__traceback__),
                 )
 
-        # 2.平台只保存 UI 所需的状态字段，消息正文已通过结果单独获得。
-        state = project_public_state(
-            {
-                key: result.state[key]
-                for key in ("todos", "files", "async_tasks")
-                if key in result.state
-            }
-        )
-        pending = [PendingUserInput.model_validate(item).model_dump(mode="json") for item in result.interrupts]
+        # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
+        public_state = {}
+        for key in ("todos", "files", "async_tasks"):
+            if key in result.state:
+                public_state[key] = result.state[key]
+        state = project_public_state(public_state)
+        pending = []
+        for item in result.interrupts:
+            pending_input = PendingUserInput.model_validate(item)
+            pending.append(pending_input.model_dump(mode="json"))
         row = self.run_service.get_run(run.run_id, recover=False)
-        history = list((row.state_snapshot or {}).get("input_history", [])) if row is not None else []
-        state.update(pending_inputs=pending, input_history=history, input_recovery=None)
-        # 表单及等待状态在同一事务提交，避免浏览器收到尚不可提交的表单。
-        final_events = [AgentProtocolEventProjector.to_public_event(projector.generated("values", state))]
-        final_events.extend(
-            AgentProtocolEventProjector.to_public_event(projector.generated(
-                "input.requested", {"interrupt_id": item["interrupt_id"], "payload": item["payload"]},
-            )) for item in pending
+        snapshot = {}
+        if row is not None:
+            snapshot = row.state_snapshot or {}
+        state.update(
+            pending_inputs=pending,
+            input_history=list(snapshot.get("input_history", [])),
+            input_recovery=None,
         )
 
-        # 3.同一事务保存消息、Agent 用量和平台终态。
-        if result.answer:
-            message_updates["answer"] = result.answer
-        message_updates["latency"] = latency
+        # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
+        raw_events = [projector.generated("values", state)]
+        for item in pending:
+            raw_events.append(projector.generated("input.requested", {
+                "interrupt_id": item["interrupt_id"], "payload": item["payload"],
+            }))
         lifecycle.update(
             message_id=str(run.spec.message_id),
             input_message_id=run.spec.input_message_id,
         )
-        terminal_event = AgentProtocolEventProjector.to_public_event(
-            projector.generated("lifecycle", lifecycle)
-        )
-        message_updates.update(
-            ConversationService.build_run_usage_updates(result.usage),
-        )
+        raw_events.append(projector.generated("lifecycle", lifecycle))
+        events = []
+        for raw in raw_events:
+            event = AgentProtocolEventProjector.to_public_event(raw)
+            if event is not None:
+                events.append(event)
+
+        # 4.回答、用量、Run 状态和事件一次提交；旧执行实例无权覆盖已收敛状态。
+        if result.answer:
+            message_updates["answer"] = result.answer
+        message_updates["latency"] = latency
+        message_updates.update(ConversationService.build_run_usage_updates(result.usage))
         committed = self.run_service.finalize_run(
             run,
             status,
-            error_message=error_message,
+            error_message=str(result.error) if result.error is not None else "",
             message_updates=message_updates,
             observability=result.observability,
-            events=[event for event in [*final_events, terminal_event] if event is not None],
+            events=events,
             state_snapshot=state,
         )
         if not committed:
             return
         run.status = status
 
-        # 4.结束事件保存失败只记录日志，不能把成功或取消改成失败。
+        # 5.提交之后才推进本地游标、通知订阅者；通知失败保留已提交的业务结果。
         try:
-            for event in [*final_events, terminal_event]:
-                if event is not None:
-                    self._publish_event(run, event, persist_database=False)
+            for event in events:
+                self._publish_event(run, event, persist_database=False)
         except Exception:
             logger.exception(
                 "Agent 工作台终态事件发布失败 run_id=%s，保留已持久化终态",
                 run.run_id,
             )
+
+    def _watch_cancel(
+        self,
+        flask_app: Flask,
+        run: WorkbenchRun,
+        agent: AgentExecutor,
+        done: threading.Event,
+    ) -> None:
+        """独立 Session 读取跨进程取消，执行已结束时不再触碰 Agent。"""
+        with flask_app.app_context():
+            while not done.wait(0.5):
+                try:
+                    status = self.run_service.get_run_status(run.run_id)
+                    if done.is_set():
+                        return
+                    if status == WorkbenchRunStatus.CANCELLING.value:
+                        run.cancel_requested.set()
+                    if run.cancel_requested.is_set() and agent.request_drain():
+                        return
+                except Exception:
+                    logger.exception("读取 Agent 取消状态失败 run_id=%s", run.run_id)
+                finally:
+                    self.db.session.remove()
 
     def _publish_event(
         self,

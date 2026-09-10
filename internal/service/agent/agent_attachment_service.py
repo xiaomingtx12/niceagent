@@ -80,17 +80,18 @@ class AgentAttachmentService:
         if not attachments:
             return
         # 1.从对象存储下载附件内容，并映射为 Workspace 虚拟路径。
-        files: list[tuple[str, bytes]] = [
-            (attachment.path, self.cos_service.download_file_bytes(attachment.key))
-            for attachment in attachments
-        ]
+        files: list[tuple[str, bytes]] = []
+        for attachment in attachments:
+            content = self.cos_service.download_file_bytes(attachment.key)
+            files.append((attachment.path, content))
         # 2.批量上传到本次运行的 Backend。
         responses = list(backend.upload_files(files))
         # Backend 契约要求结果与输入一一对应，缺失结果也必须按失败处理。
-        if len(responses) != len(files) or any(
-            response.error for response in responses
-        ):
+        if len(responses) != len(files):
             raise FailException("附件写入 Agent Workspace 失败")
+        for response in responses:
+            if response.error:
+                raise FailException("附件写入 Agent Workspace 失败")
 
 
 __all__ = ["AgentAttachmentService"]

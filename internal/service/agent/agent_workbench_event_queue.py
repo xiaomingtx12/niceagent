@@ -56,14 +56,22 @@ class _EventSignal:
     ) -> WorkbenchEventBatchResp:
         """同游标订阅共享已提交批次；最多保留两批 0.5 秒，通知后立即失效。"""
         with self.read_lock:
+            # 1.在查库前取通知版本，查询期间到达的新事件会使本批缓存失效。
             version = self.snapshot()
             now = time.monotonic()
             cached = self.batches.get(cursor)
-            if cached is not None and cached.version == version and now < cached.expires_at:
+            cache_valid = False
+            if cached is not None:
+                same_version = cached.version == version
+                not_expired = now < cached.expires_at
+                cache_valid = same_version and not_expired
+            if cache_valid:
                 return cached.batch
+            # 2.多个订阅者共享恢复节流，避免每次轮询都执行失联恢复查询。
             if now >= self.recovery_at:
                 recover()
                 self.recovery_at = time.monotonic() + 10
+            # 3.缓存只保留最近两个游标，连接断开时由 watch_events 回收整个信号。
             batch = load()
             self.batches[cursor] = _CachedEventBatch(version, time.monotonic() + 0.5, batch)
             self.batches.move_to_end(cursor)

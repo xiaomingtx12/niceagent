@@ -185,11 +185,8 @@ class AgentWorkbenchRunService:
         snapshot_sequence = -1
         persisted_payloads = {}
         for event in events:
-            if (
-                event.method == "values"
-                and not event.params.namespace
-                and isinstance(event.params.data, dict)
-            ):
+            is_root_snapshot = event.method == "values" and not event.params.namespace
+            if is_root_snapshot and isinstance(event.params.data, dict):
                 if event.seq > snapshot_sequence:
                     latest_snapshot = event.params.data
                     snapshot_sequence = event.seq
@@ -212,7 +209,11 @@ class AgentWorkbenchRunService:
                 .filter(AgentRun.id == run.run_id)
                 .one_or_none()
             )
-            if row is None or row.executor_id != run.executor_id or row.status in WORKBENCH_TERMINAL_STATUSES:
+            if row is None:
+                raise RuntimeError("Agent Run 执行权已失效，不能继续发布事件")
+            owns_execution = row.executor_id == run.executor_id
+            has_finished = row.status in WORKBENCH_TERMINAL_STATUSES
+            if not owns_execution or has_finished:
                 raise RuntimeError("Agent Run 执行权已失效，不能继续发布事件")
             previous_sequence = int(row.last_event_sequence or 0)
             row.last_event_sequence = max(previous_sequence, latest_sequence)
@@ -485,7 +486,7 @@ class AgentWorkbenchRunService:
         return events
 
     def list_context_events_by_run(self, run_ids: list[UUID]) -> dict[UUID, list[WorkbenchEvent]]:
-        """Restore at most 64 lightweight context events per deferred run."""
+        """每个延后加载的 Run 最多读取 64 条上下文事件，避免整段历史进入首屏。"""
         if not run_ids:
             return {}
         ranked = self.db.session.query(
@@ -540,9 +541,9 @@ class AgentWorkbenchRunService:
         )
 
     def request_cancel(self, row: AgentRun) -> bool:
-        """仅把活动 Run 标记为 cancelling，避免并发请求复活终态 Run。"""
-        updated = False
+        """运行中的任务先请求停止；等待表单的任务直接取消并保留重新填写信息。"""
         with self.db.auto_commit():
+            # 1.重新读取并锁定目标状态，避免取消请求覆盖已经结束的任务。
             current = (
                 self.db.session.query(AgentRun)
                 .populate_existing()
@@ -553,41 +554,7 @@ class AgentWorkbenchRunService:
                 )
                 .one_or_none()
             )
-            if current is not None:
-                if current.status == "waiting_input":
-                    current.status = "cancelled"
-                    current.finished_at = datetime.now(UTC).replace(tzinfo=None)
-                    snapshot = dict(current.state_snapshot or {})
-                    cancelled_inputs = snapshot.get("pending_inputs", [])
-                    cancellation_sequence = int(current.last_event_sequence or 0) + 2
-                    snapshot["pending_inputs"] = []
-                    snapshot["input_recovery"] = {
-                        "run_id": str(current.id), "cancellation_sequence": cancellation_sequence,
-                    } if cancelled_inputs else None
-                    snapshot["_interaction"] = {
-                        **(snapshot.get("_interaction") or {}), "cancelled_input": True,
-                        "cancelled_inputs": cancelled_inputs,
-                        "input_cancellation_sequence": cancellation_sequence,
-                    }
-                    current.executor_id = None
-                    current.state_snapshot = snapshot
-                    projector = AgentProtocolEventProjector(current.id, start_sequence=int(current.last_event_sequence or 0))
-                    public_state = project_snapshot_values(snapshot)
-                    for raw in [projector.generated("values", public_state), projector.generated("lifecycle", {
-                        "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
-                        "message_id": str(current.message_id), "input_message_id": current.input_message_id,
-                    })]:
-                        event = WorkbenchEvent.model_validate(raw)
-                        self.db.session.add(AgentRunEvent(run_id=current.id, sequence=event.seq, payload=event.model_dump(mode="json")))
-                    current.last_event_sequence = projector.last_event_sequence
-                    message = self.db.session.get(Message, current.message_id)
-                    if message is not None:
-                        message.status = "stop"
-                    row.status = "cancelled"
-                    return True
-                current.status = WorkbenchRunStatus.CANCELLING.value
-                updated = True
-            else:
+            if current is None:
                 latest_status = (
                     self.db.session.query(AgentRun.status)
                     .filter(AgentRun.id == row.id)
@@ -595,10 +562,63 @@ class AgentWorkbenchRunService:
                 )
                 if latest_status is not None:
                     row.status = latest_status
-        if updated:
-            # 调用方可能继续使用同一 ORM 对象发布本地取消信号。
-            row.status = WorkbenchRunStatus.CANCELLING.value
-        return updated
+                return False
+
+            # 2.有执行实例时只写 cancelling，实际资源释放和终态由执行线程负责。
+            if current.status != "waiting_input":
+                current.status = WorkbenchRunStatus.CANCELLING.value
+            else:
+                # 3.等待表单时没有运行线程，直接取消；保存原表单用于重新填写。
+                current.status = "cancelled"
+                current.finished_at = datetime.now(UTC).replace(tzinfo=None)
+                snapshot = dict(current.state_snapshot or {})
+                cancelled_inputs = snapshot.get("pending_inputs", [])
+                # 本次追加 values 与 lifecycle 两条事件，恢复标识使用最终序号。
+                cancellation_sequence = int(current.last_event_sequence or 0) + 2
+                snapshot["pending_inputs"] = []
+                snapshot["input_recovery"] = None
+                if cancelled_inputs:
+                    snapshot["input_recovery"] = {
+                        "run_id": str(current.id),
+                        "cancellation_sequence": cancellation_sequence,
+                    }
+                interaction = dict(snapshot.get("_interaction") or {})
+                interaction.update(
+                    cancelled_input=True,
+                    cancelled_inputs=cancelled_inputs,
+                    input_cancellation_sequence=cancellation_sequence,
+                )
+                snapshot["_interaction"] = interaction
+                current.executor_id = None
+                current.state_snapshot = snapshot
+
+                # 4.表单清空、消息停止和结束事件必须一次提交，重连才能恢复相同状态。
+                projector = AgentProtocolEventProjector(
+                    current.id, start_sequence=int(current.last_event_sequence or 0),
+                )
+                public_state = project_snapshot_values(snapshot)
+                events = [projector.generated("values", public_state)]
+                events.append(projector.generated("lifecycle", {
+                    "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
+                    "message_id": str(current.message_id), "input_message_id": current.input_message_id,
+                }))
+                for raw in events:
+                    event = WorkbenchEvent.model_validate(raw)
+                    self.db.session.add(AgentRunEvent(
+                        run_id=current.id,
+                        sequence=event.seq,
+                        payload=event.model_dump(mode="json"),
+                    ))
+                current.last_event_sequence = projector.last_event_sequence
+                message = self.db.session.get(Message, current.message_id)
+                if message is not None:
+                    message.status = "stop"
+                row.status = "cancelled"
+                return True
+
+        # 5.调用方在提交后用最新状态发送本地取消信号。
+        row.status = WorkbenchRunStatus.CANCELLING.value
+        return True
 
 
 __all__ = ["AgentWorkbenchRunService"]

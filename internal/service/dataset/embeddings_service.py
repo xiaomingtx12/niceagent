@@ -50,15 +50,12 @@ class EmbeddingsService:
         )
         provider_name = str(config.get("provider") or "")
         model_name = str(config.get("model") or "")
-        try:
-            embeddings, binding = self.language_model_service.load_embeddings_model(
-                provider_name,
-                model_name,
-                account_id,
-                provider_connection_id=config.get("provider_connection_id"),
-            )
-        except Exception as exc:
-            raise ValidateErrorException(f"初始化向量模型失败: {exc}") from exc
+        embeddings, binding = self.language_model_service.load_embeddings_model(
+            provider_name,
+            model_name,
+            account_id,
+            provider_connection_id=config.get("provider_connection_id"),
+        )
 
         configured_fingerprint = str(config.get("fingerprint") or "")
         if configured_fingerprint.startswith("legacy_"):

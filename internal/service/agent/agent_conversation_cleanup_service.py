@@ -65,20 +65,20 @@ class AgentConversationCleanupService:
     def cleanup_app(self, req: AgentAppCleanupReq) -> None:
         """清理应用下全部 Agent 派生状态。"""
         # 1.查询应用下的会话，逐个删除 checkpoint。
-        conversation_ids = [
-            row[0]
-            for row in self.db.session.query(Conversation.id)
+        conversation_rows = (
+            self.db.session.query(Conversation.id)
             .join(App, App.id == Conversation.app_id)
             .filter(
                 Conversation.app_id == req.app_id,
                 App.account_id == req.account_id,
             )
             .all()
-        ]
+        )
+        conversation_ids = [row[0] for row in conversation_rows]
         for conversation_id in conversation_ids:
             delete_agent_checkpoint(str(conversation_id))
 
-        # 2.批量软删除应用下全部用户 Workspace 文件并提交事务。
+        # 2.批量软删除应用下全部用户的共享 Workspace 文件。
         self.workspace_file_store.delete_app_files(
             self.db.session,
             account_id=req.account_id,

@@ -100,28 +100,28 @@ class AssistantAgentService(BaseService):
         model_config_override: dict | None = None,
     ) -> tuple[BaseLanguageModel, list[BaseTool]]:
         """构造辅助 Agent 专属模型与工具，执行仍交给统一装配入口。"""
-        from internal.exception import FailException
+        # 1.检索工具绑定本次账号的向量模型，后续工具执行不再读取 Flask 上下文。
+        self.embeddings_service.initialize_embeddings(account.id)
+        retrieval_tool = self.faiss_service.convert_faiss_to_tool(
+            self.embeddings_service.embeddings,
+        )
 
-        try:
-            self.embeddings_service.initialize_embeddings(account.id)
-            self.faiss_service.initialize_faiss()
-        except Exception as exc:
-            raise FailException(f"辅助智能体会话依赖初始化失败: {exc}") from exc
-
-        # 使用当前账号已激活模型作为辅助 Agent 的模型。
+        # 2.选择当前账号已激活的对话模型，只覆盖本次请求的思考强度。
         model_config = model_config_override or self.language_model_service.get_default_model_config(account.id)
         if reasoning_effort is not None:
-            parameters = {key: value for key, value in model_config.get("parameters", {}).items()
-                          if key not in {"reasoning_effort", "thinking_level", "thinking"}}
-            model_config = {**model_config, "parameters": {**parameters, "reasoning_effort": reasoning_effort}}
+            parameters = dict(model_config.get("parameters", {}))
+            for alias in ("reasoning_effort", "thinking_level", "thinking"):
+                parameters.pop(alias, None)
+            parameters["reasoning_effort"] = reasoning_effort
+            model_config = {**model_config, "parameters": parameters}
         llm = self.language_model_service.load_language_model(
             model_config,
             account.id,
         )
 
-        # 辅助 Agent 的平台工具在这里集中装配。
+        # 3.集中挂载平台工具；工具闭包只捕获账号 ID，不持有 ORM 对象。
         tools = [
-            self.faiss_service.convert_faiss_to_tool(),
+            retrieval_tool,
             self.convert_create_app_to_tool(account.id),
             self.convert_workflow_generator_to_tool(account),
             self.convert_app_with_workflow_generator_to_tool(account),

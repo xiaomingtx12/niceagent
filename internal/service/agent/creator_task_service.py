@@ -93,69 +93,6 @@ class CreatorTaskService(BaseService):
             invoke_from=InvokeFrom.CREATOR_TASK,
         )
 
-    def _visible_query(self, account: Account):
-        """构建同账号可见的任务会话查询。
-
-        ``owner_account_id`` 是新数据的稳定归属；created_by 和 EndUser
-        条件用于兼容历史 WebApp 会话，待业务侧完成数据回填后仍可保留。
-        """
-        legacy_end_users = select(EndUser.id).where(
-            EndUser.external_user_id == account.id
-        )
-        ownership = or_(
-            Conversation.owner_account_id == account.id,
-            and_(
-                Conversation.owner_account_id.is_(None),
-                or_(
-                    Conversation.created_by == account.id,
-                    and_(
-                        Conversation.invoke_from == InvokeFrom.WEB_APP,
-                        Conversation.created_by.in_(legacy_end_users),
-                    ),
-                ),
-            ),
-        )
-        return (
-            self.db.session.query(Conversation, App)
-            .join(App, App.id == Conversation.app_id)
-            .filter(
-                App.account_id == account.id,
-                App.status == AppStatus.PUBLISHED,
-                Conversation.invoke_from.in_(
-                    [
-                        InvokeFrom.CREATOR_TASK,
-                        InvokeFrom.WEB_APP,
-                    ]
-                ),
-                Conversation.is_deleted.is_(False),
-                ownership,
-            )
-        )
-
-    @staticmethod
-    def _timestamp(value: datetime | None) -> int:
-        return int(value.timestamp()) if value else 0
-
-    def _serialize_conversation(
-        self, conversation: Conversation, app: App, *, last_run_status: str = "idle",
-    ) -> dict[str, Any]:
-        """序列化已加载的摘要；列表中的运行状态由调用方批量读取。"""
-        return {
-            "id": str(conversation.id),
-            "name": conversation.name or "新的会话",
-            "summary": conversation.summary or "",
-            "is_pinned": bool(conversation.is_pinned),
-            "updated_at": self._timestamp(conversation.updated_at),
-            "created_at": self._timestamp(conversation.created_at),
-            "last_run_status": last_run_status,
-            "agent": {
-                "id": str(app.id),
-                "name": app.name,
-                "icon": app.icon,
-                "description": app.description,
-            },
-        }
-
     def get_agents(self, account: Account) -> list[dict[str, Any]]:
         """获取当前账号已发布 Agent 及其任务会话概览。"""
         apps = (
@@ -166,10 +103,9 @@ class CreatorTaskService(BaseService):
         )
         if not apps:
             return []
-        # 复用会话可见性条件，统计与最近活动时间在同一次分组查询中取得。
-        summaries = {
-            row.app_id: row
-            for row in self._visible_query(account)
+        # 1.复用会话可见性条件，计数和最近活动时间通过一次分组查询取得。
+        summary_rows = (
+            self._visible_query(account)
             .with_entities(
                 Conversation.app_id,
                 func.count(Conversation.id).label("conversation_count"),
@@ -178,21 +114,28 @@ class CreatorTaskService(BaseService):
             .filter(Conversation.app_id.in_([app.id for app in apps]))
             .group_by(Conversation.app_id)
             .all()
-        }
-        return [
-            {
+        )
+        summaries = {row.app_id: row for row in summary_rows}
+
+        # 2.没有会话的应用也要显示，缺失统计按 0 返回，不在循环内补查数据库。
+        agents = []
+        for app in apps:
+            summary = summaries.get(app.id)
+            conversation_count = 0
+            last_active_at = 0
+            if summary is not None:
+                conversation_count = summary.conversation_count
+                last_active_at = self._timestamp(summary.last_active_at)
+            agents.append({
                 "id": str(app.id),
                 "name": app.name,
                 "icon": app.icon,
                 "description": app.description,
                 "status": app.status,
-                "conversation_count": summaries[app.id].conversation_count if app.id in summaries else 0,
-                "last_active_at": (
-                    self._timestamp(summaries[app.id].last_active_at) if app.id in summaries else 0
-                ),
-            }
-            for app in apps
-        ]
+                "conversation_count": conversation_count,
+                "last_active_at": last_active_at,
+            })
+        return agents
 
     def get_agent(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """获取任务中心运行所需的已发布 Agent 配置，不返回 WebApp token。"""
@@ -226,6 +169,8 @@ class CreatorTaskService(BaseService):
         page_size: int = 20,
         search: str = "",
     ) -> dict[str, Any]:
+        """只查询授权会话，按更新时间和 ID 组合游标返回一页结果。"""
+        # 1.先应用账号可见性、应用和搜索条件，再追加游标范围。
         query = self._visible_query(account)
         if app_id is not None:
             query = query.filter(App.id == app_id)
@@ -249,6 +194,7 @@ class CreatorTaskService(BaseService):
                         ),
                     )
                 )
+        # 2.多取一条判断下一页；当前页的运行状态通过一次批量查询取得。
         rows = (
             query.order_by(desc(Conversation.updated_at), desc(Conversation.id))
             .limit(page_size + 1)
@@ -257,22 +203,25 @@ class CreatorTaskService(BaseService):
         has_more = len(rows) > page_size
         rows = rows[:page_size]
         statuses = self._last_run_statuses([conversation.id for conversation, _ in rows])
+        # 3.先生成列表和下一页游标，再构造响应，避免将流程埋在嵌套推导式中。
+        conversations = []
+        for conversation, app in rows:
+            last_status = statuses.get(conversation.id, "idle")
+            conversations.append(self._serialize_conversation(
+                conversation, app, last_run_status=last_status,
+            ))
+        next_before = None
+        if has_more and rows:
+            next_before = str(rows[-1][0].id)
         return {
-            "list": [
-                self._serialize_conversation(
-                    conversation, app, last_run_status=statuses.get(conversation.id, "idle"),
-                )
-                for conversation, app in rows
-            ],
-            "page": {
-                "has_more": has_more,
-                "next_before": str(rows[-1][0].id) if has_more and rows else None,
-            },
+            "list": conversations,
+            "page": {"has_more": has_more, "next_before": next_before},
         }
 
     def get_conversation(
         self, conversation_id: UUID, account: Account
     ) -> dict[str, Any]:
+        """从授权列表范围读取会话及所属应用，避免绕过历史归属兼容规则。"""
         row = (
             self._visible_query(account)
             .filter(Conversation.id == conversation_id)
@@ -288,6 +237,8 @@ class CreatorTaskService(BaseService):
     def update_conversation(
         self, conversation_id: UUID, account: Account, **values: Any
     ) -> dict[str, Any]:
+        """更新入口已校验的会话字段，提交后返回包含最新运行状态的摘要。"""
+        # 1.通过与列表相同的可见性条件确认修改权限。
         row = (
             self._visible_query(account)
             .filter(Conversation.id == conversation_id)
@@ -295,6 +246,7 @@ class CreatorTaskService(BaseService):
         )
         if row is None:
             raise NotFoundException("会话不存在或无权访问")
+        # 2.字段提交成功后再读取运行状态，保持响应与已保存的数据一致。
         conversation, app = row
         for field, value in values.items():
             setattr(conversation, field, value)
@@ -305,6 +257,8 @@ class CreatorTaskService(BaseService):
         )
 
     def delete_conversation(self, conversation_id: UUID, account: Account) -> None:
+        """清理可恢复运行资源后软删除会话，清理失败时不提交删除标记。"""
+        # 1.先校验归属，再执行可能涉及外部资源的清理。
         row = (
             self._visible_query(account)
             .filter(Conversation.id == conversation_id)
@@ -320,8 +274,68 @@ class CreatorTaskService(BaseService):
                 conversation_id=conversation.id,
             )
         )
+        # 2.清理成功后保存删除标记，后续列表和入口都不再返回该会话。
         conversation.is_deleted = True
         self.db.session.commit()
+
+    def _visible_query(self, account: Account):
+        """构建同账号可见的任务会话查询。
+
+        ``owner_account_id`` 是新数据的稳定归属；created_by 和 EndUser
+        条件用于兼容历史 WebApp 会话，待业务侧完成数据回填后仍可保留。
+        """
+        legacy_end_users = select(EndUser.id).where(
+            EndUser.external_user_id == account.id
+        )
+        # 新数据只认稳定的 owner；只有尚未回填的会话才允许按旧创建者关系判断。
+        legacy_webapp_owner = and_(
+            Conversation.invoke_from == InvokeFrom.WEB_APP,
+            Conversation.created_by.in_(legacy_end_users),
+        )
+        legacy_creator = or_(Conversation.created_by == account.id, legacy_webapp_owner)
+        legacy_ownership = and_(Conversation.owner_account_id.is_(None), legacy_creator)
+        ownership = or_(Conversation.owner_account_id == account.id, legacy_ownership)
+        return (
+            self.db.session.query(Conversation, App)
+            .join(App, App.id == Conversation.app_id)
+            .filter(
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+                Conversation.invoke_from.in_(
+                    [
+                        InvokeFrom.CREATOR_TASK,
+                        InvokeFrom.WEB_APP,
+                    ]
+                ),
+                Conversation.is_deleted.is_(False),
+                ownership,
+            )
+        )
+
+    @staticmethod
+    def _timestamp(value: datetime | None) -> int:
+        """历史数据没有时间时沿用接口约定返回 0。"""
+        return int(value.timestamp()) if value else 0
+
+    def _serialize_conversation(
+        self, conversation: Conversation, app: App, *, last_run_status: str = "idle",
+    ) -> dict[str, Any]:
+        """序列化已加载的摘要；列表中的运行状态由调用方批量读取。"""
+        return {
+            "id": str(conversation.id),
+            "name": conversation.name or "新的会话",
+            "summary": conversation.summary or "",
+            "is_pinned": bool(conversation.is_pinned),
+            "updated_at": self._timestamp(conversation.updated_at),
+            "created_at": self._timestamp(conversation.created_at),
+            "last_run_status": last_run_status,
+            "agent": {
+                "id": str(app.id),
+                "name": app.name,
+                "icon": app.icon,
+                "description": app.description,
+            },
+        }
 
     def _last_run_statuses(self, conversation_ids: list[UUID]) -> dict[UUID, str]:
         """仅为当前页的授权会话批量取最新状态；同时间运行按 ID 稳定排序。"""
