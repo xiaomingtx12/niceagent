@@ -38,6 +38,8 @@ class AgentInvocation(AgentInvocationContext):
     definition_fingerprint: str | None = None
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
     model_selection: WorkbenchModelSelection | None = None
+    # 旧客户端会自动回传默认模型，只有新运行显式标记后才恢复会话覆盖。
+    model_selection_explicit: bool = False
 
 
 class WorkbenchModelChoiceResp(BaseModel):
@@ -59,6 +61,7 @@ class WorkbenchModelSettingsResp(BaseModel):
     model: str = ""
     provider: str = ""
     selected_model: WorkbenchModelSelection | None = None
+    model_override: WorkbenchModelSelection | None = None
     available_models: list[WorkbenchModelChoiceResp] = Field(default_factory=list)
     reasoning_levels: list[str] = Field(default_factory=list)
     default_reasoning_effort: str | None = None

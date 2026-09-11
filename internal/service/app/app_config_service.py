@@ -200,6 +200,8 @@ class AppConfigService(BaseService):
                     item["url"] = config.url
             else:
                 item["system_prompt"] = config.system_prompt
+                if config.source == "custom":
+                    item["model_mode"] = config.model_mode
                 if config.source == "published":
                     item.update(
                         {

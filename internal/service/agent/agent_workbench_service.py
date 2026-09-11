@@ -334,6 +334,9 @@ class AgentWorkbenchService:
             conversation_id=context.conversation_id,
             invoke_from=context.invoke_from,
         )
+        # 旧记录没有区分默认展示与手动选择，不能据此固定以后运行的模型。
+        if saved.get("model_selection") and saved.get("model_selection_explicit") is not True:
+            saved = {}
         assembly = self.execution_service.agent_assembly_service
         # 1.优先恢复历史选择；解析或授权失败时再尝试当前默认配置。
         settings = None
@@ -817,6 +820,7 @@ class AgentWorkbenchService:
             selected_skills=run_input.selected_skills,
             reasoning_effort=run_input.reasoning_effort,
             model_selection=run_input.model_selection,
+            model_selection_explicit=run_input.model_selection is not None,
             input_message_id=run_input.input_message_id,
             user_input_enabled=user_input_enabled,
         )

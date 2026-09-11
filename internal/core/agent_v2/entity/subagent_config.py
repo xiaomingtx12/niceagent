@@ -57,6 +57,7 @@ class SubAgentConfig(BaseModel):
     mode: Literal["sync", "async"] = "sync"
     context_passing: Literal["NONE"] = "NONE"
     source: Literal["custom", "published"] = "custom"
+    model_mode: Literal["inherit", "custom"] | None = None
     model: StrictStr | None = Field(default=None, min_length=1)
     model_provider: StrictStr | None = Field(default=None, min_length=1)
     model_connection_id: UUID | None = None
@@ -123,8 +124,25 @@ class SubAgentConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_model_reference(cls, value: Any) -> Any:
-        """把旧 provider/model 引用转换为独立字段，保留模型名中的斜杠。"""
-        if not isinstance(value, dict) or value.get("model_provider") is not None:
+        """保留模型选择意图；跟随父模型时丢弃旧快照，旧配置按原有字段兼容。"""
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        is_custom_sync = (
+            str(value.get("source", "custom")).lower() == "custom"
+            and str(value.get("mode", "sync")).lower() == "sync"
+        )
+        if is_custom_sync:
+            if value.get("model_mode") is None:
+                has_model_reference = any(
+                    value.get(key) is not None
+                    for key in ("model", "model_provider", "model_connection_id")
+                )
+                value["model_mode"] = "custom" if has_model_reference else "inherit"
+            if value["model_mode"] == "inherit":
+                value.update(model=None, model_provider=None, model_connection_id=None)
+                return value
+        if value.get("model_provider") is not None:
             return value
         model = value.get("model")
         if not isinstance(model, str) or not model.strip():
@@ -166,6 +184,10 @@ class SubAgentConfig(BaseModel):
     @model_validator(mode="after")
     def validate_mode_constraints(self) -> "SubAgentConfig":
         """校验同步、异步和发布 Agent 之间的字段约束。"""
+        if self.model_mode is not None and (self.mode != "sync" or self.source != "custom"):
+            raise ValueError("仅同步自定义 SubAgent 支持模型选择模式")
+        if self.model_mode == "custom" and self.model is None:
+            raise ValueError("独立模型须同时提供 model 和 model_provider")
         has_model_override = any(
             value is not None
             for value in (self.model, self.model_provider, self.model_connection_id)

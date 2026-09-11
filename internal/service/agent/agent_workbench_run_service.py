@@ -370,6 +370,7 @@ class AgentWorkbenchRunService:
         row = (
             self.db.session.query(
                 invocation["model_selection"].label("model_selection"),
+                invocation["model_selection_explicit"].label("model_selection_explicit"),
                 invocation["reasoning_effort"].label("reasoning_effort"),
             )
             .filter(

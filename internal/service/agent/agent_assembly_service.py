@@ -26,7 +26,9 @@ from internal.core.agent_v2 import (
     AgentSkill,
     SubAgentRuntimeBinding,
 )
-from internal.core.language_model.entities.model_entity import BaseLanguageModel, ModelEntity
+from internal.core.language_model.entities.model_entity import (
+    BaseLanguageModel, ModelEntity, ModelParameter, ModelType,
+)
 from internal.core.language_model.parameters import canonicalize_parameters
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
@@ -51,9 +53,11 @@ from internal.core.agent_v2.entity.user_input import build_confirmed_input_conte
 from internal.repository import WorkspaceFileStore
 from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
 from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
-from internal.schema.agent.agent_runtime_schema import AgentInvocation, AgentInvocationContext, WorkbenchModelSettingsResp, WorkbenchModelChoiceResp
+from internal.schema.agent.agent_runtime_schema import (
+    AgentInvocation, AgentInvocationContext,
+    WorkbenchModelSettingsResp, WorkbenchModelChoiceResp,
+)
 from internal.entity.agent_workbench_entity import WorkbenchModelSelection
-from internal.core.language_model.entities.model_entity import ModelType
 from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
 from internal.schema.app.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
@@ -63,6 +67,11 @@ from .assistant_agent_service import AssistantAgentService
 from internal.service.language_model.language_model_service import LanguageModelService
 from internal.service.dataset.retrieval_service import RetrievalService
 from internal.service.skill.skill_service import SkillService
+
+
+_MODEL_SELECTABLE_SOURCES = frozenset({
+    InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT,
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +194,11 @@ class AgentAssemblyService:
         name, description, _, config = self._load_app_configuration(req)
         return self._definition_fingerprint(name, description, config)
 
-    def resolve_workbench_model(self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None = None) -> AppModelConfigReq | None:
+    def resolve_workbench_model(
+        self,
+        context: AgentInvocationContext,
+        selection: WorkbenchModelSelection | None = None,
+    ) -> AppModelConfigReq | None:
         """创建者可覆盖自己的已激活模型；公开入口不能借此选择账号中的其他连接。"""
         config, _ = self._resolve_workbench_model(context, selection)
         return config
@@ -202,22 +215,12 @@ class AgentAssemblyService:
         if config is None:
             return WorkbenchModelSettingsResp()
         if model is None:
-            connection_id = None
-            if config.provider_connection_id:
-                connection_id = str(config.provider_connection_id)
-            model = self.language_model_service.get_enabled_model_entity(
-                config.provider, config.model, account_id,
-                provider_connection_id=connection_id,
-            )
+            model = self._get_model_entity(config, account_id)
         if model is None:
             return WorkbenchModelSettingsResp()
 
         # 2.思考强度优先采用应用配置，未设置时才采用模型声明的默认值。
-        parameter = None
-        for item in model.parameters:
-            if item.name == "reasoning_effort":
-                parameter = item
-                break
+        parameter = self._reasoning_parameter(model)
         parameters = canonicalize_parameters(config.parameters)
         default = parameters.get("reasoning_effort")
         reasoning_levels = []
@@ -228,8 +231,7 @@ class AgentAssemblyService:
 
         # 3.没有显式选择时，仅为允许切换模型的创建者补全当前连接。
         selected_model = selection
-        selectable_sources = {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT}
-        can_select_model = context.invoke_from in selectable_sources and context.created_by == account_id
+        can_select_model = context.invoke_from in _MODEL_SELECTABLE_SOURCES and context.created_by == account_id
         connection_id = config.provider_connection_id or model.attributes.get("provider_api_key_id")
         needs_default_selection = selected_model is None and can_select_model
         if needs_default_selection and connection_id:
@@ -244,6 +246,7 @@ class AgentAssemblyService:
             model=config.model,
             provider=config.provider,
             selected_model=selected_model,
+            model_override=selection,
             available_models=self._workbench_model_choices(context),
             reasoning_levels=reasoning_levels,
             default_reasoning_effort=default,
@@ -263,21 +266,10 @@ class AgentAssemblyService:
         if effort is None:
             return
         if model is None and config is not None:
-            connection_id = None
-            if config.provider_connection_id:
-                connection_id = str(config.provider_connection_id)
-            model = self.language_model_service.get_enabled_model_entity(
-                config.provider, config.model, context.account_id,
-                provider_connection_id=connection_id,
-            )
+            model = self._get_model_entity(config, context.account_id)
 
         # 2.必须在该模型声明的可选强度内，不能仅凭参数名称接受客户端输入。
-        parameter = None
-        if model is not None:
-            for item in model.parameters:
-                if item.name == "reasoning_effort":
-                    parameter = item
-                    break
+        parameter = self._reasoning_parameter(model)
         if parameter is None:
             raise ValidateErrorException("当前模型不支持所选思考强度，请重新选择")
         allowed_efforts = {option.value for option in parameter.options}
@@ -360,6 +352,7 @@ class AgentAssemblyService:
             app_config.subagents,
             account_id=account_id,
             parent_app_id=req.app_id,
+            parent_model=cast(BaseChatModel, model),
         )
         self._log_build_timing(req, "subagents", phase_started_at, observer)
 
@@ -382,8 +375,7 @@ class AgentAssemblyService:
     ) -> tuple[AppModelConfigReq | None, ModelEntity | None]:
         """保留应用默认参数；只有切换到其他模型或连接时才采用新模型默认值。"""
         # 1.公开入口不能借用账号的其他模型连接。
-        selectable_sources = {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT}
-        if selection is not None and context.invoke_from not in selectable_sources:
+        if selection is not None and context.invoke_from not in _MODEL_SELECTABLE_SOURCES:
             raise ValidateErrorException("当前入口不允许切换模型")
 
         # 2.辅助 Agent 读取账号默认模型，其他入口读取草稿或发布配置。
@@ -408,28 +400,25 @@ class AgentAssemblyService:
             raise ValidateErrorException("所选模型未激活或不是对话模型")
 
         # 4.旧配置未记录连接 ID 时沿用原参数；明确换连接则重建默认参数。
-        same_model = False
-        same_connection = False
-        if config is not None:
-            same_model = config.provider == selection.provider and config.model == selection.model
-            if not config.provider_connection_id:
-                same_connection = True
-            else:
-                same_connection = str(config.provider_connection_id) == str(selection.provider_connection_id)
+        same_model = config is not None and (
+            config.provider == selection.provider and config.model == selection.model
+        )
+        same_connection = config is not None and (
+            config.provider_connection_id is None
+            or config.provider_connection_id == selection.provider_connection_id
+        )
         if same_model and same_connection:
             return config, model
-        parameters = {}
-        for parameter in model.parameters:
-            if not parameter.required or parameter.default is None:
-                continue
-            parameters[parameter.name] = parameter.default
+        parameters = {
+            parameter.name: parameter.default for parameter in model.parameters
+            if parameter.required and parameter.default is not None
+        }
         selected_config = AppModelConfigReq(**selection.model_dump(), parameters=parameters)
         return selected_config, model
 
     def _workbench_model_choices(self, context: AgentInvocationContext) -> list[WorkbenchModelChoiceResp]:
         """目录按可信账号和创建者身份过滤，不向 WebApp 或开放 API 暴露。"""
-        selectable_sources = {InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT}
-        if context.invoke_from not in selectable_sources:
+        if context.invoke_from not in _MODEL_SELECTABLE_SOURCES:
             return []
         if context.created_by != context.account_id:
             return []
@@ -460,6 +449,21 @@ class AgentAssemblyService:
                 ))
         return choices
 
+    def _get_model_entity(self, config: AppModelConfigReq, account_id: UUID) -> ModelEntity | None:
+        """查询展示和参数校验共用的模型定义，连接权限仍由模型服务校验。"""
+        connection_id = str(config.provider_connection_id) if config.provider_connection_id else None
+        return self.language_model_service.get_enabled_model_entity(
+            config.provider, config.model, account_id,
+            provider_connection_id=connection_id,
+        )
+
+    @staticmethod
+    def _reasoning_parameter(model: ModelEntity | None) -> ModelParameter | None:
+        """模型不支持推理强度时返回空值，供展示与提交校验一致处理。"""
+        if model is None:
+            return None
+        return next((item for item in model.parameters if item.name == "reasoning_effort"), None)
+
     @staticmethod
     def _with_reasoning_override(config: AppModelConfigReq, effort: str | None) -> AppModelConfigReq:
         """复制调用参数覆盖单个字段，避免改写草稿、发布配置及旧字段别名冲突。"""
@@ -471,8 +475,11 @@ class AgentAssemblyService:
 
     @staticmethod
     def _definition_fingerprint(name: str, description: str, config: AgentAppConfigReq) -> str:
-        """稳定序列化配置，只持久化摘要，不额外公开模型配置。"""
-        value = json.dumps([name, description, config.model_dump(mode="json")], sort_keys=True, ensure_ascii=True)
+        """指纹比较规范化后的模型字段，新增模式标记不使未变更的旧待填任务失效。"""
+        payload = config.model_dump(
+            mode="json", exclude={"subagents": {"__all__": {"model_mode"}}},
+        )
+        value = json.dumps([name, description, payload], sort_keys=True, ensure_ascii=True)
         return hashlib.sha256(value.encode()).hexdigest()
 
     def _load_app_configuration(
@@ -547,115 +554,93 @@ class AgentAssemblyService:
         *,
         account_id: UUID,
         parent_app_id: UUID,
-    ) -> tuple[
-        list[SubAgentConfig],
-        dict[str, SubAgentRuntimeBinding],
-    ]:
-        """按自定义、同步发布、异步发布三种来源装配，能力绑定与配置名称一一对应。"""
-        # 1.批量读取发布引用，避免每个 SubAgent 重复访问数据库。
-        published_apps = self._load_published_apps(
-            subagents,
-            account_id=account_id,
+        parent_model: BaseChatModel,
+    ) -> tuple[list[SubAgentConfig], dict[str, SubAgentRuntimeBinding]]:
+        """每次运行重新绑定模型；跟随子 Agent 共享本次解析后的父模型实例。"""
+        # 1.发布应用统一授权，同步引用的配置批量加载。
+        published_apps = self._load_published_apps(subagents, account_id=account_id)
+        sync_app_ids = dict.fromkeys(
+            config.published_app_id for config in subagents
+            if config.source == "published" and config.mode == "sync"
         )
-        sync_app_ids = {}
-        for config in subagents:
-            if config.source != "published" or config.mode != "sync":
-                continue
-            if config.published_app_id is None:
-                continue
-            sync_app_ids[config.published_app_id] = None
         published_configs = self.app_config_service.get_agent_runtime_configs(
             [published_apps[app_id] for app_id in sync_app_ids]
         )
-
-        # 2.准备规范化配置和逐 SubAgent 的运行时依赖绑定。
         normalized: list[SubAgentConfig] = []
         bindings: dict[str, SubAgentRuntimeBinding] = {}
 
-        # 3.逐个解析自定义、同步发布和异步发布 SubAgent。
+        # 2.外部异步、发布引用和本地自定义分别解析，不在一个分支里混用模型来源。
         for config in subagents:
-            name = config.name
+            if config.source == "published":
+                target = published_apps[config.published_app_id]
+                if config.mode == "async":
+                    normalized.append(self._prepare_async_published_subagent(
+                        config, account_id=account_id, parent_app_id=parent_app_id,
+                    ))
+                    continue
+                resolved, binding = self._prepare_sync_published_subagent(
+                    config, target, published_configs[target.id], account_id=account_id,
+                )
+                normalized.append(resolved)
+                bindings[config.name] = binding
+                continue
 
-            # 4.自定义 SubAgent 可选用独立模型，否则由 DeepAgents 继承主模型。
-            if config.source != "published":
-                normalized.append(config.model_copy(deep=True))
+            normalized.append(config.model_copy(deep=True))
+            if config.mode == "sync":
                 model = self._load_subagent_model(config, account_id=account_id)
-                if model is not None:
-                    bindings[name] = SubAgentRuntimeBinding(model=model)
-                continue
-
-            # 5.发布 SubAgent 必须属于当前租户且仍处于发布状态。
-            target_id = config.published_app_id
-            if target_id is None:
-                raise ValidateErrorException(f"子 Agent {name!r} 缺少发布应用标识")
-            target_app = published_apps[target_id]
-
-            # 6.异步发布 Agent 通过内部 Agent Protocol 独立执行。
-            if config.mode == "async":
-                internal_transport = self._build_internal_async_transport(
-                    account_id=account_id,
-                    parent_app_id=parent_app_id,
-                    target_app_id=target_id,
-                    headers=config.headers,
+                bindings[config.name] = SubAgentRuntimeBinding(
+                    model=parent_model if model is None else model,
                 )
-                normalized.append(
-                    config.model_copy(
-                        deep=True,
-                        update={
-                            "graph_id": build_published_graph_id(target_id),
-                            **internal_transport,
-                        },
-                    )
-                )
-                continue
-
-            # 7.同步发布 Agent 加载目标应用的工具、知识库和工作流能力。
-            target_config = published_configs[target_id]
-            target_tools = self._build_configured_tools(
-                target_config,
-                account_id=account_id,
-                app_id=target_id,
-            )
-
-            # 8.把发布应用转换为当前图可使用的同步 SubAgent 配置。
-            # 工具名称冲突和 DeepAgents 保留名称由 Core 的
-            # ``build_subagent_specs`` 统一校验；Service 只负责加载工具。
-            tool_names = [tool.name for tool in target_tools]
-
-            if target_config.model_config_data is None:
-                raise ValidateErrorException(
-                    f"发布 Agent {target_app.name!r} 缺少模型配置"
-                )
-            target_model = cast(
-                BaseChatModel,
-                self.language_model_service.load_language_model(
-                    target_config.model_config_data,
-                    account_id=account_id,
-                ),
-            )
-            normalized.append(
-                config.model_copy(
-                    deep=True,
-                    update={
-                        "mode": "sync",
-                        "context_passing": "NONE",
-                        "system_prompt": (
-                            f"你是已发布应用「{target_app.name}」的执行 Agent。"
-                            "请严格遵循该应用的发布人设完成任务，并只返回本次任务的最终结果。\n\n"
-                            f"{target_config.preset_prompt}"
-                        ).strip(),
-                        "tools": tool_names,
-                        "skills": [],
-                    },
-                )
-            )
-            bindings[name] = SubAgentRuntimeBinding(
-                tools=tuple(target_tools),
-                model=target_model,
-            )
-
-        # 9.返回图构建阶段所需的规范化配置和逐 Agent 运行时绑定。
         return normalized, bindings
+
+    def _prepare_sync_published_subagent(
+        self,
+        config: SubAgentConfig,
+        target: App,
+        target_config: AgentAppConfigReq,
+        *,
+        account_id: UUID,
+    ) -> tuple[SubAgentConfig, SubAgentRuntimeBinding]:
+        """同步发布引用使用目标应用的发布模型和能力，不继承父应用模型。"""
+        if target_config.model_config_data is None:
+            raise ValidateErrorException(f"发布 Agent {target.name!r} 缺少模型配置")
+        tools = self._build_configured_tools(
+            target_config, account_id=account_id, app_id=target.id,
+        )
+        model = self.language_model_service.load_language_model(
+            target_config.model_config_data, account_id=account_id,
+        )
+        resolved = config.model_copy(deep=True, update={
+            "system_prompt": (
+                f"你是已发布应用「{target.name}」的执行 Agent。"
+                "请严格遵循该应用的发布人设完成任务，并只返回本次任务的最终结果。\n\n"
+                f"{target_config.preset_prompt}"
+            ).strip(),
+            "tools": [tool.name for tool in tools],
+            "skills": [],
+        })
+        return resolved, SubAgentRuntimeBinding(
+            tools=tuple(tools), model=cast(BaseChatModel, model),
+        )
+
+    def _prepare_async_published_subagent(
+        self,
+        config: SubAgentConfig,
+        *,
+        account_id: UUID,
+        parent_app_id: UUID,
+    ) -> SubAgentConfig:
+        """异步发布引用只绑定内部传输，模型由目标应用在独立运行中解析。"""
+        target_id = config.published_app_id
+        if target_id is None:
+            raise ValidateErrorException(f"子 Agent {config.name!r} 缺少发布应用标识")
+        transport = self._build_internal_async_transport(
+            account_id=account_id, parent_app_id=parent_app_id,
+            target_app_id=target_id, headers=config.headers,
+        )
+        return config.model_copy(deep=True, update={
+            "graph_id": build_published_graph_id(target_id), **transport,
+        })
 
     @staticmethod
     def _validate_selected_skills(
@@ -765,8 +750,8 @@ class AgentAssemblyService:
         account_id: UUID,
     ) -> BaseChatModel | None:
         """解析自定义 SubAgent 的可选模型覆盖。"""
-        # 1.没有模型覆盖时，让 DeepAgents 继承主 Agent 模型。
-        if subagent.model is None:
+        # 1.跟随模式不加载独立模型，由本次装配绑定父模型。
+        if subagent.model_mode == "inherit" or subagent.model is None:
             return None
 
         # 2.使用领域层规范化后的模型与连接，租户授权由模型服务再次校验。
