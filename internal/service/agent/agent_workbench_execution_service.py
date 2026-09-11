@@ -11,7 +11,6 @@ from typing import Any, ClassVar
 from injector import inject
 from flask import Flask, current_app
 from psycopg_pool import PoolTimeout
-from langgraph.types import Command
 
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
@@ -217,14 +216,11 @@ class AgentWorkbenchRunExecutionService:
                 logger.exception("取消监控启动失败后释放 Agent 资源失败 run_id=%s", run.run_id)
             raise
 
-        # 5.恢复命令与首次消息分别构造；Core 负责执行结束后的 Agent 资源释放。
+        # 5.Core 根据消息或恢复答案构造框架输入，并在执行结束后释放资源。
         try:
-            if run.resume is not None:
-                graph_input = Command(resume=run.resume)
-            else:
-                graph_input = {"messages": [input_message]}
             return agent.execute(
-                graph_input,
+                message=input_message if run.resume is None else None,
+                resume=run.resume,
                 on_event=events.receive,
                 cancel_requested=run.cancel_requested,
             )
@@ -344,7 +340,7 @@ class AgentWorkbenchRunExecutionService:
                         return
                     if status == WorkbenchRunStatus.CANCELLING.value:
                         run.cancel_requested.set()
-                    if run.cancel_requested.is_set() and agent.request_drain():
+                    if run.cancel_requested.is_set() and agent.request_cancel():
                         return
                 except Exception:
                     logger.exception("读取 Agent 取消状态失败 run_id=%s", run.run_id)

@@ -15,7 +15,6 @@ from wechatpy.utils import check_signature
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
-from internal.core.agent_v2.execution.message_parser import message_content_to_text
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import MessageStatus, InvokeFrom
 from internal.entity.platform_entity import WechatConfigStatus
@@ -271,43 +270,21 @@ class WechatService(BaseService):
                 # Agent 流可能持续数分钟，装配完成后先释放当前 ORM Session。
                 self.db.session.close()
 
-                state_snapshot: Mapping[str, Any] = {}
-                for raw_event in agent.stream_events({"messages": [input_message]}):
-                    if raw_event.get("method") != "values":
-                        continue
-                    params = raw_event.get("params")
-                    if not isinstance(params, Mapping) or params.get("namespace"):
-                        continue
-                    data = params.get("data")
-                    if isinstance(data, Mapping):
-                        state_snapshot = data
-
-                answer = ""
-                messages = state_snapshot.get("messages")
-                if isinstance(messages, list):
-                    for item in reversed(messages):
-                        if isinstance(item, Mapping):
-                            message_type = item.get("type")
-                            content = item.get("content")
-                        else:
-                            message_type = getattr(item, "type", None)
-                            content = getattr(item, "content", None)
-                        if message_type not in {"ai", "assistant"}:
-                            continue
-                        answer = message_content_to_text(content)
-                        if answer:
-                            break
-
-                observer.finish("completed")
+                # 兼容入口只消费结果，回答提取、审核和运行资源关闭统一交给 Core。
+                result = agent.execute(message=input_message)
+                if result.error is not None:
+                    raise result.error
+                if result.status != "completed":
+                    raise FailException("微信公众号 Agent 未完成本次执行")
                 updates = {
                     "status": MessageStatus.NORMAL,
                     "latency": max(0.0, time.monotonic() - started_at),
                     **ConversationService.build_run_usage_updates(
-                        observer.build_run_usage()
+                        result.usage
                     ),
                 }
-                if answer:
-                    updates["answer"] = answer
+                if result.answer:
+                    updates["answer"] = result.answer
                 with self.db.auto_commit():
                     persisted_message = self.db.session.get(Message, message_id)
                     if persisted_message is not None:

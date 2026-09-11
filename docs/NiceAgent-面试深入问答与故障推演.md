@@ -664,7 +664,7 @@ append_events(run, executor, events):
 | 文件存储 | [workspace_file_store.py](/D:/spring_project/py/my-dify/internal/repository/workspace_file_store.py) | 上传顺序、补偿与旧对象清理 |
 | 文件事务 | [workspace_file_repository.py](/D:/spring_project/py/my-dify/internal/repository/workspace_file_repository.py) | 作用域锁、revision、配额与 Session |
 | 沙箱池 | [session_sandbox_pool.py](/D:/spring_project/py/my-dify/internal/core/agent_v2/backends/sandbox/session_sandbox_pool.py) | 占位、锁外网络、generation、失效 |
-| 框架会话身份 | [langgraph_conversation_config.py](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/configuration/langgraph_conversation_config.py) | 服务端身份覆盖调用参数 |
+| 框架会话身份 | [run_context.py](/D:/spring_project/py/my-dify/internal/core/agent_v2/entity/run_context.py) | 执行器只从服务端身份生成 thread_id 和会话元数据 |
 | 内部协议身份 | [internal_auth.py](/D:/spring_project/py/my-dify/internal/service/agent_protocol/internal_auth.py) | 作用域签名、有效期与 Header 防伪 |
 | Embedding 与切片 | [embeddings_service.py](/D:/spring_project/py/my-dify/internal/service/dataset/embeddings_service.py)、[process_rule_service.py](/D:/spring_project/py/my-dify/internal/service/dataset/process_rule_service.py) | 指纹、缓存和 length_function |
 | 异步评测 | [agent_evaluation_service.py](/D:/spring_project/py/my-dify/internal/service/agent_evaluation/agent_evaluation_service.py) | 冻结材料、投递、领取和超时 |

@@ -21,7 +21,7 @@ sequenceDiagram
     Execution->>Core: 解析授权能力、取得资源、编译图
     Core-->>Execution: 单次执行器与输入消息
     Note over Execution,Core: 装配查询 Session 关闭；取消监控另用 Session
-    Execution->>Core: execute(input, on_event, cancel_requested)
+    Execution->>Core: execute(message 或 resume, on_event, cancel_requested)
     loop 图事件
         Core->>Events: 经输出审核交付 AgentEvent
         Events->>DB: 投影公开事件并批量提交
@@ -44,7 +44,7 @@ sequenceDiagram
 | `AgentWorkbenchRunExecutionService.launch` | WorkbenchRun → 后台任务 | 有界执行池和本地登记；调度失败进入失败收敛。后台使用独立 Flask 上下文。 |
 | `AgentAssemblyService.build_agent` | AgentInvocation → 执行器、消息 | 读取配置并授权模型、工具和 Skill；校验恢复指纹，装配结束后释放查询 Session。 |
 | `AgentRuntimeAssembler.build` | 已解析配置 → AgentExecutor | 用 ExitStack 登记 Workspace、Skill、Sandbox 等资源；组合成功后转交独占 Backend 所有权，构造失败清理并保留原始错误。 |
-| `AgentExecutor.execute` | 首次消息或恢复 Command → AgentExecutionResult | 消费图流、处理取消、提取结果并关闭资源。共享 Store / Checkpointer 不随单轮关闭；清理失败不能覆盖已有执行错误。 |
+| `AgentExecutor.execute` | message 或恢复答案映射 → AgentExecutionResult | Core 构造框架输入，消费图流、处理取消、提取结果并关闭资源。共享 Store / Checkpointer 不随单轮关闭；清理失败不能覆盖已有执行错误。 |
 | `AgentEventDelivery` | 原生事件 → 可交付原生事件 | 开启输出审核时缓存整轮；失败或取消丢弃尚未交付事件。与图状态写入审核用途不同。 |
 | `AgentProtocolEventProjector` | AgentEvent → WorkbenchEvent 列表 | 维护源序号、公开序号、每个图路径的消息累积；不访问数据库。一次原生事件可产生多个公开事件。 |
 | `AgentWorkbenchEventBuffer` | 公开事件 → 已提交批次 | 首段推理、首段正文和阶段边界立即刷新，其余按批量或到达时的时间阈值刷新。先写库，再推进游标并通知。 |
@@ -102,5 +102,6 @@ sequenceDiagram
 - [ ] 断线重连：从中间游标恢复，包括存在序号空洞、通道过滤及 namespace 过滤的情况。
 - [ ] 失败：模型失败、尾批落库失败、终态提交失败、提交后通知失败，检查原始错误和终态一致性。
 - [ ] 执行权失效：旧执行实例不能写入新结果，恢复后的用量不会重复累计。
+- [ ] 微信兼容入口：保存本轮回答与用量；失败、取消或无法继续的暂停不标记为成功，无本轮回答时不回填上一轮回答。
 
 对应规划：[agent-platform-refactor-plan.md](agent-platform-refactor-plan.md)。

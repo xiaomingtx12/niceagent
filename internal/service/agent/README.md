@@ -32,6 +32,8 @@
 
 终态展示由 `agent_protocol.state_projector` 的 `project_execution_state` 和 `project_execution_lifecycle` 生成；执行服务保留数据库读取、业务消息状态、错误脱敏和原子提交顺序。
 
+执行服务只向 Core 传入 `message` 或 `resume`、事件接收方和取消信号，不构造 LangGraph Command。跨进程取消监控继续用独立 Session 查询数据库，并调用 `AgentExecutor.request_cancel()`；图排空由 Core 完成。微信兼容入口也使用 `execute(message=...)`，直接保存结果中的回答与用量。
+
 ## 待填写与取消
 
 - `respond_input` 复核答案、身份和配置指纹，提交后才恢复图执行。

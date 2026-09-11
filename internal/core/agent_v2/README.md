@@ -24,6 +24,16 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | Rubric 评分回调、修订与每轮验收 | `middleware/evidence_rubric_middleware.py` |
 | 测评候选提取与确定性证据核验 | `execution/evaluation_evidence.py` |
 
+## 执行接口
+
+平台通过 `AgentExecutor.execute(message=...)` 发起一次新输入，通过 `execute(resume=...)` 提交按中断 ID 组织的恢复答案。二者只能提供一个；空字典仍按恢复输入处理，不会误发新的用户消息。模型消息继续携带装配层设置的业务标识和附件信息。
+
+`on_event` 和 `cancel_requested` 可选：工作台传入事件接收方和共享取消信号；微信兼容入口只取最终结果。没有事件订阅者时仍执行输出审核，但不缓存待交付事件。`request_cancel()` 同时设置本次取消信号并请求图排空，调用方无需额外设置 Event；未启动或已结束时返回 False。数据库取消轮询、Session 和执行租约由 Service 管理。
+
+原生 `stream_events`、`Command` 和 `RunControl` 留在执行器内部。所有会话配置由 `AgentRunContext.conversation` 生成，调用方不再传入任意图配置。每个执行器只执行一次，返回结果前关闭独占资源；需要恢复时重新装配执行器并沿用会话身份与 Checkpointer。
+
+`AgentExecutionResult` 的优先级为：执行或清理错误 → `failed`；取消 → `cancelled`；存在中断 → `waiting_input`；其余 → `completed`。只有等待填写时返回 interrupts；开启输出审核后，失败或取消结果移除 messages，避免回答进入业务历史。业务 Run 状态、消息落库和观测历史合并由 Service 处理。
+
 ## 资源所有权
 
 装配器使用 `ExitStack` 登记已创建资源的关闭回调：Workspace 创建后立即登记；Skill 构造完成后登记它的路由。Sandbox 接管 Workspace 时替换其关闭登记；CompositeBackend 成功创建后整体接管独占 Backend。

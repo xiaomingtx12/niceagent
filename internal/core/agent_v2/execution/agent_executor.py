@@ -5,7 +5,7 @@ from enum import Enum, auto
 from threading import Event, Lock
 from typing import Any, Literal
 
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import merge_configs
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import RunControl
@@ -14,9 +14,6 @@ from langgraph.types import Command
 from internal.core.agent_v2.execution.user_input_interrupt_tracker import UserInputInterruptTracker
 from internal.core.agent_v2.execution.summary_progress import SummaryProgressCallback
 
-from internal.core.agent_v2.assembly.configuration.langgraph_conversation_config import (
-    merge_conversation_config,
-)
 from internal.core.agent_v2.execution.runtime_resources import (
     AgentRuntimeResources,
 )
@@ -62,20 +59,24 @@ class AgentExecutor:
         self._run_lock = Lock()
         self._state = _ExecutorState.READY
         self._run_control: RunControl | None = None
+        self._cancel_requested: Event | None = None
         self._interrupts: tuple[dict[str, Any], ...] = ()
 
     def execute(
         self,
-        input: dict[str, Any] | Command,
+        message: BaseMessage | None = None,
         *,
-        on_event: Callable[[AgentEvent], None],
-        cancel_requested: Event,
+        resume: Mapping[str, Any] | None = None,
+        on_event: Callable[[AgentEvent], None] | None = None,
+        cancel_requested: Event | None = None,
     ) -> AgentExecutionResult:
-        """消费图事件、处理取消并交付结果；事件接收方只负责传输和存储。"""
+        """消息与恢复答案二选一；统一交付结果并关闭资源，事件订阅和取消信号可选。"""
+        if cancel_requested is None:
+            cancel_requested = Event()
         state: dict[str, Any] = {}
         error: Exception | None = None
         cancelled = cancel_requested.is_set()
-        raw_stream = self.stream_events(input)
+        raw_stream = self._stream_events(message, resume=resume, cancel_requested=cancel_requested)
         delivery = AgentEventDelivery(self._review, on_event)
         try:
             if not cancelled:
@@ -125,29 +126,31 @@ class AgentExecutor:
             self._resources.close()
             self._state = _ExecutorState.CLOSED
 
-    def request_drain(self, reason: str = "cancel_requested") -> bool:
-        """请求当前图在下一个 superstep 边界协作式停止。"""
+    def request_cancel(self) -> bool:
+        """同时停止公开事件并请求图排空；未启动或已结束时返回 False。"""
         with self._run_lock:
             control = self._run_control
-            running = self._state is _ExecutorState.RUNNING
-        if control is None or not running:
-            return False
-        control.request_drain(reason)
+            if (self._state is not _ExecutorState.RUNNING
+                    or control is None or self._cancel_requested is None):
+                return False
+            self._cancel_requested.set()
+        control.request_drain("cancel_requested")
         return True
 
-    def stream_events(
+    def _stream_events(
         self,
-        input: dict[str, Any] | Command,
-        config: RunnableConfig | None = None,
+        message: BaseMessage | None,
+        *,
+        resume: Mapping[str, Any] | None,
+        cancel_requested: Event,
     ) -> Generator[dict[str, Any], None, None]:
-        """直接输出 Deep Agents v3 事件，并在结束时释放运行资源。"""
-        messages = [] if isinstance(input, Command) else list(input.get("messages", []) or [])
-        if not isinstance(input, Command) and not messages:
-            try:
-                self.close()
-            except Exception:
-                logger.exception("无效输入导致 Agent 关闭失败")
-            raise ValueError("智能体输入消息不能为空")
+        """将业务输入转换为框架命令；原生事件流和会话配置仅在 Core 内使用。"""
+        if (message is None) == (resume is None):
+            raise ValueError("必须且只能提供输入消息或恢复答案")
+        if message is not None and not isinstance(message, BaseMessage):
+            raise ValueError("输入消息必须是 BaseMessage")
+        if resume is not None and not isinstance(resume, Mapping):
+            raise ValueError("恢复答案必须是中断标识到答案的映射")
         with self._run_lock:
             if self._state is _ExecutorState.CLOSED:
                 raise RuntimeError("智能体运行时资源已经关闭")
@@ -161,8 +164,9 @@ class AgentExecutor:
             interrupt_tracker = UserInputInterruptTracker()
             with self._run_lock:
                 self._run_control = run_control
+                self._cancel_requested = cancel_requested
             effective_config = merge_configs(
-                merge_conversation_config(self._runtime_context, config),
+                self._runtime_context.conversation.to_config(),
                 {
                     "run_id": self._observer.run_id,
                     "callbacks": [self._observer, interrupt_tracker, summary_progress],
@@ -173,7 +177,7 @@ class AgentExecutor:
                 },
             )
             stream = self._graph.stream_events(
-                input if isinstance(input, Command) else {"messages": messages},
+                Command(resume=dict(resume)) if resume is not None else {"messages": [message]},
                 config=effective_config,
                 context=self._runtime_context,
                 version="v3",
@@ -224,7 +228,7 @@ class AgentExecutor:
             if cancel_requested.is_set():
                 cancelled = True
                 if not drain_requested:
-                    drain_requested = self.request_drain()
+                    drain_requested = self.request_cancel()
                     if not drain_requested:
                         break
                 continue
@@ -270,6 +274,7 @@ class AgentExecutor:
         with self._run_lock:
             self._state = _ExecutorState.FINISHED
             self._run_control = None
+            self._cancel_requested = None
 
         try:
             self.close()
