@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -83,7 +83,7 @@ class _TextStream:
     id: str
     namespace: list[str]
     node: str | None
-    text: str = ""
+    blocks: list[dict[str, str]] = field(default_factory=list)
 
 
 class AgentProtocolEventProjector:
@@ -344,15 +344,19 @@ class AgentProtocolEventProjector:
         node: str | None,
         source_sequence: int,
     ) -> list[dict[str, Any]]:
-        """把模型文本 chunk 立即投影为浏览器可消费的增量消息事件。"""
+        """只投影标准化的公开正文和推理文本，签名、工具参数不进入展示内容。"""
         normalized_namespace = tuple(str(item) for item in (namespace or []))
         stream_hint = node or (str(chunk.id or "") if not normalized_namespace else "")
         key = (normalized_namespace, stream_hint)
         state = self._text_streams.get(key)
-        text = chunk.text
         events: list[dict[str, Any]] = []
-
-        if text:
+        for block in chunk.content_blocks:
+            kind = block.get("type")
+            if kind not in {"text", "reasoning"}:
+                continue
+            value = block.get(kind)
+            if not isinstance(value, str) or not value:
+                continue
             if state is None:
                 state = _TextStream(
                     id=str(
@@ -364,21 +368,29 @@ class AgentProtocolEventProjector:
                     node=node,
                 )
                 self._text_streams[key] = state
-                start_fragments = (
-                    {"event": "message-start", "role": "ai", "id": state.id},
-                    {
-                        "event": "content-block-start", "index": 0,
-                        "content": {"type": "text", "text": ""},
-                    },
-                )
-                events.extend(
+                events.append(
                     self._event(
                         method="messages", namespace=namespace, timestamp=timestamp,
-                        node=node, source_sequence=source_sequence, data=fragment,
+                        node=node, source_sequence=source_sequence,
+                        data={"event": "message-start", "role": "ai", "id": state.id},
                     )
-                    for fragment in start_fragments
                 )
-            state.text += text
+            if not state.blocks or state.blocks[-1]["type"] != kind:
+                if state.blocks:
+                    events.append(self._event(
+                        method="messages", namespace=namespace, timestamp=timestamp,
+                        node=node, source_sequence=source_sequence,
+                        data={"event": "content-block-finish", "index": len(state.blocks) - 1,
+                              "content": dict(state.blocks[-1])},
+                    ))
+                state.blocks.append({"type": kind, kind: ""})
+                events.append(self._event(
+                    method="messages", namespace=namespace, timestamp=timestamp,
+                    node=node, source_sequence=source_sequence,
+                    data={"event": "content-block-start", "index": len(state.blocks) - 1,
+                          "content": {"type": kind, kind: ""}},
+                ))
+            state.blocks[-1][kind] += value
             events.append(
                 self._event(
                     method="messages",
@@ -388,8 +400,8 @@ class AgentProtocolEventProjector:
                     source_sequence=source_sequence,
                     data={
                         "event": "content-block-delta",
-                        "index": 0,
-                        "delta": {"type": "text-delta", "text": text},
+                        "index": len(state.blocks) - 1,
+                        "delta": {"type": f"{kind}-delta", kind: value},
                     },
                 )
             )
@@ -431,8 +443,8 @@ class AgentProtocolEventProjector:
                 source=source,
                 data={
                     "event": "content-block-finish",
-                    "index": 0,
-                    "content": {"type": "text", "text": state.text},
+                    "index": len(state.blocks) - 1,
+                    "content": dict(state.blocks[-1]),
                 },
             ),
             self._event(

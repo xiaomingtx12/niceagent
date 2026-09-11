@@ -171,6 +171,7 @@ class AgentWorkbenchRunExecutionService:
         # 2.先公开运行状态；恢复执行时清空待填表单，保留已提交回答。
         self._publish_event(run, projector.generated("lifecycle", {
             "event": "running",
+            "phase": "preparing",
             "message_id": str(run.spec.message_id),
             "input_message_id": run.spec.input_message_id,
         }))
@@ -202,6 +203,11 @@ class AgentWorkbenchRunExecutionService:
             name=f"agent-cancel-{run.run_id}",
         )
         try:
+            self._publish_event(run, projector.generated("lifecycle", {
+                "event": "running", "phase": "executing",
+                "message_id": str(run.spec.message_id),
+                "input_message_id": run.spec.input_message_id,
+            }))
             monitor.start()
         except Exception:
             try:

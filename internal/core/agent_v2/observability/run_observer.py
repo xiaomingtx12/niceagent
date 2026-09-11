@@ -36,6 +36,7 @@ from internal.core.agent_v2.observability.callback_metadata import (
 from internal.core.agent_v2.observability.summary_progress import (
     SummaryProgressPublisher,
 )
+from internal.extension.logging_extension import logger
 
 
 _SUBAGENT_TOOL_NAMES = frozenset({"task", "start_async_task"})
@@ -325,6 +326,27 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             attributes=attributes,
         )
         self._summary_progress.start(run_id, metadata)
+
+    def on_llm_new_token(
+        self, token: str, *, run_id: UUID, chunk: Any = None, **kwargs: Any,
+    ) -> None:
+        """记录每次模型请求的首包和首正文耗时，不保存 token 内容。"""
+        message = getattr(chunk, "message", None)
+        text = message.text if message is not None else token
+        with self._lock:
+            span = self._active_spans.get(str(run_id))
+            if span is None:
+                return
+            duration_ms = (monotonic() - span.started_monotonic) * 1000
+            for stage, present in (("first_chunk", True), ("first_text", bool(text))):
+                key = f"{stage}_ms"
+                if not present or key in span.attributes:
+                    continue
+                span.attributes[key] = round(duration_ms, 3)
+                logger.info(
+                    "agent_model_timing run_id=%s model_call_id=%s stage=%s duration_ms=%.2f",
+                    self._trace_id, run_id, stage, duration_ms,
+                )
 
     def on_llm_start(
         self,

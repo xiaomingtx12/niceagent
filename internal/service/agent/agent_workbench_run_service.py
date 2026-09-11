@@ -40,7 +40,8 @@ from internal.schema.agent.agent_workbench_read_schema import WorkbenchRunEvents
 from .agent_workbench_event_queue import EventBatch
 from pkg.sqlalchemy import SQLAlchemy
 
-_PERSISTED_EVENT_METHODS = ("tools", "lifecycle", "custom")
+# 历史回放必须包含思考、阶段正文和计划状态，不能只恢复工具及生命周期。
+_PERSISTED_EVENT_METHODS = ("messages", "values", "tools", "lifecycle", "custom", "input.requested")
 
 
 @inject
