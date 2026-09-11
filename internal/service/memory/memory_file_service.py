@@ -11,10 +11,8 @@ from internal.core.agent_v2.entity.agent_memory import (
     AgentMemoryFile,
     AgentMemoryIdentity,
     AgentMemoryConflict,
-    AGENT_MEMORY_INDEX,
     AgentMemoryPathError,
     AgentMemoryQuotaExceeded,
-    normalize_agent_memory_path,
 )
 from internal.core.agent_v2.persistence.agent_memory_repository import (
     AgentMemoryRepository,
@@ -26,7 +24,7 @@ from internal.exception import FailException, ValidateErrorException
 @inject
 @dataclass
 class MemoryFileService:
-    """协调记忆身份、领域校验、配额和持久化。"""
+    """处理管理接口用例和异常转换；路径、配额与并发规则由仓储执行。"""
 
     agent_memory_repository: AgentMemoryRepository
 
@@ -53,8 +51,7 @@ class MemoryFileService:
         """读取当前账号、应用的一个记忆文件。"""
         identity = self._identity(account_id, app_id)
         try:
-            normalized_path = normalize_agent_memory_path(path)
-            row = self.agent_memory_repository.get_file(identity, normalized_path)
+            row = self.agent_memory_repository.get_file(identity, path)
         except AgentMemoryPathError as exc:
             raise ValidateErrorException(str(exc)) from exc
         except AgentMemoryStorageError as exc:
@@ -76,12 +73,9 @@ class MemoryFileService:
         """按配额新增或覆盖当前账号、应用的 UTF-8 文本记忆。"""
         identity = self._identity(account_id, app_id)
         try:
-            normalized_path = normalize_agent_memory_path(path)
-            if normalized_path == AGENT_MEMORY_INDEX:
-                raise AgentMemoryPathError("记忆索引由系统生成，不能编辑")
             return self.agent_memory_repository.put_file(
                 identity,
-                path=normalized_path,
+                path=path,
                 content=content,
                 original_path=original_path or None,
                 expected_sha256=expected_sha256,
@@ -112,10 +106,9 @@ class MemoryFileService:
         """删除当前账号、应用的一个长期记忆文件。"""
         identity = self._identity(account_id, app_id)
         try:
-            normalized_path = normalize_agent_memory_path(path)
             deleted = self.agent_memory_repository.delete_file(
                 identity,
-                normalized_path,
+                path,
                 expected_sha256=expected_sha256,
             )
         except (AgentMemoryPathError, AgentMemoryConflict) as exc:

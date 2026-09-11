@@ -6,10 +6,7 @@ import json
 from deepagents.middleware.memory import MemoryMiddleware, MEMORY_SYSTEM_PROMPT
 from langchain.tools import ToolRuntime, tool
 
-from internal.core.agent_v2.entity.agent_memory import (
-    AgentMemoryIdentity,
-    AGENT_MEMORY_INDEX,
-)
+from internal.core.agent_v2.entity.agent_memory import AgentMemoryIdentity
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.persistence.agent_memory_repository import (
     AgentMemoryRepository,
@@ -59,8 +56,6 @@ class ReloadingMemoryMiddleware(MemoryMiddleware):
             """永久删除指定 /memories/ 文件；先读取确认目标，没有暂停或恢复操作。"""
             try:
                 identity = memory_identity(runtime)
-                if path == AGENT_MEMORY_INDEX:
-                    raise ValueError("系统索引不能删除")
                 changed = AgentMemoryRepository(lambda: runtime.store).delete_file(
                     identity, path
                 )

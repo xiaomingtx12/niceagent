@@ -20,6 +20,7 @@ from internal.core.agent_v2.entity.agent_memory import (
     validate_agent_memory_scope,
     memory_store_key_to_virtual_path,
     memory_virtual_path_to_store_key,
+    memory_writable_path_to_store_key,
 )
 from .memory_file_transaction import memory_file_transaction
 from internal.core.agent_v2.persistence.langgraph_store_provider import (
@@ -86,9 +87,9 @@ class AgentMemoryRepository:
         original_path: str | None = None,
         expected_sha256: str | None = None,
     ) -> AgentMemoryFile:
-        """新增或覆盖一个 UTF-8 文本记忆。"""
-        key = memory_virtual_path_to_store_key(path)
-        old_key = memory_virtual_path_to_store_key(original_path or path)
+        """新增、覆盖或重命名用户文件，系统索引不能成为源或目标。"""
+        key = memory_writable_path_to_store_key(path)
+        old_key = memory_writable_path_to_store_key(original_path or path)
 
         def operation(base_store: BaseStore) -> AgentMemoryFile:
             with memory_file_transaction(base_store, identity.namespace) as store:
@@ -139,8 +140,8 @@ class AgentMemoryRepository:
         *,
         expected_sha256: str | None = None,
     ) -> bool:
-        """删除一个记忆文件，返回目标是否存在。"""
-        key = memory_virtual_path_to_store_key(path)
+        """删除用户文件并返回目标是否存在；系统索引不属于可删除文件。"""
+        key = memory_writable_path_to_store_key(path)
 
         def operation(base_store: BaseStore) -> bool:
             with memory_file_transaction(base_store, identity.namespace) as store:
