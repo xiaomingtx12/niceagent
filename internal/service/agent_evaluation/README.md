@@ -6,8 +6,9 @@
 | --- | --- |
 | `agent_evaluation_service.py` | 来源授权、冻结材料、幂等提交、队列投递、执行认领及结果持久化 |
 | `agent_evaluation_grader.py` | 历史回答评分：调用裁判、核对标准及引用、汇总可评项目 |
-| `agent_evaluation_evidence.py` | 从实际图状态提取候选和文件，计算哈希并执行确定性核验 |
-| `agent_evaluation_runtime.py` | 装配隔离图、限制工具、适配 Rubric 回调并确认最终验收结果 |
+| `agent_evaluation_runtime.py` | 使用冻结配置装配隔离图，接收 Core 的验收记录并确认最终结果 |
+
+框架中间件统一放在 `internal/core/agent_v2/middleware/`：`evaluation_tool_middleware.py` 限制工具访问，`evidence_rubric_middleware.py` 适配 Rubric 回调。候选提取、哈希和确定性核验放在 `internal/core/agent_v2/execution/evaluation_evidence.py`。Core 不引用测评 Service，进度只通过传入的回调交付。
 
 ## 两种测评
 
@@ -23,7 +24,7 @@
 
 ## Rubric 适配约束
 
-- 当前实现对应 Deep Agents **0.6.12**。`_rubric_status`、`jump_to` 和评分回调格式的适配集中在运行模块。
+- 当前实现对应 Deep Agents **0.6.12**。`_rubric_status`、`jump_to` 和评分回调格式的适配集中在 Core 的 `evidence_rubric_middleware.py`。
 - 同步和异步评分共用 `_begin_round`：冻结当前候选，清空旧证据，再报告进度。
 - `_record` 保存本轮记录；标准覆盖、证据读取及通过结论的一致性由 `_validation_error` 检查。
 - 最终验收还需确认最后一次评分的候选哈希等于最终状态哈希；不能仅凭图结束或存在回答判为通过。

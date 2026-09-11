@@ -14,6 +14,9 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | Skill 路由和长期记忆路由 | `assembly/context/skill_context.py`、`memory_context.py` |
 | 框架 Checkpoint 与 Store | `persistence/` |
 | 模型调用、工具调用与用量记录 | `observability/run_observer.py` |
+| 测评工具访问限制 | `middleware/evaluation_tool_middleware.py` |
+| Rubric 评分回调、修订与每轮验收 | `middleware/evidence_rubric_middleware.py` |
+| 测评候选提取与确定性证据核验 | `execution/evaluation_evidence.py` |
 
 ## 资源所有权
 
@@ -30,3 +33,5 @@ Skill 与 Memory 使用 `build_skill_context`、`build_memory_context` 直接构
 Core 的 `PendingUserInput` 验证表单字段与答案。平台的 `AgentRunInteraction` 负责表单提交幂等、取消批次及重新填写规则。前者不认识数据库 Run，后者不直接调用 LangGraph。
 
 修改运行中的模型继承时，先检查服务层本次解析得到的父模型及子模型绑定；Core 使用已经解析好的实例，不读取应用配置。
+
+测评中间件同样属于 Core：工具白名单和 Rubric 状态适配不依赖数据库或任务队列。测评 Service 负责应用授权、冻结配置和持久化，通过 `on_progress` 回调接收每轮记录；这些中间件只挂载到独立测评图。
