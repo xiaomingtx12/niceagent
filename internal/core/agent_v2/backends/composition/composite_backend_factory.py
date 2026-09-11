@@ -45,13 +45,13 @@ def build_composite_backend(
     )
 
 
-def close_runtime_backends(backend: BackendProtocol | None) -> None:
-    """关闭 CompositeBackend 及其路由 Backend，并避免共享实例重复关闭。"""
-    if backend is None:
-        return
-    candidates = [backend, getattr(backend, "default", None)]
-    routes = getattr(backend, "routes", {}) or {}
-    candidates.extend(routes.values())
+def close_runtime_backends(*backends: BackendProtocol | None) -> None:
+    """关闭根 Backend 及其直接路由；整批按实例去重，个别失败仍继续清理。"""
+    candidates = []
+    for backend in backends:
+        candidates.extend((backend, getattr(backend, "default", None)))
+        routes = getattr(backend, "routes", {}) or {}
+        candidates.extend(routes.values())
     seen: set[int] = set()
     errors: list[Exception] = []
     for candidate in candidates:

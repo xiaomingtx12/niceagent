@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from contextlib import ExitStack
 
 from deepagents.backends.protocol import BackendProtocol
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -86,24 +85,22 @@ class AgentRuntimeAssembler:
         observer: PlatformAgentRunObserver,
     ) -> AgentRuntimeResources:
         """逐项登记独占资源，组合成功后将所有权交给本轮运行时。"""
-        cleanup = ExitStack()
-        workspace_cleanup = ExitStack()
-        cleanup.callback(workspace_cleanup.close)
+        owned_backends: list[BackendProtocol] = []
         try:
             telemetry = AgentTelemetry(observer.record, attributes=context.telemetry_attributes)
             workspace = self.workspace_factory(context, telemetry)
-            workspace_cleanup.callback(close_runtime_backends, workspace)
+            owned_backends.append(workspace)
             skills = build_skill_context(
                 skills=definition.skills,
                 selected_skill_names=definition.selected_skills,
                 subagents=definition.subagents,
             )
-            for route in skills.routes.values():
-                cleanup.callback(close_runtime_backends, route)
+            owned_backends.extend(skills.routes.values())
             memory = build_memory_context(
                 store_provider=self.store_provider,
                 enabled=context.memory_enabled,
             )
+            owned_backends.extend(memory.routes.values())
             sandbox = build_sandbox_backend(
                 settings=self.config,
                 workspace=workspace,
@@ -118,16 +115,14 @@ class AgentRuntimeAssembler:
             )
             if sandbox is not None:
                 # 沙箱接管 Workspace，包括尚未启动的惰性沙箱。
-                workspace_cleanup.pop_all()
-                workspace_cleanup.callback(close_runtime_backends, sandbox)
+                owned_backends[0] = sandbox
             backend = build_composite_backend(
                 routes={"/workspace/": workspace, **skills.routes, **memory.routes},
                 sandbox=sandbox,
             )
             # 组合成功后只关闭根 Backend，避免与单项清理重复同步。
-            cleanup.pop_all()
-            cleanup.callback(close_runtime_backends, backend)
-            runtime = AgentRuntimeResources(
+            owned_backends = [backend]
+            return AgentRuntimeResources(
                 checkpointer=self.checkpointer_provider(),
                 backend=backend,
                 permissions=build_filesystem_permissions(memory_enabled=context.memory_enabled),
@@ -137,11 +132,9 @@ class AgentRuntimeAssembler:
                 store=memory.store,
                 runtime_context=context,
             )
-            cleanup.pop_all()
-            return runtime
         except BaseException:
             try:
-                cleanup.close()
+                close_runtime_backends(*reversed(owned_backends))
             except Exception:
                 logger.exception("Agent 运行资源装配失败后的清理失败")
             raise

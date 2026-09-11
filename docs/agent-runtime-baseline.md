@@ -43,7 +43,7 @@ sequenceDiagram
 | `AgentWorkbenchService.start_run` | 可信身份、输入 → Run 标识 | 先锁会话，再创建消息与 Run；提交后才能 launch。重复请求复用已有结果。 |
 | `AgentWorkbenchRunExecutionService.launch` | WorkbenchRun → 后台任务 | 有界执行池和本地登记；调度失败进入失败收敛。后台使用独立 Flask 上下文。 |
 | `AgentAssemblyService.build_agent` | AgentInvocation → 执行器、消息 | 读取配置并授权模型、工具和 Skill；校验恢复指纹，装配结束后释放查询 Session。 |
-| `AgentRuntimeAssembler.build` | 已解析配置 → AgentExecutor | 用 ExitStack 登记 Workspace、Skill、Sandbox 等资源；组合成功后转交独占 Backend 所有权，构造失败清理并保留原始错误。 |
+| `AgentRuntimeAssembler.build` | 已解析配置 → AgentExecutor | 用待清理列表登记 Workspace、Skill、Memory Backend；Sandbox 接管 Workspace 时替换登记，组合成功后列表只保留根 Backend。`AgentRuntimeResources` 创建成功后转交所有权，之前失败按实例去重清理并保留原始错误。 |
 | `AgentExecutor.execute` | message 或恢复答案映射 → AgentExecutionResult | Core 构造框架输入，消费图流、处理取消、提取结果并关闭资源。共享 Store / Checkpointer 不随单轮关闭；清理失败不能覆盖已有执行错误。 |
 | `AgentEventDelivery` | 原生事件 → 可交付原生事件 | 开启输出审核时缓存整轮；失败或取消丢弃尚未交付事件。与图状态写入审核用途不同。 |
 | `AgentProtocolEventProjector` | AgentEvent → WorkbenchEvent 列表 | 维护源序号、公开序号、每个图路径的消息累积；不访问数据库。一次原生事件可产生多个公开事件。 |
@@ -75,6 +75,8 @@ sequenceDiagram
 - 图执行失败、尾批失败、资源关闭失败可能同时发生；保留最先产生的执行错误用于排障。
 - 尾批失败可将原本成功的执行转为失败；终态提交后通知失败不能改写已经提交的结果。
 - Backend 清理只尝试一次。失败持续可见，不能重试已释放沙箱的同步流程。
+- 装配失败时按取得资源的逆序清理；组合成功后只从根 Backend 清理直接路由。多个路径引用同一 Backend 时整批只调用一次 close，某个 Backend 关闭失败仍继续关闭其余 Backend。
+- Sandbox 工厂构造失败时可能已释放 Workspace；装配器仍兜底调用幂等的 Workspace.close。共享 Store 和 Checkpointer 不随单轮关闭，也不因装配失败被关闭。
 - 未知异常详情只进入日志或内部错误字段，对外使用固定错误信息。
 
 ## 状态与排障入口
@@ -103,5 +105,7 @@ sequenceDiagram
 - [ ] 失败：模型失败、尾批落库失败、终态提交失败、提交后通知失败，检查原始错误和终态一致性。
 - [ ] 执行权失效：旧执行实例不能写入新结果，恢复后的用量不会重复累计。
 - [ ] 微信兼容入口：保存本轮回答与用量；失败、取消或无法继续的暂停不标记为成功，无本轮回答时不回填上一轮回答。
+- [ ] Runtime 装配：关闭/启用沙箱各运行一次，附件可读、Skill 只读、Memory 可跨轮读取；惰性沙箱未启动时直接结束，启动后确认文件回写与资源释放。
+- [ ] 装配失败清理：无效 Sandbox Provider、附件准备失败、Checkpointer/构图失败；确认原始错误保留，Skill 临时目录与 Workspace Session 已释放，共享持久化资源仍可供下一轮使用。
 
 对应规划：[agent-platform-refactor-plan.md](agent-platform-refactor-plan.md)。

@@ -4,7 +4,7 @@
 
 在保留现有运行行为的前提下，降低 LangGraph 到 DeepAgents 迁移后的阅读和维护成本。
 
-状态：阶段 0–3 已完成本地改造与行为验证，实际环境验收待完成。阶段 4–8 保持为后续评估项，不要求逐项新增模块。本文基于 2026-09-11 工作区并随实施更新；后续阶段开始前需重新核对现状。
+状态：阶段 0–4 已完成本地改造与行为验证，实际环境验收待完成。阶段 5–8 保持为后续评估项，不要求逐项新增模块。本文基于 2026-09-11 工作区并随实施更新；后续阶段开始前需重新核对现状。
 
 运行时序、资源与事务约束、人工验收清单见 [Agent 运行基线](agent-runtime-baseline.md)。
 
@@ -78,14 +78,14 @@
 
 验收：Service 不需要知道图是如何 stream、resume 或 drain 的。
 
-### 阶段 4：整理 Runtime 装配
+### 阶段 4：整理 Runtime 装配（代码完成，待环境验收）
 
 目标：明确资源所有权，减少装配器中的交叉逻辑。
 
-- [ ] 复核现有 Workspace、Skill、Memory、Sandbox、Composite Backend 工厂和构建函数，仅处理仍然重复的资源获取逻辑，不再为每种资源增加 Provider 类。
-- [ ] 保留一个唯一的 `AgentRuntimeResources` 所有权对象。
-- [ ] 复核构造失败、执行结束和清理失败的处理；保留清理只尝试一次、失败持续可见以及原始执行异常优先的规则。
-- [ ] 明确共享 Store、Checkpointer 与单次运行 Backend 的生命周期差异。
+- [x] 复核现有 Workspace、Skill、Memory、Sandbox、Composite Backend 工厂；用待清理 Backend 列表替换双层 ExitStack 和回调交接，不增加 Provider 类。
+- [x] 保留一个唯一的 `AgentRuntimeResources` 所有权对象。
+- [x] 构造失败统一清理已取得资源，整批按实例去重并包含 Memory 路由；组合成功后只登记根 Backend，保留 Checkpointer 或 RuntimeResources 创建失败时的回收行为。
+- [x] 保留清理只尝试一次、失败持续可见以及原始执行异常优先的规则；共享 Store、Checkpointer 不随单次运行关闭。
 
 验收：任何资源的创建和关闭都能在一个位置找到对应关系。
 
@@ -169,3 +169,13 @@
 - 使用真实 LangGraph v3 和 InMemorySaver 验证暂停/恢复、同一会话 checkpoint、用户消息不重复、单次执行约束、协作取消和一次资源关闭。未调用外部模型或操作业务数据库。
 - 独立取消补测发现只请求图排空可能仍返回 completed；`request_cancel()` 现同时设置本次取消信号。修正后共享/内部信号与取消时回调失败共 4 组场景通过，并复验只取结果及真实 checkpoint 暂停/恢复。
 - 改动文件通过语法与服务导入检查，未新增测试文件。真实环境继续验证多表单恢复、运行中取消、沙箱清理失败及微信兼容入口。
+
+## 第三批实施记录（2026-09-12）
+
+- 基于 `340c0f5` 实施阶段 4。装配器用一份待清理 Backend 列表表达所有权，移除双层 ExitStack、重复回调登记和 `pop_all()` 交接。
+- Sandbox 成功返回后替换 Workspace 的登记；CompositeBackend 成功返回后替换整份列表。直到 `AgentRuntimeResources` 创建成功前，根 Backend 仍由装配器负责失败清理。
+- `close_runtime_backends` 支持整批清理并按实例去重；修正组合前多个 Skill 路由共用一个 Backend 时重复调用 close 的问题，将 Memory 路由纳入同一清理路径。当前 Memory Backend 没有独占连接，清理不关闭共享 Store。
+- 168 组装配差分场景与基线一致，覆盖资源构造、附件、构图和阶段观测失败、惰性沙箱启动/未启动/初始化失败，以及清理失败时保留原始错误。18 组共享 Skill 路由场景验证只关闭一次，48 组可关闭 Memory 路由替身场景验证回收。
+- 使用已安装 DeepAgents 0.6.12 的真实 Skill、Memory、CompositeBackend 和惰性 Sandbox 工厂完成 6 组本地验证：Skill 临时目录被清理、只读路由有效、共享 InMemoryStore / InMemorySaver 可复用；未建立远程 Sandbox 连接。两个改动 Python 文件通过语法和导入检查。
+- 保留现有 Provider 失败清理契约：构造失败时 Workspace 可能已被 Provider 关闭，装配器的兜底依赖 Workspace.close 的幂等契约；RuntimeResources 的一次清理及错误保留规则不变。
+- 未新增测试文件或数据库迁移。真实环境仍需验收附件上传、沙箱文件回写、装配/执行取消，以及失败后的资源释放。

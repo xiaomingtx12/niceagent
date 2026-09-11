@@ -36,7 +36,16 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 
 ## 资源所有权
 
-装配器使用 `ExitStack` 登记已创建资源的关闭回调：Workspace 创建后立即登记；Skill 构造完成后登记它的路由。Sandbox 接管 Workspace 时替换其关闭登记；CompositeBackend 成功创建后整体接管独占 Backend。
+装配器只维护一份待清理 Backend 列表，资源创建与所有权交接都在 `_build_runtime()` 中：
+
+| 创建阶段 | 当前清理责任 |
+| --- | --- |
+| Workspace、Skill、Memory | Workspace 首先登记，Skill 与 Memory 路由随后追加；失败时逆序、整批按实例去重清理。 |
+| Sandbox 成功返回 | 替换列表中的 Workspace，由 Sandbox 负责它的关闭；惰性 Sandbox 未启动时也遵循此规则。 |
+| CompositeBackend 成功返回 | 列表替换为唯一的根 Backend；后续 Checkpointer、权限或资源对象构造失败仍能回收全部直接路由。 |
+| AgentRuntimeResources 成功返回 | 独占 Backend 交给资源对象；附件准备或构图失败时装配器调用它的 close，执行器取得后负责运行结束时关闭。 |
+
+`close_runtime_backends` 统一处理根 Backend 与直接路由的去重、继续清理和错误汇总。Sandbox 工厂失败时可能已关闭 Workspace，装配器的兜底依赖 Workspace.close 的幂等契约；不重复启动或同步 Sandbox。
 
 资源获取和图编译分别由装配器内部方法负责，Store 与 Checkpointer 工厂可注入。构造失败时关闭已经取得的资源并保留原始异常；成功后由 `AgentRuntimeResources` 持有组合 Backend，执行器通过它释放资源。清理只执行一次：成功可重复关闭；失败持续报告原始异常，执行器保留 `CLOSE_FAILED`，不自动重跑已释放会话的沙箱同步。进程共享的 Checkpointer 与 Store 不随单次运行关闭。
 
