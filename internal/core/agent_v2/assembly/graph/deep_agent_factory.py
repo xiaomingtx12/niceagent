@@ -21,7 +21,7 @@ from openai import APIConnectionError
 from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
     build_app_system_prompt,
 )
-from internal.core.agent_v2.entity.runtime_resources import (
+from internal.core.agent_v2.execution.runtime_resources import (
     AgentRuntimeResources,
 )
 from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
@@ -29,8 +29,7 @@ from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
     validate_agent_tools,
 )
 from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
-from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
+from internal.core.agent_v2.entity.agent_config import SubAgentDefinition
 from internal.core.agent_v2.middleware.reloading_memory_middleware import ReloadingMemoryMiddleware
 from internal.core.agent_v2.middleware.context_window_middleware import ContextWindowMiddleware
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
@@ -41,7 +40,7 @@ from internal.core.agent_v2.middleware.runtime_context_middleware import (
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
-from internal.core.agent_v2.tools.ask_user import UserInputMiddleware
+from internal.core.agent_v2.middleware.user_input_middleware import UserInputMiddleware
 
 
 _RETRYABLE_MODEL_STATUS_CODES = frozenset({408, 409, 429})
@@ -58,9 +57,8 @@ def build_deep_agent(
     preset_prompt: str,
     review_config: Mapping[str, Any],
     tools: Sequence[BaseTool],
-    subagents: Sequence[SubAgentConfig],
+    subagents: Sequence[SubAgentDefinition],
     runtime: AgentRuntimeResources,
-    subagent_bindings: Mapping[str, SubAgentRuntimeBinding] | None = None,
 ) -> CompiledStateGraph:
     """把已校验的应用配置和已解析依赖编译成 Deep Agents 图。"""
     # 1.在 Core 内统一生成提示词和已授权工具，避免调用方了解图装配细节。
@@ -80,9 +78,7 @@ def build_deep_agent(
     # 持久化记录仅作业务适配，其余运行时能力由 DeepAgents 负责。
     subagent_specs = build_subagent_specs(
         subagents,
-        available_tools=agent_tools,
         skill_sources_by_agent=runtime.subagent_skill_sources,
-        runtime_bindings=subagent_bindings,
     )
 
     if runtime.runtime_context.user_input_enabled and runtime.checkpointer:

@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
 
 from deepagents.backends.protocol import BackendProtocol
 
 from internal.core.agent_v2.backends.skill_backend import SkillBackend
-from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
+from internal.core.agent_v2.entity.agent_config import AgentSkill, SubAgentDefinition, SyncSubAgentDefinition
 
 
 @dataclass
@@ -24,19 +23,18 @@ class SkillProjection:
 
 def build_skill_context(
     *,
-    skills: list[Any],
-    subagents: Sequence[SubAgentConfig],
+    skills: Sequence[AgentSkill],
+    subagents: Sequence[SubAgentDefinition],
     selected_skill_names: Sequence[str] = (),
 ) -> SkillProjection:
     """装配主 Agent 和 SubAgent 的只读 Skill 路由。"""
     projection = SkillProjection()
     packages: dict[str, list[tuple[str, bytes]]] = {}
-    enabled_skills = [skill for skill in skills if getattr(skill, "enabled", True)]
     selected_names = set(selected_skill_names)
     main_skills = (
-        [skill for skill in enabled_skills if skill.name in selected_names]
+        [skill for skill in skills if skill.name in selected_names]
         if selected_names
-        else enabled_skills
+        else skills
     )
     if main_skills:
         packages["/skills/"] = [
@@ -45,8 +43,10 @@ def build_skill_context(
         ]
         projection.sources = ["/skills/"]
 
-    skill_map = {skill.name: skill for skill in enabled_skills}
+    skill_map = {skill.name: skill for skill in skills}
     for subagent_config in subagents:
+        if not isinstance(subagent_config, SyncSubAgentDefinition):
+            continue
         requested = subagent_config.skills
         missing = sorted(set(requested) - set(skill_map))
         if missing:
@@ -76,9 +76,9 @@ def build_skill_context(
 
 
 
-def _package_files(*, root: str, skill: Any) -> list[tuple[str, bytes]]:
+def _package_files(*, root: str, skill: AgentSkill) -> list[tuple[str, bytes]]:
     """把可信 Skill 包转换为 Sandbox 上传文件。"""
-    package_files = getattr(skill, "package_files", None) or {
+    package_files = skill.package_files or {
         "SKILL.md": skill.skill_md,
     }
     files: list[tuple[str, bytes]] = []

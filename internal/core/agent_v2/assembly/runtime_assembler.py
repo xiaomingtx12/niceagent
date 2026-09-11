@@ -8,10 +8,12 @@ from dataclasses import dataclass
 from contextlib import ExitStack
 
 from deepagents.backends.protocol import BackendProtocol
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.store.base import BaseStore
 
 from config.config import Config
 from internal.core.agent_v2.assembly.context.memory_context import build_memory_context
-from internal.core.agent_v2.entity.runtime_resources import AgentRuntimeResources
+from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources
 from internal.core.agent_v2.assembly.context.sandbox_context import (
     build_filesystem_permissions,
 )
@@ -47,6 +49,9 @@ class AgentRuntimeAssembler:
     workspace_factory: Callable[[AgentRunContext, AgentTelemetry], WorkspaceBackend]
     config: Config
 
+    store_provider: Callable[[], BaseStore] = get_configured_store
+    checkpointer_provider: Callable[[], BaseCheckpointSaver | bool] = get_configured_checkpointer
+
     def build(
         self,
         *,
@@ -55,28 +60,48 @@ class AgentRuntimeAssembler:
         observer: PlatformAgentRunObserver,
         prepare_backend: Callable[[BackendProtocol], None],
     ) -> AgentExecutor:
-        """装配运行时和图；平台通过回调写入附件，不接管运行资源的生命周期。"""
-        # 1.接收平台创建的 Workspace，其底层 Session 由实现自己管理。
-        # 部分资源即创建即登记，组合成功后整体交接所有权。
+        """先取得运行资源，再准备附件和编译图；失败时保留原始装配错误。"""
+        started_at = time.monotonic()
+        runtime = self._build_runtime(context, definition, observer)
+        try:
+            self._record_stage(observer, context, "runtime", started_at)
+            started_at = time.monotonic()
+            prepare_backend(runtime.backend)
+            self._record_stage(observer, context, "attachments", started_at)
+            started_at = time.monotonic()
+            agent = self._build_executor(runtime, definition, observer)
+            self._record_stage(observer, context, "graph", started_at)
+            return agent
+        except BaseException:
+            try:
+                runtime.close()
+            except Exception:
+                logger.exception("Agent 装配失败后的 Backend 清理失败")
+            raise
+
+    def _build_runtime(
+        self,
+        context: AgentRunContext,
+        definition: AgentConfig,
+        observer: PlatformAgentRunObserver,
+    ) -> AgentRuntimeResources:
+        """逐项登记独占资源，组合成功后将所有权交给本轮运行时。"""
         cleanup = ExitStack()
         workspace_cleanup = ExitStack()
-        skill_cleanup = ExitStack()
-        cleanup.callback(skill_cleanup.close)
         cleanup.callback(workspace_cleanup.close)
-        phase_started_at = time.monotonic()
         try:
             telemetry = AgentTelemetry(observer.record, attributes=context.telemetry_attributes)
             workspace = self.workspace_factory(context, telemetry)
             workspace_cleanup.callback(close_runtime_backends, workspace)
-            skill_projection = build_skill_context(
-                skills=list(definition.skills),
+            skills = build_skill_context(
+                skills=definition.skills,
                 selected_skill_names=definition.selected_skills,
                 subagents=definition.subagents,
             )
-            for route in skill_projection.routes.values():
-                skill_cleanup.callback(close_runtime_backends, route)
+            for route in skills.routes.values():
+                cleanup.callback(close_runtime_backends, route)
             memory = build_memory_context(
-                store_provider=get_configured_store,
+                store_provider=self.store_provider,
                 enabled=context.memory_enabled,
             )
             sandbox = build_sandbox_backend(
@@ -88,88 +113,75 @@ class AgentRuntimeAssembler:
                     conversation_id=context.conversation_id,
                     agent_id=context.agent_id,
                 ),
-                skill_files=skill_projection.files,
+                skill_files=skills.files,
                 telemetry=telemetry,
             )
-
             if sandbox is not None:
-                # Sandbox 接管 Workspace，不能同时登记两者的关闭回调。
+                # 沙箱接管 Workspace，包括尚未启动的惰性沙箱。
                 workspace_cleanup.pop_all()
                 workspace_cleanup.callback(close_runtime_backends, sandbox)
-
-            # 2.组合 Backend 和持久化资源，后续失败由组合 Backend 统一清理。
             backend = build_composite_backend(
-                routes={
-                    "/workspace/": workspace,
-                    **skill_projection.routes,
-                    **memory.routes,
-                },
+                routes={"/workspace/": workspace, **skills.routes, **memory.routes},
                 sandbox=sandbox,
             )
-            # CompositeBackend 已接管全部独占 Backend，取消逐项关闭登记。
+            # 组合成功后只关闭根 Backend，避免与单项清理重复同步。
             cleanup.pop_all()
             cleanup.callback(close_runtime_backends, backend)
             runtime = AgentRuntimeResources(
-                checkpointer=get_configured_checkpointer(),
+                checkpointer=self.checkpointer_provider(),
                 backend=backend,
-                permissions=build_filesystem_permissions(
-                    memory_enabled=context.memory_enabled,
-                ),
-                skill_sources=skill_projection.sources,
+                permissions=build_filesystem_permissions(memory_enabled=context.memory_enabled),
+                skill_sources=skills.sources,
                 memory_sources=memory.sources,
-                subagent_skill_sources=skill_projection.subagent_sources,
+                subagent_skill_sources=skills.subagent_sources,
                 store=memory.store,
                 runtime_context=context,
-                _cleanup=cleanup,
             )
-            runtime_ms = (time.monotonic() - phase_started_at) * 1000
-            observer.record_stage("assembly.runtime", runtime_ms)
-
-            # 3.平台写入已授权附件后，Core 编译图并创建一次性执行器。
-            phase_started_at = time.monotonic()
-            prepare_backend(backend)
-            attachments_ms = (time.monotonic() - phase_started_at) * 1000
-            observer.record_stage("assembly.attachments", attachments_ms)
-
-            phase_started_at = time.monotonic()
-            graph = build_deep_agent(
-                llm=definition.model,
-                app_name=definition.name,
-                app_description=definition.description,
-                preset_prompt=definition.preset_prompt,
-                review_config=definition.review_config,
-                tools=definition.tools,
-                subagents=definition.subagents,
-                runtime=runtime,
-                subagent_bindings=definition.subagent_bindings,
-            )
-            agent = AgentExecutor(
-                graph=graph, runtime=runtime, observer=observer,
-                review_config=definition.review_config,
-            )
-            graph_ms = (time.monotonic() - phase_started_at) * 1000
-            observer.record_stage("assembly.graph", graph_ms)
-            for stage, duration_ms in (
-                ("runtime", runtime_ms),
-                ("attachments", attachments_ms),
-                ("graph", graph_ms),
-            ):
-                logger.info(
-                    "agent_assembly_timing app_id=%s conversation_id=%s "
-                    "stage=%s duration_ms=%.2f",
-                    context.app_id,
-                    context.conversation_id,
-                    stage,
-                    duration_ms,
-                )
-            return agent
-        except Exception:
+            cleanup.pop_all()
+            return runtime
+        except BaseException:
             try:
                 cleanup.close()
             except Exception:
-                logger.exception("Agent 装配失败后的 Backend 清理失败")
+                logger.exception("Agent 运行资源装配失败后的清理失败")
             raise
 
+    @staticmethod
+    def _build_executor(
+        runtime: AgentRuntimeResources,
+        definition: AgentConfig,
+        observer: PlatformAgentRunObserver,
+    ) -> AgentExecutor:
+        """编译阶段只消费已取得的资源，成功后由执行器接管其生命周期。"""
+        graph = build_deep_agent(
+            llm=definition.model,
+            app_name=definition.name,
+            app_description=definition.description,
+            preset_prompt=definition.preset_prompt,
+            review_config=definition.review_config,
+            tools=definition.tools,
+            subagents=definition.subagents,
+            runtime=runtime,
+        )
+        return AgentExecutor(
+            graph=graph, runtime=runtime, observer=observer,
+            review_config=definition.review_config,
+        )
+
+    @staticmethod
+    def _record_stage(
+        observer: PlatformAgentRunObserver,
+        context: AgentRunContext,
+        stage: str,
+        started_at: float,
+    ) -> None:
+        """在阶段完成时记录耗时，后续装配失败也保留已完成阶段。"""
+        duration_ms = (time.monotonic() - started_at) * 1000
+        observer.record_stage(f"assembly.{stage}", duration_ms)
+        logger.info(
+            "agent_assembly_timing app_id=%s conversation_id=%s stage=%s duration_ms=%.2f",
+            context.app_id, context.conversation_id, stage, duration_ms,
+        )
 
 
 __all__ = ["AgentRuntimeAssembler"]

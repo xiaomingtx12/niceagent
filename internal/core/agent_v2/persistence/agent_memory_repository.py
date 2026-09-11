@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import re
 from typing import Any, Callable, TypeVar
 
 from langgraph.store.base import BaseStore
@@ -23,6 +22,11 @@ from internal.core.agent_v2.entity.agent_memory import (
     memory_virtual_path_to_store_key,
 )
 from .memory_file_transaction import memory_file_transaction
+from .legacy_memory_import import (
+    ensure_legacy_memories_imported,
+    legacy_entries_namespace,
+    legacy_import_metadata_namespace,
+)
 from internal.core.agent_v2.persistence.langgraph_store_provider import (
     get_configured_store,
 )
@@ -48,10 +52,10 @@ class AgentMemoryRepository:
     store_provider: Callable[[], BaseStore] = get_configured_store
 
     def list_files(self, identity: AgentMemoryIdentity) -> list[AgentMemoryFile]:
-        """列出当前主体命名空间中的全部文本记忆。"""
+        """兼容首次读取时的旧目录转换，再列出当前主体的全部文本记忆。"""
 
         def operation(store: BaseStore) -> list[AgentMemoryFile]:
-            self._import_entries(store, identity)
+            ensure_legacy_memories_imported(store, identity)
             rows = [
                 self._item_to_entity(item)
                 for item in self._search_all(store, identity.namespace)
@@ -154,116 +158,6 @@ class AgentMemoryRepository:
 
         return self._execute(operation)
 
-    @classmethod
-    def _check_expected(cls, item: Any, expected: str | None) -> None:
-        """空摘要表示只允许新建，非空摘要防止自动保存覆盖已变更文件。"""
-        if expected is None:
-            return
-        actual = cls._item_to_entity(item).content_sha256 if item else ""
-        if actual != expected:
-            raise AgentMemoryConflict("记忆已被修改或删除，请重新打开后再编辑")
-
-    @classmethod
-    def _import_entries(
-        cls, base_store: BaseStore, identity: AgentMemoryIdentity
-    ) -> None:
-        """仅首次导入有效条目；完成标识独立于文件，删除后不会再次导入。"""
-        metadata = (
-            "mydify",
-            "agent-memory-files-meta",
-            str(identity.account_id),
-            str(identity.app_id),
-        )
-        if base_store.get(metadata, "imported") is not None:
-            return
-        with memory_file_transaction(base_store, identity.namespace) as store:
-            if store.get(metadata, "imported") is not None:
-                return
-            namespace = (
-                "mydify",
-                "agent-memory-entries",
-                str(identity.account_id),
-                str(identity.app_id),
-            )
-            catalog = store.get(namespace, "catalog")
-            entries = catalog.value.get("entries", []) if catalog else []
-            planned = {}
-            occupied = {item.key for item in cls._search_all(store, identity.namespace)}
-            for entry in entries:
-                if entry.get("status") != "active":
-                    continue
-                category = {
-                    "preference": "preferences",
-                    "fact": "background",
-                    "experience": "experience",
-                }[entry["category"]]
-                title = (
-                    re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", entry["topic"])[:70] or "记忆"
-                )
-                key = f"/{category}/{title}-{entry['id'][:8]}.md"
-                suffix = 2
-                while key in occupied:
-                    key = f"/{category}/{title}-{entry['id'][:8]}-{suffix}.md"
-                    suffix += 1
-                occupied.add(key)
-                row = AgentMemoryFile(
-                    path=memory_store_key_to_virtual_path(key),
-                    content=(
-                        f"适用范围：{entry['scope']}\n\n{entry['content']}"
-                        if entry.get("scope") and entry["scope"] != "当前应用"
-                        else entry["content"]
-                    ),
-                    created_at=entry["created_at"],
-                    updated_at=entry["updated_at"],
-                )
-                planned[key] = {
-                    "content": row.content,
-                    "encoding": "utf-8",
-                    "created_at": entry["created_at"],
-                    "modified_at": entry["updated_at"],
-                }
-            # 先验证全部导入内容；旧数据允许超出新建配额，不能因此截断已有记忆。
-            for key, value in planned.items():
-                store.put(identity.namespace, key, value)
-            # 旧 MEMORY.md 可能含已暂停或已纠正内容，沿用原有字面抑制规则。
-            if entries:
-                from internal.core.agent_v2.entity.memory_entry import (
-                    normalized_memory_text,
-                )
-
-                suppressed = {
-                    normalized_memory_text(value)
-                    for entry in entries
-                    for value in [
-                        entry.get("topic", ""),
-                        entry.get("content", ""),
-                        *(
-                            revision.get("content", "")
-                            for revision in entry.get("revisions", [])
-                        ),
-                    ]
-                    if len(normalized_memory_text(value)) >= 2
-                }
-                legacy = store.get(identity.namespace, "/MEMORY.md")
-                if legacy and isinstance(legacy.value.get("content"), str):
-                    content = "\n".join(
-                        line
-                        for line in legacy.value["content"].splitlines()
-                        if not any(
-                            term in normalized_memory_text(line) for term in suppressed
-                        )
-                    )
-                    if content.strip():
-                        store.put(
-                            identity.namespace,
-                            "/MEMORY.md",
-                            {**legacy.value, "content": content},
-                        )
-                    else:
-                        store.delete(identity.namespace, "/MEMORY.md")
-                store.delete(namespace, "catalog")
-            store.put(metadata, "imported", {"done": True})
-
     def delete_app_memories(self, *, account_id: str, app_id: str) -> None:
         """删除账号下应用的全部长期记忆。"""
         prefix = (*AGENT_MEMORY_NAMESPACE_ROOT, account_id, app_id)
@@ -290,22 +184,27 @@ class AgentMemoryRepository:
         self._execute(operation)
 
         # 结构化目录使用独立 namespace，同一应用清理必须覆盖两种存储。
-        from internal.core.agent_v2.persistence.memory_entry_repository import (
-            MemoryEntryRepository,
-        )
-
         identity = AgentMemoryIdentity(account_id=account_id, app_id=app_id)
         self._execute(
             lambda store: store.delete(
-                MemoryEntryRepository.namespace(identity), "catalog"
+                legacy_entries_namespace(identity), "catalog"
             )
         )
         self._execute(
             lambda store: store.delete(
-                ("mydify", "agent-memory-files-meta", str(account_id), str(app_id)),
+                legacy_import_metadata_namespace(identity),
                 "imported",
             )
         )
+
+    @classmethod
+    def _check_expected(cls, item: Any, expected: str | None) -> None:
+        """空摘要表示只允许新建，非空摘要防止自动保存覆盖已变更文件。"""
+        if expected is None:
+            return
+        actual = cls._item_to_entity(item).content_sha256 if item else ""
+        if actual != expected:
+            raise AgentMemoryConflict("记忆已被修改或删除，请重新打开后再编辑")
 
     def _execute(self, operation: Callable[[BaseStore], T]) -> T:
         """把 Store 连接错误转换为稳定的领域异常。"""

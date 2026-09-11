@@ -19,7 +19,7 @@ from pydantic import (
     model_validator,
 )
 
-from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
+from internal.entity.subagent_config import SubAgentConfig
 from internal.entity.audio_entity import ALLOWED_AUDIO_VOICES
 from internal.exception import ValidateErrorException
 from internal.schema.skill.skill_schema import SkillBindingReq

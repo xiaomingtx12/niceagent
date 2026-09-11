@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from langchain_core.messages import BaseMessage
@@ -35,4 +35,29 @@ def message_content_to_text(content: Any) -> str:
     return "".join(parts)
 
 
-__all__ = ["message_content_to_text", "response_messages"]
+def current_turn_ai_contents(messages: Sequence[Any]) -> Iterator[Any]:
+    """从后向前读取本轮 AI 内容，遇到用户消息停止，兼容原生消息和字典。"""
+    for message in reversed(messages):
+        if isinstance(message, BaseMessage):
+            role, content = message.type, message.content
+        elif isinstance(message, Mapping):
+            role = message.get("type") or message.get("role")
+            content = message.get("content")
+        else:
+            continue
+        if role in {"human", "user"}:
+            break
+        if role in {"ai", "assistant"}:
+            yield content
+
+
+def final_answer(messages: Sequence[Any]) -> str:
+    """忽略本轮末尾的空工具调用消息，取最后一条有正文的 AI 回答。"""
+    for content in current_turn_ai_contents(messages):
+        text = message_content_to_text(content)
+        if text:
+            return text
+    return ""
+
+
+__all__ = ["current_turn_ai_contents", "final_answer", "message_content_to_text", "response_messages"]

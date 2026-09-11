@@ -21,7 +21,9 @@ from internal.core.agent_v2 import (
     AgentRunContext,
     AgentRuntimeAssembler,
     AgentSkill,
-    SubAgentRuntimeBinding,
+    AsyncSubAgentDefinition,
+    SubAgentDefinition,
+    SyncSubAgentDefinition,
 )
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
@@ -29,7 +31,7 @@ from internal.core.language_model.entities.model_entity import (
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
-from internal.core.agent_v2.entity.subagent_config import (
+from internal.entity.subagent_config import (
     SubAgentConfig,
     build_published_graph_id,
 )
@@ -75,8 +77,7 @@ class _ResolvedAgentDefinition:
     model: BaseLanguageModel
     tools: tuple[BaseTool, ...]
     selected_skills: tuple[str, ...]
-    subagents: tuple[SubAgentConfig, ...]
-    subagent_bindings: Mapping[str, SubAgentRuntimeBinding]
+    subagents: tuple[SubAgentDefinition, ...]
 
 
 @inject
@@ -152,7 +153,6 @@ class AgentAssemblyService:
             ),
             selected_skills=definition.selected_skills,
             subagents=definition.subagents,
-            subagent_bindings=definition.subagent_bindings,
         )
 
         # 3.Core 装配运行时并编译图，平台只提供附件写入操作和异常转换。
@@ -246,11 +246,12 @@ class AgentAssemblyService:
 
         # 4.解析同步和异步 SubAgent 的运行时绑定。
         phase_started_at = time.monotonic()
-        subagents, bindings = self._prepare_subagents(
+        subagents = self._prepare_subagents(
             app_config.subagents,
             account_id=account_id,
             parent_app_id=req.app_id,
             parent_model=cast(BaseChatModel, model),
+            parent_tools=tools,
         )
         self._log_build_timing(req, "subagents", phase_started_at, observer)
 
@@ -263,7 +264,6 @@ class AgentAssemblyService:
             tools=tuple(tools),
             selected_skills=selected_skills,
             subagents=tuple(subagents),
-            subagent_bindings=bindings,
         )
 
 
@@ -312,9 +312,9 @@ class AgentAssemblyService:
         account_id: UUID,
         parent_app_id: UUID,
         parent_model: BaseChatModel,
-    ) -> tuple[list[SubAgentConfig], dict[str, SubAgentRuntimeBinding]]:
-        """每次运行重新绑定模型；跟随子 Agent 共享本次解析后的父模型实例。"""
-        # 1.发布应用统一授权，同步引用的配置批量加载。
+        parent_tools: Sequence[BaseTool],
+    ) -> list[SubAgentDefinition]:
+        """平台解析模型来源及工具授权，Core 仅接收本轮可执行的同步或异步定义。"""
         published_apps = self._load_published_apps(subagents, account_id=account_id)
         sync_app_ids = dict.fromkeys(
             config.published_app_id for config in subagents
@@ -323,32 +323,48 @@ class AgentAssemblyService:
         published_configs = self.app_config_service.get_agent_runtime_configs(
             [published_apps[app_id] for app_id in sync_app_ids]
         )
-        normalized: list[SubAgentConfig] = []
-        bindings: dict[str, SubAgentRuntimeBinding] = {}
-
-        # 2.外部异步、发布引用和本地自定义分别解析，不在一个分支里混用模型来源。
+        available_tools = {tool.name: tool for tool in parent_tools}
+        resolved: list[SubAgentDefinition] = []
         for config in subagents:
-            if config.source == "published":
+            if config.mode == "async":
+                resolved.append(self._prepare_async_subagent(
+                    config, account_id=account_id, parent_app_id=parent_app_id,
+                ))
+            elif config.source == "published":
                 target = published_apps[config.published_app_id]
-                if config.mode == "async":
-                    normalized.append(self._prepare_async_published_subagent(
-                        config, account_id=account_id, parent_app_id=parent_app_id,
-                    ))
-                    continue
-                resolved, binding = self._prepare_sync_published_subagent(
+                resolved.append(self._prepare_sync_published_subagent(
                     config, target, published_configs[target.id], account_id=account_id,
-                )
-                normalized.append(resolved)
-                bindings[config.name] = binding
-                continue
+                ))
+            else:
+                resolved.append(self._prepare_sync_custom_subagent(
+                    config, account_id=account_id,
+                    parent_model=parent_model, available_tools=available_tools,
+                ))
+        return resolved
 
-            normalized.append(config.model_copy(deep=True))
-            if config.mode == "sync":
-                model = self._load_subagent_model(config, account_id=account_id)
-                bindings[config.name] = SubAgentRuntimeBinding(
-                    model=parent_model if model is None else model,
-                )
-        return normalized, bindings
+    def _prepare_sync_custom_subagent(
+        self,
+        config: SubAgentConfig,
+        *,
+        account_id: UUID,
+        parent_model: BaseChatModel,
+        available_tools: Mapping[str, BaseTool],
+    ) -> SyncSubAgentDefinition:
+        """跟随模式直接绑定本轮父模型；工具仅从父应用已授权能力中选择。"""
+        missing = sorted(set(config.tools) - set(available_tools))
+        if missing:
+            raise ValidateErrorException(
+                f"subagent {config.name!r} 引用了未授权工具: {', '.join(missing)}"
+            )
+        model = self._load_subagent_model(config, account_id=account_id)
+        return SyncSubAgentDefinition(
+            name=config.name,
+            description=config.description,
+            system_prompt=config.system_prompt,
+            model=parent_model if model is None else model,
+            tools=tuple(available_tools[name] for name in config.tools),
+            skills=tuple(config.skills),
+        )
 
     def _prepare_sync_published_subagent(
         self,
@@ -357,7 +373,7 @@ class AgentAssemblyService:
         target_config: AgentAppConfigReq,
         *,
         account_id: UUID,
-    ) -> tuple[SubAgentConfig, SubAgentRuntimeBinding]:
+    ) -> SyncSubAgentDefinition:
         """同步发布引用使用目标应用的发布模型和能力，不继承父应用模型。"""
         if target_config.model_config_data is None:
             raise ValidateErrorException(f"发布 Agent {target.name!r} 缺少模型配置")
@@ -367,38 +383,45 @@ class AgentAssemblyService:
         model = self.language_model_service.load_language_model(
             target_config.model_config_data, account_id=account_id,
         )
-        resolved = config.model_copy(deep=True, update={
-            "system_prompt": (
+        return SyncSubAgentDefinition(
+            name=config.name,
+            description=config.description,
+            system_prompt=(
                 f"你是已发布应用「{target.name}」的执行 Agent。"
                 "请严格遵循该应用的发布人设完成任务，并只返回本次任务的最终结果。\n\n"
                 f"{target_config.preset_prompt}"
             ).strip(),
-            "tools": [tool.name for tool in tools],
-            "skills": [],
-        })
-        return resolved, SubAgentRuntimeBinding(
-            tools=tuple(tools), model=cast(BaseChatModel, model),
+            tools=tuple(tools),
+            model=cast(BaseChatModel, model),
         )
 
-    def _prepare_async_published_subagent(
+    def _prepare_async_subagent(
         self,
         config: SubAgentConfig,
         *,
         account_id: UUID,
         parent_app_id: UUID,
-    ) -> SubAgentConfig:
-        """异步发布引用只绑定内部传输，模型由目标应用在独立运行中解析。"""
-        target_id = config.published_app_id
-        if target_id is None:
-            raise ValidateErrorException(f"子 Agent {config.name!r} 缺少发布应用标识")
-        transport = build_internal_agent_transport(
-            settings=self.config,
-            account_id=account_id, parent_app_id=parent_app_id,
-            target_app_id=target_id, headers=config.headers,
+    ) -> AsyncSubAgentDefinition:
+        """发布引用完成内部认证绑定，外部目标沿用已校验的 Protocol 配置。"""
+        graph_id, url, headers = config.graph_id, config.url, dict(config.headers)
+        if config.source == "published":
+            target_id = config.published_app_id
+            if target_id is None:
+                raise ValidateErrorException(f"子 Agent {config.name!r} 缺少发布应用标识")
+            transport = build_internal_agent_transport(
+                settings=self.config,
+                account_id=account_id, parent_app_id=parent_app_id,
+                target_app_id=target_id, headers=headers,
+            )
+            graph_id = build_published_graph_id(target_id)
+            url = cast(str, transport["url"])
+            headers = cast(dict[str, str], transport["headers"])
+        if not graph_id:
+            raise ValidateErrorException(f"子 Agent {config.name!r} 缺少 graph_id")
+        return AsyncSubAgentDefinition(
+            name=config.name, description=config.description,
+            graph_id=graph_id, url=url, headers=headers,
         )
-        return config.model_copy(deep=True, update={
-            "graph_id": build_published_graph_id(target_id), **transport,
-        })
 
     @staticmethod
     def _validate_selected_skills(

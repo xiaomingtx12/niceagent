@@ -10,15 +10,31 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
-from .subagent_config import SubAgentConfig
+
+@dataclass(frozen=True, slots=True)
+class SyncSubAgentDefinition:
+    """本轮已授权的同步子 Agent，无需再解析模型来源或工具名称。"""
+
+    name: str
+    description: str
+    system_prompt: str
+    model: BaseChatModel | str
+    tools: tuple[BaseTool, ...] = ()
+    skills: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
-class SubAgentRuntimeBinding:
-    """已解析的子 Agent 模型和工具覆盖，不涉及发布应用查询。"""
+class AsyncSubAgentDefinition:
+    """可直接交给 Agent Protocol 的目标，平台负责解析发布应用和内部认证。"""
 
-    tools: tuple[BaseTool, ...] | None = None
-    model: BaseChatModel | str | None = None
+    name: str
+    description: str
+    graph_id: str
+    url: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+
+
+SubAgentDefinition = SyncSubAgentDefinition | AsyncSubAgentDefinition
 
 
 @dataclass(frozen=True)
@@ -43,5 +59,4 @@ class AgentConfig:
     tools: tuple[BaseTool, ...] = ()
     skills: tuple[AgentSkill, ...] = ()
     selected_skills: tuple[str, ...] = ()
-    subagents: tuple[SubAgentConfig, ...] = ()
-    subagent_bindings: Mapping[str, SubAgentRuntimeBinding] = field(default_factory=dict)
+    subagents: tuple[SubAgentDefinition, ...] = ()

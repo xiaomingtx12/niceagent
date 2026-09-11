@@ -10,7 +10,7 @@ from uuid import UUID
 from injector import inject
 
 from config import Config
-from internal.core.agent_v2.entity.subagent_config import build_published_graph_id
+from internal.entity.subagent_config import build_published_graph_id
 from internal.service.agent_protocol.internal_auth import (
     InternalAgentProtocolClaims,
     parse_internal_agent_protocol_token,

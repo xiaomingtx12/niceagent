@@ -8,7 +8,7 @@ from injector import inject
 from langchain_core.tools import BaseTool
 from pydantic import ValidationError
 
-from internal.core.agent_v2.entity.subagent_config import (
+from internal.entity.subagent_config import (
     SubAgentConfig,
     SubAgentConfigList,
 )

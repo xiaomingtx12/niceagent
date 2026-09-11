@@ -6,18 +6,17 @@ from threading import Event, Lock
 from typing import Any, Literal
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import merge_configs
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import RunControl
 from langgraph.errors import GraphDrained
 from langgraph.types import Command
-from internal.core.agent_v2.tools.ask_user import UserInputInterruptTracker
+from internal.core.agent_v2.observability.user_input_interrupt_tracker import UserInputInterruptTracker
 
 from internal.core.agent_v2.assembly.configuration.langgraph_conversation_config import (
     merge_conversation_config,
 )
-from internal.core.agent_v2.entity.runtime_resources import (
+from internal.core.agent_v2.execution.runtime_resources import (
     AgentRuntimeResources,
 )
 from internal.core.agent_v2.observability.run_observer import (
@@ -26,7 +25,8 @@ from internal.core.agent_v2.observability.run_observer import (
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
 from internal.core.agent_v2.entity.agent_event import AgentEvent
-from internal.core.agent_v2.execution.message_parser import message_content_to_text
+from internal.core.agent_v2.execution.message_parser import final_answer
+from internal.core.agent_v2.execution.event_delivery import AgentEventDelivery
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.extension.logging_extension import logger
 
@@ -38,6 +38,7 @@ class _ExecutorState(Enum):
     RUNNING = auto()
     FINISHED = auto()
     CLOSED = auto()
+    CLOSE_FAILED = auto()
 
 
 class AgentExecutor:
@@ -74,52 +75,12 @@ class AgentExecutor:
         error: Exception | None = None
         cancelled = cancel_requested.is_set()
         raw_stream = self.stream_events(input)
-        reviewed_events: list[AgentEvent] = []
+        delivery = AgentEventDelivery(self._review, on_event)
         try:
-            # 1.取消后请求图协作退出，继续消费以完成图内部清理。
             if not cancelled:
-                drain_requested = False
-                for raw_event in raw_stream:
-                    event = AgentEvent.from_raw(raw_event)
-                    if (
-                        event.channel == "values"
-                        and not event.namespace
-                        and isinstance(event.data, Mapping)
-                    ):
-                        state = dict(event.data)
-                    if cancel_requested.is_set():
-                        cancelled = True
-                        if not drain_requested:
-                            drain_requested = self.request_drain()
-                            if not drain_requested:
-                                break
-                        continue
-
-                    # 2.取消后的根状态仍用于保存部分结果，但不再向前端输出增量。
-                    if self._review.output_enabled:
-                        # 原生消息增量和 values 都可能携带未审核文本，整轮通过后再公开。
-                        if event.channel == "values" and isinstance(event.data, Mapping):
-                            for message in reversed(event.data.get("messages", []) or []):
-                                if isinstance(message, BaseMessage):
-                                    role, content = message.type, message.content
-                                elif isinstance(message, Mapping):
-                                    role = message.get("type") or message.get("role")
-                                    content = message.get("content")
-                                else:
-                                    continue
-                                if role in {"human", "user"}:
-                                    break
-                                if role in {"ai", "assistant"}:
-                                    self._review.check_output(content)
-                        reviewed_events.append(event)
-                    else:
-                        on_event(event)
+                cancelled = self._consume_stream(raw_stream, state, delivery, cancel_requested)
                 if not cancelled and not cancel_requested.is_set():
-                    for event in reviewed_events:
-                        if cancel_requested.is_set():
-                            cancelled = True
-                            break
-                        on_event(event)
+                    delivery.flush(cancel_requested)
         except GraphDrained as exc:
             if exc.reason == "cancel_requested" or cancel_requested.is_set():
                 cancelled = True
@@ -128,7 +89,8 @@ class AgentExecutor:
         except Exception as exc:
             error = exc
         finally:
-            # 3.回调异常或执行前取消时也必须关闭流和运行时，保留最初的错误。
+            delivery.discard()
+            # 回调异常或执行前取消时也必须关闭流和运行时，保留最初的错误。
             try:
                 raw_stream.close()
             except Exception as exc:
@@ -145,56 +107,20 @@ class AgentExecutor:
                     else:
                         logger.exception("Agent 执行失败后的资源关闭失败")
 
-        # 4.从根图最终状态提取回答，并结束观测与用量统计。
-        if self._review.output_enabled and (error is not None or cancelled or cancel_requested.is_set()):
-            # 未通过交付审核的回答也不能经业务历史或取消结果公开。
-            state = {key: value for key, value in state.items() if key != "messages"}
-        answer = ""
-        messages = state.get("messages")
-        if isinstance(messages, list):
-            for message in reversed(messages):
-                if isinstance(message, BaseMessage):
-                    role, content = message.type, message.content
-                elif isinstance(message, Mapping):
-                    role = message.get("type") or message.get("role")
-                    content = message.get("content")
-                else:
-                    continue
-                if role in {"human", "user"}:
-                    break
-                if role not in {"ai", "assistant"}:
-                    continue
-                answer = message_content_to_text(content)
-                if answer:
-                    break
-        status: Literal["completed", "cancelled", "failed", "waiting_input"] = "completed"
-        if error is not None:
-            status = "failed"
-        elif cancelled or cancel_requested.is_set():
-            status = "cancelled"
-        elif self._interrupts:
-            status = "waiting_input"
-        self._observer.finish(status, error=error)
-        return AgentExecutionResult(
-            status=status,
-            interrupts=self._interrupts if status == "waiting_input" else (),
-            answer=answer,
+        return self._build_result(
             state=state,
-            usage=self._observer.build_run_usage(),
-            observability=self._observer.snapshot(),
             error=error,
+            cancelled=cancelled or cancel_requested.is_set(),
         )
 
     def close(self) -> None:
-        """串行关闭非运行态资源；失败后保留为可重试关闭状态。"""
+        """串行清理非运行态资源；失败是终态，不能重跑已释放会话的同步流程。"""
         with self._run_lock:
             if self._state is _ExecutorState.RUNNING:
                 raise RuntimeError("智能体仍在运行，不能提前关闭运行时资源")
             if self._state is _ExecutorState.CLOSED:
                 return
-            # close 一旦被请求，即使部分 Backend 关闭失败也不能再次运行；
-            # FINISHED 状态允许调用方稍后重试幂等关闭。
-            self._state = _ExecutorState.FINISHED
+            self._state = _ExecutorState.CLOSE_FAILED
             self._resources.close()
             self._state = _ExecutorState.CLOSED
 
@@ -207,23 +133,6 @@ class AgentExecutor:
             return False
         control.request_drain(reason)
         return True
-
-    def _finish_run(
-        self,
-        *,
-        preserve_run_error: bool,
-    ) -> None:
-        """结束执行状态并关闭资源，且不让清理错误覆盖图执行错误。"""
-        with self._run_lock:
-            self._state = _ExecutorState.FINISHED
-            self._run_control = None
-
-        try:
-            self.close()
-        except Exception:
-            if not preserve_run_error:
-                raise
-            logger.exception("Agent 运行异常后的 Backend 清理失败")
 
     def stream_events(
         self,
@@ -292,6 +201,78 @@ class AgentExecutor:
             self._finish_run(
                 preserve_run_error=False,
             )
+
+    def _consume_stream(
+        self,
+        raw_stream: Generator[dict[str, Any], None, None],
+        state: dict[str, Any],
+        delivery: AgentEventDelivery,
+        cancel_requested: Event,
+    ) -> bool:
+        """取消后协作式排空图；继续收集根状态，但停止公开后续事件。"""
+        cancelled = False
+        drain_requested = False
+        for raw_event in raw_stream:
+            event = AgentEvent.from_raw(raw_event)
+            if event.channel == "values" and not event.namespace and isinstance(event.data, Mapping):
+                state.clear()
+                state.update(event.data)
+            if cancel_requested.is_set():
+                cancelled = True
+                if not drain_requested:
+                    drain_requested = self.request_drain()
+                    if not drain_requested:
+                        break
+                continue
+            delivery.accept(event)
+        return cancelled
+
+    def _build_result(
+        self,
+        *,
+        state: dict[str, Any],
+        error: Exception | None,
+        cancelled: bool,
+    ) -> AgentExecutionResult:
+        """统一完成状态、回答与观测，阻止未通过交付审核的消息进入业务历史。"""
+        if self._review.output_enabled and (error is not None or cancelled):
+            state = {key: value for key, value in state.items() if key != "messages"}
+        messages = state.get("messages")
+        answer = final_answer(messages) if isinstance(messages, list) else ""
+        status: Literal["completed", "cancelled", "failed", "waiting_input"] = "completed"
+        if error is not None:
+            status = "failed"
+        elif cancelled:
+            status = "cancelled"
+        elif self._interrupts:
+            status = "waiting_input"
+        self._observer.finish(status, error=error)
+        return AgentExecutionResult(
+            status=status,
+            interrupts=self._interrupts if status == "waiting_input" else (),
+            answer=answer,
+            state=state,
+            usage=self._observer.build_run_usage(),
+            observability=self._observer.snapshot(),
+            error=error,
+        )
+
+    def _finish_run(
+        self,
+        *,
+        preserve_run_error: bool,
+    ) -> None:
+        """结束执行状态并关闭资源，且不让清理错误覆盖图执行错误。"""
+        with self._run_lock:
+            self._state = _ExecutorState.FINISHED
+            self._run_control = None
+
+        try:
+            self.close()
+        except Exception:
+            if not preserve_run_error:
+                raise
+            logger.exception("Agent 运行异常后的 Backend 清理失败")
 
 
 __all__ = ["AgentExecutor"]

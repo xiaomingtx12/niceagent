@@ -1,4 +1,4 @@
-"""平台 SubAgent 配置到 DeepAgents 原生规格的适配。"""
+"""已解析子 Agent 定义到 DeepAgents 原生规格的适配。"""
 
 from __future__ import annotations
 
@@ -7,11 +7,13 @@ from collections.abc import Mapping, Sequence
 from deepagents.middleware.async_subagents import AsyncSubAgent
 from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.middleware.subagents import SubAgent
-from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 
-from internal.core.agent_v2.entity.subagent_config import SubAgentConfig
-from internal.core.agent_v2.entity.agent_config import SubAgentRuntimeBinding
+from internal.core.agent_v2.entity.agent_config import (
+    AsyncSubAgentDefinition,
+    SubAgentDefinition,
+    SyncSubAgentDefinition,
+)
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
@@ -62,43 +64,35 @@ def validate_agent_tools(
 
 
 def build_subagent_specs(
-    subagents: Sequence[SubAgentConfig],
+    subagents: Sequence[SubAgentDefinition],
     *,
-    available_tools: Sequence[BaseTool] = (),
     skill_sources_by_agent: Mapping[str, Sequence[str]] | None = None,
-    runtime_bindings: Mapping[str, SubAgentRuntimeBinding] | None = None,
 ) -> list[SubAgent | AsyncSubAgent]:
-    """按配置顺序将平台 SubAgent 转为 DeepAgents 原生规格。"""
-    base_tool_map = {tool.name: tool for tool in available_tools}
+    """保留定义顺序，仅组装框架所需的技能权限和中间件。"""
     scoped_skills = skill_sources_by_agent or {}
-    bindings = runtime_bindings or {}
-    _validate_runtime_names(subagents, scoped_skills, bindings)
+    _validate_runtime_names(subagents, scoped_skills)
 
     specs: list[SubAgent | AsyncSubAgent] = []
     for config in subagents:
-        if config.mode == "async":
+        if isinstance(config, AsyncSubAgentDefinition):
             specs.append(_build_async_spec(config))
             continue
         specs.append(
             _build_sync_spec(
                 config,
-                available_tools=base_tool_map,
                 skill_sources=scoped_skills.get(config.name, ()),
-                binding=bindings.get(config.name),
             )
         )
     return specs
 
 
 def _build_sync_spec(
-    config: SubAgentConfig,
+    config: SyncSubAgentDefinition,
     *,
-    available_tools: Mapping[str, BaseTool],
     skill_sources: Sequence[str],
-    binding: SubAgentRuntimeBinding | None,
 ) -> SubAgent:
-    """解析一个同步 SubAgent 的授权资源并构造原生规格。"""
-    tools = _resolve_subagent_tools(config, available_tools, binding)
+    """同步定义已包含授权能力，显式隔离父图的工具和文件权限。"""
+    tools = validate_agent_tools(config.tools, context=f"subagent {config.name!r}")
     sources = list(skill_sources)
     if config.skills and not sources:
         raise ValueError(f"subagent {config.name!r} 的 Skills 尚未完成运行时授权")
@@ -107,6 +101,7 @@ def _build_sync_spec(
         "name": config.name,
         "description": config.description,
         "system_prompt": config.system_prompt,
+        "model": config.model,
         # 显式空列表避免 DeepAgents 继承父 Agent 的全部工具。
         "tools": tools,
         # 子 Agent 权限替换父规则，避免继承主 Agent 的 Memory 和 Skill 范围。
@@ -115,18 +110,13 @@ def _build_sync_spec(
     }
     if sources:
         spec["skills"] = sources
-    if binding is not None and binding.model is not None:
-        spec["model"] = binding.model
-    elif config.model is not None:
-        raise ValueError(f"subagent {config.name!r} 的模型尚未完成运行时解析")
-    # 未覆盖 model 时由 DeepAgents 原生继承主 Agent 模型。
     return spec
 
 
-def _build_async_spec(config: SubAgentConfig) -> AsyncSubAgent:
+def _build_async_spec(config: AsyncSubAgentDefinition) -> AsyncSubAgent:
     """构造一个远程 Agent Protocol SubAgent 原生规格。"""
     graph_id = config.graph_id
-    if graph_id is None:
+    if not graph_id:
         raise ValueError(f"subagent {config.name!r} 缺少 graph_id")
     spec: AsyncSubAgent = {
         "name": config.name,
@@ -140,35 +130,9 @@ def _build_async_spec(config: SubAgentConfig) -> AsyncSubAgent:
     return spec
 
 
-def _resolve_subagent_tools(
-    config: SubAgentConfig,
-    available_tools: Mapping[str, BaseTool],
-    binding: SubAgentRuntimeBinding | None,
-) -> list[BaseTool]:
-    """解析并核对一个同步 SubAgent 的工具授权。"""
-    if binding is not None and binding.tools is not None:
-        resolved = validate_agent_tools(
-            binding.tools,
-            context=f"subagent {config.name!r}",
-        )
-        configured_names = set(config.tools)
-        resolved_names = {tool.name for tool in resolved}
-        if resolved_names != configured_names:
-            raise ValueError(f"subagent {config.name!r} 的运行时工具绑定与配置不一致")
-        return resolved
-
-    missing = sorted(set(config.tools) - set(available_tools))
-    if missing:
-        raise ValueError(
-            f"subagent {config.name!r} 引用了未授权工具: {', '.join(missing)}"
-        )
-    return [available_tools[name] for name in config.tools]
-
-
 def _validate_runtime_names(
-    subagents: Sequence[SubAgentConfig],
+    subagents: Sequence[SubAgentDefinition],
     skill_sources: Mapping[str, Sequence[str]],
-    bindings: Mapping[str, SubAgentRuntimeBinding],
 ) -> None:
     """拒绝无法对应到同步 SubAgent 的运行时资源，避免静默忽略装配错误。"""
     names: set[str] = set()
@@ -180,8 +144,8 @@ def _validate_runtime_names(
     if duplicates:
         raise ValueError(f"SubAgent 名称重复: {', '.join(sorted(duplicates))}")
 
-    sync_names = {config.name for config in subagents if config.mode == "sync"}
-    unknown = sorted((set(skill_sources) | set(bindings)) - sync_names)
+    sync_names = {config.name for config in subagents if isinstance(config, SyncSubAgentDefinition)}
+    unknown = sorted(set(skill_sources) - sync_names)
     if unknown:
         raise ValueError(f"存在未使用的 SubAgent 运行时资源: {', '.join(unknown)}")
 
@@ -238,7 +202,6 @@ def _build_subagent_permissions(
 
 
 __all__ = [
-    "SubAgentRuntimeBinding",
     "build_subagent_specs",
     "validate_agent_tools",
 ]

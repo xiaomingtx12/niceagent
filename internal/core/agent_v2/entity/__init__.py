@@ -18,7 +18,6 @@ from .run_context import (
     AgentRunContext,
     AgentConversationIdentity,
 )
-from .subagent_config import SubAgentConfig, SubAgentConfigList
 from .token_usage import AgentTokenUsage, AgentTokenUsageSummary
 from .telemetry import AgentTelemetryEvent, TelemetryValue
 from .tool import DATASET_RETRIEVAL_TOOL_NAME
@@ -44,8 +43,6 @@ __all__ = [
     "AgentMemoryQuotaExceeded",
     "AgentRunContext",
     "AgentConversationIdentity",
-    "SubAgentConfig",
-    "SubAgentConfigList",
     "AgentTokenUsage",
     "AgentTokenUsageSummary",
     "AgentTelemetryEvent",
