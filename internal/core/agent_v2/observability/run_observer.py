@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from threading import RLock
 from time import monotonic
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import ToolMessage
@@ -21,20 +21,20 @@ from internal.core.agent_v2.observability.token_usage import (
 from internal.core.agent_v2.entity.telemetry import (
     AgentTelemetryEvent,
     TelemetryValue,
+    normalize_attributes,
 )
 from internal.core.agent_v2.entity.token_usage import AgentTokenUsageSummary
-from internal.core.agent_v2.observability.callback_metadata import (
-    _TOOL_METADATA_KEYS,
-    _async_subagent_attributes,
-    _bounded_text,
-    _exception_status,
-    _model_identity,
-    _response_model_name,
-    _safe_attributes,
-    _serialized_name,
+from internal.core.agent_v2.entity.run_observability import (
+    DETAIL_LIMITS, RunObservability, RunStatus, RunUsage, SpanKind, SpanStatus,
 )
-from internal.core.agent_v2.observability.summary_progress import (
-    SummaryProgressPublisher,
+from internal.core.agent_v2.observability.callback_metadata import (
+    TOOL_METADATA_KEYS,
+    async_subagent_attributes,
+    bounded_text,
+    exception_status,
+    model_identity,
+    response_model_name,
+    serialized_name,
 )
 from internal.extension.logging_extension import logger
 
@@ -53,14 +53,13 @@ class _ObservedSpan:
 
     span_id: str
     parent_span_id: str | None
-    category: str
-    kind: str
+    kind: SpanKind
     name: str
     started_at: datetime
     started_monotonic: float
     attributes: dict[str, TelemetryValue] = field(default_factory=dict)
     retry_number: int = 0
-    status: str = "running"
+    status: SpanStatus = "running"
     duration_ms: float | None = None
     error_type: str | None = None
     usage: dict[str, Any] | None = None
@@ -68,7 +67,7 @@ class _ObservedSpan:
     def finish(
         self,
         *,
-        status: str,
+        status: SpanStatus,
         error_type: str | None = None,
         usage: dict[str, Any] | None = None,
     ) -> None:
@@ -102,7 +101,7 @@ class _ObservedSpan:
 
 
 class PlatformAgentRunObserver(BaseCallbackHandler):
-    """通过 LangChain Callback 汇总平台自己的完整 Run 观测数据。
+    """通过 LangChain Callback 汇总一次执行的观测数据。
 
     Callback 负责模型、工具和同步 SubAgent 的自动传播；本类还作为
     ``AgentTelemetry`` 输出端，接收 Workspace 与 Sandbox 运行事件。
@@ -116,14 +115,16 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         trace_id: UUID,
         *,
         attributes: Mapping[str, Any] | None = None,
-        max_spans: int = 500,
-        max_stages: int = 100,
-        max_events: int = 200,
+        execution_id: UUID | None = None,
+        max_spans: int = DETAIL_LIMITS["spans"],
+        max_stages: int = DETAIL_LIMITS["stages"],
+        max_events: int = DETAIL_LIMITS["events"],
     ) -> None:
-        """创建一次 Run 独占、线程安全且有容量上限的观察器。"""
+        """一次执行独占状态；恢复执行由持久化层合并，避免复用已关闭的回调。"""
         super().__init__()
         self._trace_id = trace_id
-        self._attributes = _safe_attributes(attributes)
+        self._execution_id = str(execution_id or uuid4())
+        self._attributes = normalize_attributes(attributes)
         self._max_spans = max(1, max_spans)
         self._max_stages = max(1, max_stages)
         self._max_events = max(1, max_events)
@@ -132,11 +133,10 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         self._started_monotonic = monotonic()
         self._finished_at: datetime | None = None
         self._duration_ms: float | None = None
-        self._status = "running"
+        self._status: RunStatus = "running"
         self._error_type: str | None = None
         self._parents: dict[str, str | None] = {}
         self._active_spans: dict[str, _ObservedSpan] = {}
-        self._summary_progress = SummaryProgressPublisher()
         self._observable_spans: dict[str, _ObservedSpan] = {}
         self._spans: list[_ObservedSpan] = []
         self._stages: list[dict[str, Any]] = []
@@ -150,8 +150,9 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             "retry_count": 0,
             "error_count": 0,
             "cancelled_call_count": 0,
+            "incomplete_call_count": 0,
         }
-        self._dropped = {"spans": 0, "stages": 0, "events": 0}
+        self._dropped = {"spans": 0, "stages": 0, "events": 0, "late_records": 0}
 
     @property
     def run_id(self) -> UUID:
@@ -164,14 +165,16 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         return str(self._trace_id)
 
     def record(self, event: AgentTelemetryEvent) -> None:
-        """接收 AgentTelemetry 的脱敏运行时事件。"""
+        """接收已筛选属性的运行时事件，与调用明细共用执行生命周期。"""
         value = {
-            "name": _bounded_text(event.name),
+            "name": bounded_text(event.name),
             "value": float(event.value),
             "occurred_at": event.occurred_at.isoformat(),
-            "attributes": _safe_attributes(event.attributes),
+            "attributes": normalize_attributes(event.attributes),
         }
         with self._lock:
+            if self._ignore_after_finish():
+                return
             if len(self._events) >= self._max_events:
                 self._dropped["events"] += 1
                 return
@@ -185,12 +188,14 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
     ) -> None:
         """记录装配、流消费和持久化边界的阶段耗时。"""
         stage = {
-            "name": _bounded_text(name),
+            "name": bounded_text(name),
             "duration_ms": round(max(0.0, float(duration_ms)), 3),
             "occurred_at": _utc_now().isoformat(),
-            "attributes": _safe_attributes(attributes),
+            "attributes": normalize_attributes(attributes),
         }
         with self._lock:
+            if self._ignore_after_finish():
+                return
             if len(self._stages) >= self._max_stages:
                 self._dropped["stages"] += 1
                 return
@@ -198,7 +203,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
 
     def finish(
         self,
-        status: str,
+        status: RunStatus,
         *,
         error: BaseException | None = None,
     ) -> None:
@@ -218,43 +223,40 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             )
             self._status = final_status
             self._error_type = type(error).__name__ if error is not None else None
-            unfinished_status = (
+            unfinished_status: SpanStatus = (
                 "cancelled"
                 if final_status == "cancelled"
-                else "error" if final_status == "failed" else "ok"
+                else "incomplete"
             )
             for span in self._active_spans.values():
-                span.finish(
-                    status=unfinished_status,
-                    error_type=(
-                        self._error_type if unfinished_status == "error" else None
-                    ),
-                )
-                if unfinished_status == "error":
-                    self._counters["error_count"] += 1
-                elif unfinished_status == "cancelled":
+                if span.kind == "model":
+                    self._model_names.add(span.name)
+                span.finish(status=unfinished_status)
+                if unfinished_status == "cancelled":
                     self._counters["cancelled_call_count"] += 1
+                else:
+                    self._counters["incomplete_call_count"] += 1
             self._active_spans.clear()
-            self._summary_progress.clear()
             self._parents.clear()
 
-    def build_run_usage(self) -> dict[str, Any]:
-        """构造 Message 统计所需的稳定 Run 用量结构。"""
+    def build_run_usage(self) -> RunUsage:
+        """汇总已返回的实测用量，未返回用量的调用仍计入调用数与模型数。"""
         with self._lock:
             total = self._usage.total
-            model_count = (
-                len(self._usage.by_model)
-                if self._usage.by_model
-                else len(self._model_names)
-            )
+            model_names = self._model_names | {
+                span.name for span in self._active_spans.values() if span.kind == "model"
+            }
             return {
                 "trace_id": self.trace_id,
                 "usage_id": self.trace_id,
-                "model_count": model_count,
+                "model_count": len(model_names),
+                "model_names": sorted(model_names),
                 "model_call_count": self._counters["model_call_count"],
                 "tool_call_count": self._counters["tool_call_count"],
                 "usage_source": "langchain_callback",
                 "usage_present": self._usage.present,
+                "usage_call_count": self._usage.call_count,
+                "missing_usage_call_count": self._counters["model_call_count"] - self._usage.call_count,
                 "input_tokens": total.input_tokens,
                 "output_tokens": total.output_tokens,
                 "total_tokens": (
@@ -268,7 +270,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 },
             }
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self) -> RunObservability:
         """返回可直接写入 JSONB 的平台观测快照。"""
         with self._lock:
             usage = self.build_run_usage()
@@ -276,13 +278,17 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 **self._counters,
                 "model_count": usage["model_count"],
                 "usage_present": usage["usage_present"],
+                "usage_call_count": usage["usage_call_count"],
+                "missing_usage_call_count": usage["missing_usage_call_count"],
                 "input_tokens": usage["input_tokens"],
                 "output_tokens": usage["output_tokens"],
                 "total_tokens": usage["total_tokens"],
             }
-            value: dict[str, Any] = {
-                "schema_version": 1,
+            value: RunObservability = {
+                "schema_version": 2,
                 "trace_id": self.trace_id,
+                "execution_id": self._execution_id,
+                "execution_count": 1,
                 "status": self._status,
                 "started_at": self._started_at.isoformat(),
                 "finished_at": (
@@ -294,9 +300,16 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 "attributes": dict(self._attributes),
                 "summary": summary,
                 "usage": usage,
-                "spans": [span.to_dict() for span in self._spans],
-                "stages": list(self._stages),
-                "events": list(self._events),
+                "spans": [{**span.to_dict(), "execution_id": self._execution_id} for span in self._spans],
+                "stages": [{**stage, "execution_id": self._execution_id} for stage in self._stages],
+                "events": [{**event, "execution_id": self._execution_id} for event in self._events],
+                "executions": [{
+                    "execution_id": self._execution_id,
+                    "status": self._status,
+                    "started_at": self._started_at.isoformat(),
+                    "finished_at": self._finished_at.isoformat() if self._finished_at else None,
+                    "duration_ms": self._duration_ms,
+                }],
                 "dropped": dict(self._dropped),
             }
             if self._error_type is not None:
@@ -313,19 +326,17 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """记录一次聊天模型的真实调用尝试。"""
         del messages, tags
-        name, attributes = _model_identity(serialized, metadata, kwargs)
+        name, attributes = model_identity(serialized, metadata, kwargs)
         self._start_span(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            category="model",
             kind="model",
             name=name,
             attributes=attributes,
         )
-        self._summary_progress.start(run_id, metadata)
 
     def on_llm_new_token(
         self, token: str, *, run_id: UUID, chunk: Any = None, **kwargs: Any,
@@ -333,7 +344,10 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         """记录每次模型请求的首包和首正文耗时，不保存 token 内容。"""
         message = getattr(chunk, "message", None)
         text = message.text if message is not None else token
+        timings: list[tuple[str, float]] = []
         with self._lock:
+            if self._ignore_after_finish():
+                return
             span = self._active_spans.get(str(run_id))
             if span is None:
                 return
@@ -343,10 +357,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 if not present or key in span.attributes:
                     continue
                 span.attributes[key] = round(duration_ms, 3)
-                logger.info(
-                    "agent_model_timing run_id=%s model_call_id=%s stage=%s duration_ms=%.2f",
-                    self._trace_id, run_id, stage, duration_ms,
-                )
+                timings.append((stage, duration_ms))
+        for stage, duration_ms in timings:
+            logger.info(
+                "agent_model_timing run_id=%s model_call_id=%s stage=%s duration_ms=%.2f",
+                self._trace_id, run_id, stage, duration_ms,
+            )
 
     def on_llm_start(
         self,
@@ -358,19 +374,17 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """记录非聊天模型的真实调用尝试。"""
         del prompts, tags
-        name, attributes = _model_identity(serialized, metadata, kwargs)
+        name, attributes = model_identity(serialized, metadata, kwargs)
         self._start_span(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            category="model",
             kind="model",
             name=name,
             attributes=attributes,
         )
-        self._summary_progress.start(run_id, metadata)
 
     def on_llm_end(
         self,
@@ -380,19 +394,19 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         parent_run_id: UUID | None = None,
         tags: list[str] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """结束模型 Span 并聚合 Provider Token 用量。"""
         del parent_run_id, tags, kwargs
         usage = normalize_llm_result(response)
-        model_name = _response_model_name(response)
+        model_name = response_model_name(response)
         with self._lock:
+            if self._ignore_after_finish():
+                return
             span = self._active_spans.get(str(run_id))
             if span is None:
                 return
             if model_name is None:
-                model_name = _bounded_text(span.attributes.get("model_name"))
-            if model_name is not None:
-                self._model_names.add(model_name)
+                model_name = bounded_text(span.attributes.get("model_name"))
             if usage.present:
                 self._usage.add(usage, model_name=model_name)
             # 消费活动调用与累计用量必须在同一把锁内，防止重复结束并发计费。
@@ -402,9 +416,6 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 usage=usage.to_dict() if usage.present else None,
                 model_name=model_name,
             )
-        self._summary_progress.finish(
-            run_id, "completed", usage=usage.to_dict() if usage.present else None
-        )
 
     def on_llm_error(
         self,
@@ -414,15 +425,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         parent_run_id: UUID | None = None,
         tags: list[str] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """结束失败或取消的模型 Span。"""
         del parent_run_id, tags, kwargs
-        self._summary_progress.finish(
-            run_id, "cancelled" if _exception_status(error) == "cancelled" else "failed"
-        )
         self._finish_span(
             run_id,
-            status=_exception_status(error),
+            status=exception_status(error),
             error_type=type(error).__name__,
         )
 
@@ -437,21 +445,20 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         metadata: dict[str, Any] | None = None,
         inputs: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """记录工具或 SubAgent 调度，不保留工具输入。"""
         del input_str, tags, kwargs
-        name = _serialized_name(serialized)
+        name = serialized_name(serialized)
         kind = "subagent" if name in _SUBAGENT_TOOL_NAMES else "tool"
-        attributes = _safe_attributes(metadata, allowed_keys=_TOOL_METADATA_KEYS)
+        attributes = normalize_attributes(metadata, allowed_keys=TOOL_METADATA_KEYS)
         attributes["tool_name"] = name
         if kind == "subagent" and isinstance(inputs, Mapping):
             subagent_name = inputs.get("subagent_type")
             if isinstance(subagent_name, str) and subagent_name:
-                attributes["subagent_name"] = _bounded_text(subagent_name)
+                attributes["subagent_name"] = bounded_text(subagent_name)
         self._start_span(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            category="tool",
             kind=kind,
             name=name,
             attributes=attributes,
@@ -464,7 +471,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         run_id: UUID,
         parent_run_id: UUID | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """结束成功工具 Span，并识别框架返回的错误 ToolMessage。"""
         del parent_run_id, kwargs
         is_error = (
@@ -475,7 +482,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             run_id,
             status="error" if is_error else "ok",
             error_type="ToolMessageError" if is_error else None,
-            attributes=_async_subagent_attributes(output),
+            attributes=async_subagent_attributes(output),
         )
 
     def on_tool_error(
@@ -485,12 +492,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         run_id: UUID,
         parent_run_id: UUID | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """结束失败或取消的工具 Span。"""
         del parent_run_id, kwargs
         self._finish_span(
             run_id,
-            status=_exception_status(error),
+            status=exception_status(error),
             error_type=type(error).__name__,
         )
 
@@ -501,10 +508,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         run_id: UUID,
         parent_run_id: UUID | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """仅统计框架实际发出的重试回调，不推测未上报的重试。"""
         del retry_state, parent_run_id, kwargs
         with self._lock:
+            if self._ignore_after_finish():
+                return
             self._counters["retry_count"] += 1
             span = self._active_spans.get(str(run_id))
             if span is not None:
@@ -520,10 +529,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         tags: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """登记内部 Chain 父子关系，但不产生高噪音 Chain Span。"""
         del serialized, inputs, tags, metadata, kwargs
         with self._lock:
+            if self._ignore_after_finish():
+                return
             self._parents[str(run_id)] = (
                 str(parent_run_id) if parent_run_id is not None else None
             )
@@ -535,10 +546,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         run_id: UUID,
         parent_run_id: UUID | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """释放已完成 Chain 的临时父子关系。"""
         del outputs, parent_run_id, kwargs
         with self._lock:
+            if self._ignore_after_finish():
+                return
             self._parents.pop(str(run_id), None)
 
     def on_chain_error(
@@ -548,10 +561,12 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         run_id: UUID,
         parent_run_id: UUID | None = None,
         **kwargs: Any,
-    ) -> Any:
+    ) -> None:
         """释放失败 Chain 的临时父子关系。"""
         del error, parent_run_id, kwargs
         with self._lock:
+            if self._ignore_after_finish():
+                return
             self._parents.pop(str(run_id), None)
 
     def _start_span(
@@ -559,8 +574,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         *,
         run_id: UUID,
         parent_run_id: UUID | None,
-        category: str,
-        kind: str,
+        kind: SpanKind,
         name: str,
         attributes: dict[str, TelemetryValue],
     ) -> None:
@@ -568,12 +582,13 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         span_id = str(run_id)
         parent_id = str(parent_run_id) if parent_run_id is not None else None
         with self._lock:
+            if self._ignore_after_finish():
+                return
             if span_id in self._active_spans:
                 return
             self._parents[span_id] = parent_id
-            if category == "model":
+            if kind == "model":
                 self._counters["model_call_count"] += 1
-                self._model_names.add(name)
             else:
                 self._counters["tool_call_count"] += 1
                 if kind == "subagent":
@@ -581,7 +596,6 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
             span = _ObservedSpan(
                 span_id=span_id,
                 parent_span_id=self._nearest_observable_parent(parent_id),
-                category=category,
                 kind=kind,
                 name=name,
                 started_at=_utc_now(),
@@ -599,7 +613,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         self,
         run_id: UUID,
         *,
-        status: str,
+        status: SpanStatus,
         error_type: str | None = None,
         usage: dict[str, Any] | None = None,
         model_name: str | None = None,
@@ -608,13 +622,19 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         """关闭活动调用并累计状态；Span 达到保存上限后仍保留汇总计数。"""
         span_id = str(run_id)
         with self._lock:
+            if self._ignore_after_finish():
+                return
             span = self._active_spans.pop(span_id, None)
             self._parents.pop(span_id, None)
             if span is None:
                 return
             if model_name is not None:
+                if span.name != model_name:
+                    span.attributes["configured_model_name"] = span.name
                 span.name = model_name
                 span.attributes["model_name"] = model_name
+            if span.kind == "model":
+                self._model_names.add(span.name)
             if attributes:
                 span.attributes.update(attributes)
             span.finish(status=status, error_type=error_type, usage=usage)
@@ -622,6 +642,13 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 self._counters["error_count"] += 1
             elif status == "cancelled":
                 self._counters["cancelled_call_count"] += 1
+
+    def _ignore_after_finish(self) -> bool:
+        """调用方持锁；终态后只增加丢弃诊断，不再改变调用统计和明细。"""
+        if self._finished_at is None:
+            return False
+        self._dropped["late_records"] += 1
+        return True
 
     def _nearest_observable_parent(self, parent_id: str | None) -> str | None:
         """沿框架 Chain 关系寻找最近的模型、工具或 SubAgent Span。"""

@@ -1,6 +1,7 @@
 """Agent 单次执行结果，不依赖平台 Run 或消息表。"""
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any, Literal
 
 
@@ -12,6 +13,6 @@ class AgentExecutionResult:
     interrupts: tuple[dict[str, Any], ...] = ()
     answer: str = ""
     state: dict[str, Any] = field(default_factory=dict)
-    usage: dict[str, Any] = field(default_factory=dict)
-    observability: dict[str, Any] = field(default_factory=dict)
+    usage: Mapping[str, Any] = field(default_factory=dict)
+    observability: Mapping[str, Any] = field(default_factory=dict)
     error: Exception | None = None

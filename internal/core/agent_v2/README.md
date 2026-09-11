@@ -16,7 +16,8 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | 文件记忆存取与并发校验 | `persistence/agent_memory_repository.py` |
 | 文件记忆工具适配与配额事务 | `backends/memory/agent_memory_backend.py` |
 | 记忆目录排版与提示词字节预算 | `backends/memory/memory_index.py` |
-| 用户提问工具装配与暂停识别 | `middleware/user_input_middleware.py`、`observability/user_input_interrupt_tracker.py` |
+| 用户提问工具装配与暂停识别 | `middleware/user_input_middleware.py`、`execution/user_input_interrupt_tracker.py` |
+| 摘要生成进度通知 | `execution/summary_progress.py` |
 | 框架 Checkpoint 与 Store | `persistence/` |
 | 模型调用、工具调用与用量记录 | `observability/run_observer.py` |
 | 测评工具访问限制 | `middleware/evaluation_tool_middleware.py` |

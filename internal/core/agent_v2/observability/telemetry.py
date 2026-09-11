@@ -8,6 +8,7 @@ from collections.abc import Callable, Mapping
 from internal.core.agent_v2.entity.telemetry import (
     AgentTelemetryEvent,
     TelemetryValue,
+    normalize_attributes,
 )
 from internal.extension.logging_extension import logger
 
@@ -21,9 +22,9 @@ class AgentTelemetry:
         *,
         attributes: Mapping[str, TelemetryValue | None] | None = None,
     ) -> None:
-        """绑定输出端和脱敏基础属性。"""
+        """固定执行作用域，单条事件只能补充属性。"""
         self._record = record
-        self._attributes = self._sanitize(attributes or {})
+        self._attributes = normalize_attributes(attributes)
 
     def emit(
         self,
@@ -35,7 +36,7 @@ class AgentTelemetry:
         """隔离观察端故障并发送事件。"""
         if self._record is None:
             return
-        merged = {**self._attributes, **self._sanitize(attributes or {})}
+        merged = {**normalize_attributes(attributes), **self._attributes}
         try:
             self._record(
                 AgentTelemetryEvent(
@@ -46,17 +47,6 @@ class AgentTelemetry:
             )
         except Exception:
             logger.exception("Agent telemetry sink failed for %s", name)
-
-    @staticmethod
-    def _sanitize(
-        attributes: Mapping[str, TelemetryValue | None],
-    ) -> dict[str, TelemetryValue]:
-        """保留适合指标系统的非空标量。"""
-        return {
-            str(key): value
-            for key, value in attributes.items()
-            if value is not None and isinstance(value, (str, int, float, bool))
-        }
 
 
 def build_path_digest(path: str) -> str:

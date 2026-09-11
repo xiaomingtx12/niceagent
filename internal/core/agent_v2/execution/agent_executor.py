@@ -11,7 +11,8 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.runtime import RunControl
 from langgraph.errors import GraphDrained
 from langgraph.types import Command
-from internal.core.agent_v2.observability.user_input_interrupt_tracker import UserInputInterruptTracker
+from internal.core.agent_v2.execution.user_input_interrupt_tracker import UserInputInterruptTracker
+from internal.core.agent_v2.execution.summary_progress import SummaryProgressCallback
 
 from internal.core.agent_v2.assembly.configuration.langgraph_conversation_config import (
     merge_conversation_config,
@@ -154,6 +155,7 @@ class AgentExecutor:
                 raise RuntimeError("AgentExecutor 只允许执行一次")
             self._state = _ExecutorState.RUNNING
 
+        summary_progress = SummaryProgressCallback()
         try:
             run_control = RunControl()
             interrupt_tracker = UserInputInterruptTracker()
@@ -163,7 +165,7 @@ class AgentExecutor:
                 merge_conversation_config(self._runtime_context, config),
                 {
                     "run_id": self._observer.run_id,
-                    "callbacks": [self._observer, interrupt_tracker],
+                    "callbacks": [self._observer, interrupt_tracker, summary_progress],
                     "metadata": {
                         "trace_id": self._observer.trace_id,
                         "run_id": self._observer.trace_id,
@@ -201,6 +203,8 @@ class AgentExecutor:
             self._finish_run(
                 preserve_run_error=False,
             )
+        finally:
+            summary_progress.close()
 
     def _consume_stream(
         self,

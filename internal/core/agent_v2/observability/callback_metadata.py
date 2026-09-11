@@ -8,7 +8,8 @@ from uuid import UUID
 from langchain_core.outputs import LLMResult
 from langgraph.errors import GraphInterrupt
 
-from internal.core.agent_v2.entity.telemetry import TelemetryValue
+from internal.core.agent_v2.entity.telemetry import TelemetryValue, normalize_attributes
+from internal.core.agent_v2.entity.run_observability import SpanStatus
 
 _MODEL_METADATA_KEYS = (
     "langgraph_node",
@@ -19,72 +20,51 @@ _MODEL_METADATA_KEYS = (
     "configured_reasoning_effort",
     "lc_source",
 )
-_TOOL_METADATA_KEYS = (
+TOOL_METADATA_KEYS = (
     "langgraph_node",
     "lc_agent_name",
 )
 
 
-def _bounded_text(value: Any, *, default: str = "unknown") -> str:
-    """把观测标识转换为有界文本，避免业务载荷进入 Trace。"""
+def bounded_text(value: Any, *, default: str = "unknown") -> str:
+    """只截断调用标识；调用方须先排除正文和敏感字段。"""
     if not isinstance(value, (str, int, float, bool, UUID)):
         return default
     text = str(value).strip()
     return text[:128] if text else default
 
 
-def _safe_attributes(
-    values: Mapping[str, Any] | None,
-    *,
-    allowed_keys: tuple[str, ...] | None = None,
-) -> dict[str, TelemetryValue]:
-    """只保留有界标量属性。"""
-    if not isinstance(values, Mapping):
-        return {}
-    keys = allowed_keys or tuple(str(key) for key in values)
-    attributes: dict[str, TelemetryValue] = {}
-    for key in keys:
-        value = values.get(key)
-        if isinstance(value, bool):
-            attributes[str(key)] = value
-        elif isinstance(value, (int, float)):
-            attributes[str(key)] = value
-        elif isinstance(value, str) and value:
-            attributes[str(key)] = value[:256]
-    return attributes
-
-
-def _serialized_name(serialized: Mapping[str, Any] | None) -> str:
+def serialized_name(serialized: Mapping[str, Any] | None) -> str:
     """从框架序列化信息中提取运行对象名称。"""
     if not isinstance(serialized, Mapping):
         return "unknown"
     name = serialized.get("name")
     if isinstance(name, str) and name:
-        return _bounded_text(name)
+        return bounded_text(name)
     identifier = serialized.get("id")
     if isinstance(identifier, (list, tuple)) and identifier:
-        return _bounded_text(identifier[-1])
+        return bounded_text(identifier[-1])
     return "unknown"
 
 
-def _model_identity(
+def model_identity(
     serialized: Mapping[str, Any] | None,
     metadata: Mapping[str, Any] | None,
     kwargs: Mapping[str, Any],
 ) -> tuple[str, dict[str, TelemetryValue]]:
     """从模型开始事件提取名称、Provider 和框架节点。"""
-    attributes = _safe_attributes(metadata, allowed_keys=_MODEL_METADATA_KEYS)
+    attributes = normalize_attributes(metadata, allowed_keys=_MODEL_METADATA_KEYS)
     invocation = kwargs.get("invocation_params")
     if isinstance(invocation, Mapping):
         for key in ("model", "model_name", "model_id"):
             value = invocation.get(key)
             if isinstance(value, str) and value:
-                attributes.setdefault("model_name", _bounded_text(value))
+                attributes.setdefault("model_name", bounded_text(value))
                 break
-    model_name = _bounded_text(
+    model_name = bounded_text(
         attributes.get("model_name")
         or attributes.get("ls_model_name")
-        or _serialized_name(serialized)
+        or serialized_name(serialized)
     )
     attributes["model_name"] = model_name
     if "model_provider" not in attributes and "ls_provider" in attributes:
@@ -92,7 +72,7 @@ def _model_identity(
     return model_name, attributes
 
 
-def _response_model_name(response: LLMResult) -> str | None:
+def response_model_name(response: LLMResult) -> str | None:
     """从模型结果元数据读取实际模型名，不读取回复正文。"""
     for generations in response.generations:
         for generation in generations:
@@ -103,17 +83,17 @@ def _response_model_name(response: LLMResult) -> str | None:
             for key in ("model_name", "model", "model_id"):
                 value = metadata.get(key)
                 if isinstance(value, str) and value:
-                    return _bounded_text(value)
+                    return bounded_text(value)
     llm_output = response.llm_output
     if isinstance(llm_output, Mapping):
         for key in ("model_name", "model", "model_id"):
             value = llm_output.get(key)
             if isinstance(value, str) and value:
-                return _bounded_text(value)
+                return bounded_text(value)
     return None
 
 
-def _exception_status(error: BaseException) -> str:
+def exception_status(error: BaseException) -> SpanStatus:
     """区分协作式取消和真正的调用失败。"""
     if isinstance(error, GraphInterrupt):
         return "waiting_input"
@@ -122,7 +102,7 @@ def _exception_status(error: BaseException) -> str:
     return "error"
 
 
-def _async_subagent_attributes(output: Any) -> dict[str, TelemetryValue]:
+def async_subagent_attributes(output: Any) -> dict[str, TelemetryValue]:
     """从异步 SubAgent 的 Command 中提取子 Trace 标识，不读取结果正文。"""
     update = getattr(output, "update", None)
     if not isinstance(update, Mapping):
@@ -134,12 +114,12 @@ def _async_subagent_attributes(output: Any) -> dict[str, TelemetryValue]:
     if not isinstance(task, Mapping):
         return {}
     attributes: dict[str, TelemetryValue] = {
-        "async_task_id": _bounded_text(task_id),
+        "async_task_id": bounded_text(task_id),
     }
     child_run_id = task.get("run_id")
     if isinstance(child_run_id, (str, UUID)):
-        attributes["child_trace_id"] = _bounded_text(child_run_id)
+        attributes["child_trace_id"] = bounded_text(child_run_id)
     child_conversation_id = task.get("conversation_id", task.get("thread_id"))
     if isinstance(child_conversation_id, (str, UUID)):
-        attributes["child_conversation_id"] = _bounded_text(child_conversation_id)
+        attributes["child_conversation_id"] = bounded_text(child_conversation_id)
     return attributes

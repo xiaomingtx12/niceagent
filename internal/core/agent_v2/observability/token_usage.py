@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from math import isfinite
 from typing import Any
 
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import LLMResult
 
-from internal.core.agent_v2.entity.token_usage import AgentTokenUsage
+from internal.core.agent_v2.entity.token_usage import AgentTokenUsage, normalize_token_details
 
 
 _INPUT_KEYS = ("input_tokens", "prompt_tokens", "prompt_token_count")
@@ -66,7 +67,7 @@ def normalize_usage(raw: Any, *, source: str = "unknown") -> AgentTokenUsage:
         or total_tokens
         or input_details
         or output_details
-        or any(key in raw for key in (*_INPUT_KEYS, *_OUTPUT_KEYS, *_TOTAL_KEYS))
+        or any(_is_token_count(raw.get(key)) for key in (*_INPUT_KEYS, *_OUTPUT_KEYS, *_TOTAL_KEYS))
     )
     return AgentTokenUsage(
         input_tokens=input_tokens,
@@ -109,16 +110,22 @@ def _first_int(raw: Mapping[str, Any], keys: Iterable[str]) -> int:
     """按候选字段顺序读取第一个有效整数。"""
     for key in keys:
         value = raw.get(key)
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)):
+        if _is_token_count(value):
             return int(value)
     return 0
 
 
+def _is_token_count(value: Any) -> bool:
+    """无效字段不能把缺失用量伪装成实测零值，也不能阻断备用来源。"""
+    return (
+        isinstance(value, (int, float)) and not isinstance(value, bool)
+        and isfinite(value) and value >= 0
+    )
+
+
 def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
     """提取指定方向的缓存、推理等 Token 明细。"""
-    details: dict[str, int] = {}
+    details: dict[str, int | float] = {}
     detail_keys = (
         f"{direction}_token_details",
         f"{direction}_tokens_details",
@@ -129,19 +136,17 @@ def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
         if isinstance(raw_details, Mapping):
             for key, value in raw_details.items():
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    details[str(key)] = int(value)
+                    details[str(key)] = value
 
     aliases = (
-        ("cached", "cached_tokens"),
-        ("cache_read", "cache_read_input_tokens"),
-        ("cache_creation", "cache_creation_input_tokens"),
-        ("reasoning", "reasoning_tokens"),
+        ("cached_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+        if direction == "input" else ("reasoning_tokens",)
     )
-    for detail_name, raw_key in aliases:
+    for raw_key in aliases:
         value = raw.get(raw_key)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            details.setdefault(detail_name, int(value))
-    return details
+            details.setdefault(raw_key, value)
+    return normalize_token_details(details)
 
 
 __all__ = [

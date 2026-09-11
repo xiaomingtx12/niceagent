@@ -45,7 +45,6 @@ from .agent_assembly_service import AgentAssemblyService
 from .agent_workbench_event_buffer import AgentWorkbenchEventBuffer
 from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
 from .agent_workbench_run_service import AgentWorkbenchRunService
-from internal.service.conversation.conversation_service import ConversationService
 
 
 _AGENT_PERSISTENCE_ERRORS = (*POSTGRES_CONNECTION_ERRORS, PoolTimeout)
@@ -89,6 +88,7 @@ class AgentWorkbenchRunExecutionService:
         started_at = time.monotonic()
         observer = PlatformAgentRunObserver(
             run.run_id,
+            execution_id=run.executor_id,
             attributes={
                 "account_id": str(run.spec.account_id),
                 "app_id": str(run.spec.app_id),
@@ -267,7 +267,6 @@ class AgentWorkbenchRunExecutionService:
         if result.answer:
             message_updates["answer"] = result.answer
         message_updates["latency"] = latency
-        message_updates.update(ConversationService.build_run_usage_updates(result.usage))
         committed = self.run_service.finalize_run(
             run,
             status,

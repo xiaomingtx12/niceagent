@@ -8,6 +8,7 @@ from injector import inject
 from redis import Redis
 
 from internal.model import Account, App, Message
+from internal.core.agent_v2.entity.token_usage import normalize_token_details
 from pkg.sqlalchemy import SQLAlchemy
 from .app_service import AppService
 from internal.service.common.base_service import BaseService
@@ -236,22 +237,13 @@ class AnalysisService(BaseService):
                 target["total_tokens"] += cls._int_value(
                     raw_model_usage.get("total_tokens")
                 )
-                input_details = raw_model_usage.get("input_details", {})
-                output_details = raw_model_usage.get("output_details", {})
-                if isinstance(input_details, dict):
-                    target["cached_tokens"] += cls._detail_value(
-                        input_details,
-                        "cached",
-                    )
-                    target["reasoning_tokens"] += cls._detail_value(
-                        input_details,
-                        "reasoning",
-                    )
-                if isinstance(output_details, dict):
-                    target["reasoning_tokens"] += cls._detail_value(
-                        output_details,
-                        "reasoning",
-                    )
+                input_details = normalize_token_details(raw_model_usage.get("input_details"))
+                output_details = normalize_token_details(raw_model_usage.get("output_details"))
+                target["cached_tokens"] += input_details.get("cached", 0)
+                # 旧快照可能把同一份推理用量放在两个方向，与消息字段保持一致。
+                target["reasoning_tokens"] += max(
+                    input_details.get("reasoning", 0), output_details.get("reasoning", 0),
+                )
         return usage_by_model
 
     @classmethod
@@ -312,16 +304,3 @@ class AnalysisService(BaseService):
     def _int_value(value: Any) -> int:
         """把模型用量中的数值安全转换为整数。"""
         return int(value) if isinstance(value, (int, float)) else 0
-
-    @classmethod
-    def _detail_value(cls, details: dict[str, Any], name: str) -> int:
-        """读取模型明细中的兼容字段名。"""
-        aliases = {
-            "cached": ("cached", "cached_tokens", "cache_read", "cache_read_tokens"),
-            "reasoning": ("reasoning", "reasoning_tokens"),
-        }
-        for alias in aliases.get(name, (name,)):
-            value = details.get(alias)
-            if isinstance(value, (int, float)):
-                return int(value)
-        return 0

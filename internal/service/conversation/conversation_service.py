@@ -31,19 +31,7 @@ from internal.service.agent.agent_conversation_cleanup_service import AgentConve
 from internal.service.language_model.provider_api_key_service import ProviderApiKeyService
 from internal.exception import ForbiddenException, NotFoundException
 from internal.model import App, Conversation, EndUser, Message, Account
-
-
-def _usage_detail(details: Mapping[str, Any], name: str) -> int:
-    """读取 Token 明细并统一转换为整数。"""
-    aliases = {
-        "cached": ("cached", "cached_tokens", "cache_read", "cache_read_tokens"),
-        "reasoning": ("reasoning", "reasoning_tokens"),
-    }
-    for alias in aliases.get(name, (name,)):
-        value = details.get(alias, 0)
-        if isinstance(value, (int, float)):
-            return int(value)
-    return 0
+from internal.core.agent_v2.entity.token_usage import normalize_token_details
 
 
 @inject
@@ -62,12 +50,8 @@ class ConversationService(BaseService):
         if not run_usage:
             return {}
         # 2.规范化输入、输出 Token 明细，兼容缺失或异常结构。
-        input_details = run_usage.get("input_details", {})
-        output_details = run_usage.get("output_details", {})
-        if not isinstance(input_details, Mapping):
-            input_details = {}
-        if not isinstance(output_details, Mapping):
-            output_details = {}
+        input_details = normalize_token_details(run_usage.get("input_details"))
+        output_details = normalize_token_details(run_usage.get("output_details"))
 
         # 3.先写入调用次数、Trace 和按模型拆分的原始统计。
         updates: dict[str, Any] = {
@@ -82,13 +66,10 @@ class ConversationService(BaseService):
                 {
                     "input_token_count": int(run_usage.get("input_tokens", 0) or 0),
                     "output_token_count": int(run_usage.get("output_tokens", 0) or 0),
-                    "cached_token_count": _usage_detail(
-                        input_details,
-                        "cached",
-                    ),
+                    "cached_token_count": input_details.get("cached", 0),
                     "reasoning_token_count": max(
-                        _usage_detail(input_details, "reasoning"),
-                        _usage_detail(output_details, "reasoning"),
+                        input_details.get("reasoning", 0),
+                        output_details.get("reasoning", 0),
                     ),
                     "total_token_count": int(run_usage.get("total_tokens", 0) or 0),
                 }

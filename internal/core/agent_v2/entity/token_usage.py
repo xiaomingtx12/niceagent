@@ -4,7 +4,32 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from math import isfinite
 from typing import Any
+
+
+def normalize_token_details(raw: Any) -> dict[str, int]:
+    """新响应与历史快照共用别名规则；同一份用量中的别名不重复相加。"""
+    if not isinstance(raw, Mapping):
+        return {}
+    details = {
+        str(key): int(value)
+        for key, value in raw.items()
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        and isfinite(value) and value >= 0
+    }
+    aliases = {
+        "cached": ("cached", "cached_tokens", "cache_read", "cache_read_tokens", "cache_read_input_tokens"),
+        "cache_creation": ("cache_creation", "cache_creation_tokens", "cache_creation_input_tokens"),
+        "reasoning": ("reasoning", "reasoning_tokens"),
+    }
+    for name, keys in aliases.items():
+        value = next((details[key] for key in keys if key in details), None)
+        for key in keys:
+            details.pop(key, None)
+        if value is not None:
+            details[name] = value
+    return details
 
 
 def _add_details(target: dict[str, int], source: Mapping[str, int]) -> None:
@@ -41,8 +66,8 @@ class AgentTokenUsage:
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
         self.total_tokens += other.total_tokens
-        _add_details(self.input_details, other.input_details)
-        _add_details(self.output_details, other.output_details)
+        _add_details(self.input_details, normalize_token_details(other.input_details))
+        _add_details(self.output_details, normalize_token_details(other.output_details))
         if self.source == "unknown":
             self.source = other.source
         self.present = self.present or other.present
@@ -124,4 +149,4 @@ class AgentTokenUsageSummary:
         }
 
 
-__all__ = ["AgentTokenUsage", "AgentTokenUsageSummary"]
+__all__ = ["AgentTokenUsage", "AgentTokenUsageSummary", "normalize_token_details"]

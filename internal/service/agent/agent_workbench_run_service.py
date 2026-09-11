@@ -32,6 +32,8 @@ from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
 from internal.core.agent_v2.entity.user_input import build_confirmed_input_context
+from internal.core.agent_v2.observability.run_snapshot import merge_run_observability
+from internal.service.conversation.conversation_service import ConversationService
 from internal.schema.agent.agent_workbench_schema import (
     WorkbenchEvent,
     WorkbenchRunMetadataResp,
@@ -255,6 +257,9 @@ class AgentWorkbenchRunService:
                 return False
             if row.status in WORKBENCH_TERMINAL_STATUSES:
                 return False
+            if (observability and observability.get("execution_id")
+                    and (row.observability or {}).get("execution_id") == observability["execution_id"]):
+                return False
 
             # 2.仅第一次成功收敛的调用保存运行结果和结束时间。
             row.status = status.value
@@ -264,17 +269,17 @@ class AgentWorkbenchRunService:
             if state_snapshot is not None:
                 row.state_snapshot = {**(row.state_snapshot or {}), **state_snapshot}
             if observability is not None:
-                row.observability = dict(observability)
+                row.observability = merge_run_observability(row.observability or {}, observability)
 
             # 3.业务消息和 Run 在同一事务内更新。
-            if message_updates:
+            updates = dict(message_updates or {})
+            if observability is not None:
+                updates.update(ConversationService.build_run_usage_updates(row.observability.get("usage")))
+            if updates:
                 message = self.db.session.get(Message, run.spec.message_id)
                 if message is not None:
-                    for field, value in message_updates.items():
-                        if run.resume is not None and field in {
-                            "latency", "model_call_count", "tool_call_count", "input_token_count",
-                            "output_token_count", "cached_token_count", "reasoning_token_count", "total_token_count",
-                        }:
+                    for field, value in updates.items():
+                        if run.resume is not None and field == "latency":
                             value += getattr(message, field, 0) or 0
                         setattr(message, field, value)
             if events:
