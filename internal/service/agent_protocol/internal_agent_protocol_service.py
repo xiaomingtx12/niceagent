@@ -16,6 +16,8 @@ from internal.service.agent_protocol.internal_auth import (
     parse_internal_agent_protocol_token,
 )
 from internal.entity import WORKBENCH_ACTIVE_STATUSES
+from internal.entity.agent_run_interaction import RunRejected
+from internal.service.agent.agent_workbench_query_service import AgentWorkbenchQueryService
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import (
@@ -24,7 +26,9 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.model import Account, AgentRun, App, Conversation
-from internal.schema.agent.agent_runtime_schema import AgentInvocationContext
+from internal.entity.agent_invocation import (
+    AgentInvocationContext,
+)
 from internal.schema.agent.agent_workbench_schema import WorkbenchCommandInputReq
 from internal.schema.agent_protocol.internal_agent_protocol_schema import (
     InternalRunCreateReq,
@@ -48,6 +52,7 @@ class InternalAgentProtocolService(BaseService):
 
     db: SQLAlchemy
     config: Config
+    query_service: AgentWorkbenchQueryService
     workbench_service: AgentWorkbenchService
     run_service: AgentWorkbenchRunService
     conversation_service: ConversationService
@@ -124,10 +129,10 @@ class InternalAgentProtocolService(BaseService):
             run_input=command_input,
             user_input_enabled=False,
         )
-        if started.type == "error":
+        if isinstance(started, RunRejected):
             return InternalRunLaunchResp(conflict_message=started.message)
 
-        run_id = started.result.run_id
+        run_id = started.run_id
         row = self.run_service.get_run(run_id)
         return InternalRunLaunchResp(
             run=self._to_run_response(
@@ -146,7 +151,7 @@ class InternalAgentProtocolService(BaseService):
     ) -> InternalThreadResp:
         """读取 SDK 所需的当前 State，用于异步任务获取最终结果。"""
         account = self._get_authorized_account(claims)
-        state = self.workbench_service.get_state(
+        state = self.query_service.get_state(
             context=self.creator_task_service.get_invocation_context(
                 app_id=claims.target_app_id,
                 conversation_id=conversation_id,

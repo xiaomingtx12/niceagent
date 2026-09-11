@@ -6,11 +6,9 @@ from .agent.agent_tool_schema import (
     DatasetRetrievalToolReq,
     WorkflowGeneratorToolReq,
 )
-from .agent.agent_runtime_schema import (
+from internal.schema.agent.agent_cleanup_schema import (
     AgentAppCleanupReq,
     AgentConversationCleanupReq,
-    AgentInvocation,
-    AgentInvocationContext,
     AgentMessageCleanupReq,
 )
 from .app.app_config_schema import AgentAppConfigReq, DraftAppConfigPatchReq
@@ -73,8 +71,6 @@ __all__ = [
     "WorkflowGeneratorToolReq",
     "AgentAppCleanupReq",
     "AgentConversationCleanupReq",
-    "AgentInvocation",
-    "AgentInvocationContext",
     "AgentMessageCleanupReq",
     "DraftAppConfigPatchReq",
     "AgentAppConfigReq",

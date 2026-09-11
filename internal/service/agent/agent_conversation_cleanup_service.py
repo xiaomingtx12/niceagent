@@ -19,7 +19,7 @@ from internal.core.agent_v2.persistence.agent_memory_repository import (
 from internal.extension.logging_extension import logger
 from internal.model import App, Conversation
 from internal.repository import WorkspaceFileStore
-from internal.schema.agent.agent_runtime_schema import (
+from internal.schema.agent.agent_cleanup_schema import (
     AgentAppCleanupReq,
     AgentConversationCleanupReq,
     AgentMessageCleanupReq,

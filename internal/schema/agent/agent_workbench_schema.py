@@ -189,28 +189,6 @@ class WorkbenchCommandReq(BaseModel):
             raise ValidateErrorException("run.start 需要 input.messages 或 query")
         return value
 
-    @property
-    def command_id(self) -> int | None:
-        """返回协议命令 id。"""
-        return self.id if isinstance(self.id, int) else None
-
-    def to_run_input(self) -> WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq:
-        """转换为 Service 可直接使用的新消息或中断响应。"""
-        if self.method == "input.respond":
-            return self.to_input_response()
-        if self.method == "input.reopen":
-            try:
-                return WorkbenchInputReopenReq.model_validate(self.params)
-            except ValidationError as exc:
-                raise ValidateErrorException("表单恢复格式错误") from exc
-        return self.input_data().to_run_input()
-
-    def to_input_response(self) -> WorkbenchInputRespondReq:
-        """在 HTTP 边界校验 SDK 表单响应。"""
-        try:
-            return WorkbenchInputRespondReq.model_validate(self.params)
-        except ValidationError as exc:
-            raise ValidateErrorException("表单提交格式错误") from exc
 
 
 class WorkbenchEventParams(BaseModel):

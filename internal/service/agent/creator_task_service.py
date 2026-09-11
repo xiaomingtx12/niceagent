@@ -14,8 +14,10 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
 from internal.model import Account, AgentRun, App, Conversation, EndUser
-from internal.schema.agent.agent_runtime_schema import (
+from internal.schema.agent.agent_cleanup_schema import (
     AgentConversationCleanupReq,
+)
+from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
 from pkg.sqlalchemy import SQLAlchemy
@@ -222,16 +224,10 @@ class CreatorTaskService(BaseService):
         self, conversation_id: UUID, account: Account
     ) -> dict[str, Any]:
         """从授权列表范围读取会话及所属应用，避免绕过历史归属兼容规则。"""
-        row = (
-            self._visible_query(account)
-            .filter(Conversation.id == conversation_id)
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("会话不存在或无权访问")
-        statuses = self._last_run_statuses([row[0].id])
+        conversation, app = self._get_visible_conversation(conversation_id, account)
+        statuses = self._last_run_statuses([conversation.id])
         return self._serialize_conversation(
-            row[0], row[1], last_run_status=statuses.get(row[0].id, "idle"),
+            conversation, app, last_run_status=statuses.get(conversation.id, "idle"),
         )
 
     def update_conversation(
@@ -239,15 +235,8 @@ class CreatorTaskService(BaseService):
     ) -> dict[str, Any]:
         """更新入口已校验的会话字段，提交后返回包含最新运行状态的摘要。"""
         # 1.通过与列表相同的可见性条件确认修改权限。
-        row = (
-            self._visible_query(account)
-            .filter(Conversation.id == conversation_id)
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("会话不存在或无权访问")
+        conversation, app = self._get_visible_conversation(conversation_id, account)
         # 2.字段提交成功后再读取运行状态，保持响应与已保存的数据一致。
-        conversation, app = row
         for field, value in values.items():
             setattr(conversation, field, value)
         self.db.session.commit()
@@ -259,14 +248,7 @@ class CreatorTaskService(BaseService):
     def delete_conversation(self, conversation_id: UUID, account: Account) -> None:
         """清理可恢复运行资源后软删除会话，清理失败时不提交删除标记。"""
         # 1.先校验归属，再执行可能涉及外部资源的清理。
-        row = (
-            self._visible_query(account)
-            .filter(Conversation.id == conversation_id)
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("会话不存在或无权访问")
-        conversation, app = row
+        conversation, app = self._get_visible_conversation(conversation_id, account)
         self.agent_cleanup_service.cleanup_conversation(
             AgentConversationCleanupReq(
                 account_id=account.id,
@@ -277,6 +259,19 @@ class CreatorTaskService(BaseService):
         # 2.清理成功后保存删除标记，后续列表和入口都不再返回该会话。
         conversation.is_deleted = True
         self.db.session.commit()
+
+    def _get_visible_conversation(
+        self, conversation_id: UUID, account: Account,
+    ) -> tuple[Conversation, App]:
+        """详情、更新和删除共用列表的可见性规则，返回已加载的会话与应用。"""
+        row = (
+            self._visible_query(account)
+            .filter(Conversation.id == conversation_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise NotFoundException("会话不存在或无权访问")
+        return row[0], row[1]
 
     def _visible_query(self, account: Account):
         """构建同账号可见的任务会话查询。

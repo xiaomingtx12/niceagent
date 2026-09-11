@@ -10,8 +10,10 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, EndUser
-from internal.schema.agent.agent_runtime_schema import (
+from internal.schema.agent.agent_cleanup_schema import (
     AgentConversationCleanupReq,
+)
+from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
 from pkg.sqlalchemy import SQLAlchemy

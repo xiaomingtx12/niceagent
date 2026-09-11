@@ -16,6 +16,8 @@ from internal.schema import (
 )
 from internal.service import AgentWorkbenchService, AssistantAgentService
 from internal.middleware.rate_limit_middleware import rate_limit
+from internal.service.agent_protocol.command_adapter import execute_command
+from internal.service.agent.agent_workbench_query_service import AgentWorkbenchQueryService
 from pkg.response import json_response, sse_response
 
 
@@ -24,6 +26,7 @@ from pkg.response import json_response, sse_response
 class AssistantAgentProtocolHandler:
     """辅助 Agent command、stream、state 和取消适配器。"""
 
+    query_service: AgentWorkbenchQueryService
     service: AgentWorkbenchService
     assistant_agent_service: AssistantAgentService
 
@@ -41,13 +44,13 @@ class AssistantAgentProtocolHandler:
         """提交辅助 Agent 协议命令。"""
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
-        result = self.service.start_run(
+        result = execute_command(
+            self.service,
             context=self.assistant_agent_service.get_invocation_context(
                 conversation_id=conversation_id,
                 account=current_user,
             ),
-            run_input=command.to_run_input(),
-            command_id=command.command_id,
+            command=command,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
@@ -58,7 +61,7 @@ class AssistantAgentProtocolHandler:
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
-        events = self.service.subscribe(
+        events = self.query_service.subscribe(
             context=self.assistant_agent_service.get_invocation_context(
                 conversation_id=conversation_id,
                 account=current_user,
@@ -70,7 +73,7 @@ class AssistantAgentProtocolHandler:
     @login_required
     def state(self, conversation_id: UUID) -> Response:
         """读取辅助 Agent 状态。"""
-        result = self.service.get_state(
+        result = self.query_service.get_state(
             view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.assistant_agent_service.get_invocation_context(
                 conversation_id=conversation_id,
@@ -83,7 +86,7 @@ class AssistantAgentProtocolHandler:
     @login_required
     def model_settings(self, conversation_id: UUID) -> Response:
         """沿用辅助 Agent 会话权限读取模型选项。"""
-        result = self.service.get_model_settings(context=self.assistant_agent_service.get_invocation_context(
+        result = self.query_service.get_model_settings(context=self.assistant_agent_service.get_invocation_context(
             conversation_id=conversation_id, account=current_user,
         ))
         return json_response(result.model_dump(mode="json"))
@@ -98,7 +101,7 @@ class AssistantAgentProtocolHandler:
             ),
             run_id=run_id,
         )
-        response = WorkbenchCancelResp.model_validate(result)
+        response = WorkbenchCancelResp.model_validate(result, from_attributes=True)
         return json_response(response.model_dump(mode="json"))
 
 

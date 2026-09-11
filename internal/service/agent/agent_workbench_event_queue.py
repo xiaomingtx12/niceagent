@@ -12,7 +12,16 @@ from uuid import UUID
 
 from internal.entity import WorkbenchRun, WorkbenchRunStatus
 from internal.entity.conversation_entity import InvokeFrom
-from internal.schema.agent.agent_workbench_read_schema import WorkbenchEventBatchResp
+from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
+
+
+@dataclass(frozen=True)
+class EventBatch:
+    """内部扫描结果；游标独立于过滤后的事件，不作为 HTTP 响应校验或序列化。"""
+
+    events: list[WorkbenchEvent]
+    next_sequence: int
+    has_more: bool
 
 
 @dataclass(frozen=True)
@@ -21,7 +30,7 @@ class _CachedEventBatch:
 
     version: int
     expires_at: float
-    batch: WorkbenchEventBatchResp
+    batch: EventBatch
 
 
 @dataclass
@@ -55,9 +64,9 @@ class _EventSignal:
         self,
         cursor: int,
         *,
-        load: Callable[[], WorkbenchEventBatchResp],
+        load: Callable[[], EventBatch],
         recover: Callable[[], None] | None = None,
-    ) -> WorkbenchEventBatchResp:
+    ) -> EventBatch:
         """同游标订阅共享已提交批次；最多保留两批 0.5 秒，通知后立即失效。"""
         with self.read_lock:
             # 1.在查库前取通知版本，查询期间到达的新事件会使本批缓存失效。

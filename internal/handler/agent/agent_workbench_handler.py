@@ -23,6 +23,8 @@ from internal.service import (
     CreatorTaskService,
     WebAppService,
 )
+from internal.service.agent_protocol.command_adapter import execute_command
+from internal.service.agent.agent_workbench_query_service import AgentWorkbenchQueryService
 from pkg.response import json_response, sse_response
 
 
@@ -31,6 +33,7 @@ from pkg.response import json_response, sse_response
 class AgentWorkbenchHandler:
     """Agent 工作台 HTTP 处理器。"""
 
+    query_service: AgentWorkbenchQueryService
     service: AgentWorkbenchService
     app_service: AppService
     web_app_service: WebAppService
@@ -39,7 +42,7 @@ class AgentWorkbenchHandler:
     @login_required
     def debug_model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
         """沿用调试会话权限，仅返回模型选项。"""
-        result = self.service.get_model_settings(context=self.app_service.get_debugger_invocation_context(
+        result = self.query_service.get_model_settings(context=self.app_service.get_debugger_invocation_context(
             app_id=app_id, conversation_id=conversation_id, account=current_user,
         ))
         return json_response(result.model_dump(mode="json"))
@@ -47,7 +50,7 @@ class AgentWorkbenchHandler:
     @login_required
     def web_app_model_settings(self, token: str, conversation_id: UUID) -> Response:
         """发布态选项沿用会话授权，不暴露创建者可选模型目录。"""
-        result = self.service.get_model_settings(context=self.web_app_service.get_invocation_context(
+        result = self.query_service.get_model_settings(context=self.web_app_service.get_invocation_context(
             token=token, conversation_id=conversation_id, account=current_user,
         ))
         return json_response(result.model_dump(mode="json"))
@@ -55,7 +58,7 @@ class AgentWorkbenchHandler:
     @login_required
     def creator_task_model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
         """任务中心独立读取当前会话的模型选择。"""
-        result = self.service.get_model_settings(context=self.creator_task_service.get_invocation_context(
+        result = self.query_service.get_model_settings(context=self.creator_task_service.get_invocation_context(
             app_id=app_id, conversation_id=conversation_id, account=current_user,
         ))
         return json_response(result.model_dump(mode="json"))
@@ -66,7 +69,7 @@ class AgentWorkbenchHandler:
         page = PaginatorReq(request.args)
         if not page.validate():
             raise ValidateErrorException("执行详情分页参数无效")
-        result = self.service.get_run_events(
+        result = self.query_service.get_run_events(
             run_id=run_id, account=current_user,
             current_page=page.current_page.data, page_size=page.page_size.data,
         )
@@ -75,7 +78,7 @@ class AgentWorkbenchHandler:
     @login_required
     def run_observability(self, run_id: UUID) -> Response:
         """读取当前账号可访问的 Agent Run 平台观测链路。"""
-        result = self.service.get_run_observability(
+        result = self.query_service.get_run_observability(
             run_id=run_id,
             account=current_user,
         )
@@ -87,14 +90,14 @@ class AgentWorkbenchHandler:
         """调试工作台提交 Agent 命令。"""
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
-        result = self.service.start_run(
+        result = execute_command(
+            self.service,
             context=self.app_service.get_debugger_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
                 account=current_user,
             ),
-            run_input=command.to_run_input(),
-            command_id=command.command_id,
+            command=command,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
@@ -105,7 +108,7 @@ class AgentWorkbenchHandler:
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
-        events = self.service.subscribe(
+        events = self.query_service.subscribe(
             context=self.app_service.get_debugger_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
@@ -118,7 +121,7 @@ class AgentWorkbenchHandler:
     @login_required
     def debug_state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """读取调试工作台状态和消息快照。"""
-        result = self.service.get_state(
+        result = self.query_service.get_state(
             view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.app_service.get_debugger_invocation_context(
                 app_id=app_id,
@@ -134,14 +137,14 @@ class AgentWorkbenchHandler:
         """发布态 WebApp 提交 Agent 命令。"""
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
-        result = self.service.start_run(
+        result = execute_command(
+            self.service,
             context=self.web_app_service.get_invocation_context(
                 token=token,
                 conversation_id=conversation_id,
                 account=current_user,
             ),
-            run_input=command.to_run_input(),
-            command_id=command.command_id,
+            command=command,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
@@ -152,7 +155,7 @@ class AgentWorkbenchHandler:
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
-        events = self.service.subscribe(
+        events = self.query_service.subscribe(
             context=self.web_app_service.get_invocation_context(
                 token=token,
                 conversation_id=conversation_id,
@@ -165,7 +168,7 @@ class AgentWorkbenchHandler:
     @login_required
     def web_app_state(self, token: str, conversation_id: UUID) -> Response:
         """读取发布态 WebApp 工作台状态和消息快照。"""
-        result = self.service.get_state(
+        result = self.query_service.get_state(
             view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.web_app_service.get_invocation_context(
                 token=token,
@@ -192,7 +195,7 @@ class AgentWorkbenchHandler:
             ),
             run_id=run_id,
         )
-        response = WorkbenchCancelResp.model_validate(result)
+        response = WorkbenchCancelResp.model_validate(result, from_attributes=True)
         return json_response(response.model_dump(mode="json"))
 
     @login_required
@@ -211,7 +214,7 @@ class AgentWorkbenchHandler:
             ),
             run_id=run_id,
         )
-        response = WorkbenchCancelResp.model_validate(result)
+        response = WorkbenchCancelResp.model_validate(result, from_attributes=True)
         return json_response(response.model_dump(mode="json"))
 
     @login_required
@@ -219,14 +222,14 @@ class AgentWorkbenchHandler:
         """Creator 任务中心提交已发布 Agent 命令。"""
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
-        result = self.service.start_run(
+        result = execute_command(
+            self.service,
             context=self.creator_task_service.get_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
                 account=current_user,
             ),
-            run_input=command.to_run_input(),
-            command_id=command.command_id,
+            command=command,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
@@ -237,7 +240,7 @@ class AgentWorkbenchHandler:
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
-        events = self.service.subscribe(
+        events = self.query_service.subscribe(
             context=self.creator_task_service.get_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
@@ -250,7 +253,7 @@ class AgentWorkbenchHandler:
     @login_required
     def creator_task_state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """Creator 任务中心读取会话状态。"""
-        result = self.service.get_state(
+        result = self.query_service.get_state(
             view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.creator_task_service.get_invocation_context(
                 app_id=app_id,
@@ -274,7 +277,7 @@ class AgentWorkbenchHandler:
             ),
             run_id=run_id,
         )
-        response = WorkbenchCancelResp.model_validate(result)
+        response = WorkbenchCancelResp.model_validate(result, from_attributes=True)
         return json_response(response.model_dump(mode="json"))
 
 

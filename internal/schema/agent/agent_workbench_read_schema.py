@@ -34,11 +34,3 @@ class WorkbenchRunEventsResp(BaseModel):
     run_id: UUID
     events: list[WorkbenchEvent]
     next_page: int | None = None
-
-
-class WorkbenchEventBatchResp(BaseModel):
-    """扫描游标独立于公开事件，过滤结果为空时也能继续读取下一批。"""
-
-    events: list[WorkbenchEvent]
-    next_sequence: int
-    has_more: bool

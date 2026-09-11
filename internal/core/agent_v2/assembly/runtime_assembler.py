@@ -5,18 +5,17 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from contextlib import ExitStack
 
 from deepagents.backends.protocol import BackendProtocol
 
 from config.config import Config
-from internal.core.agent_v2.assembly.context.memory_context import MemoryContextAssembler
+from internal.core.agent_v2.assembly.context.memory_context import build_memory_context
 from internal.core.agent_v2.entity.runtime_resources import AgentRuntimeResources
 from internal.core.agent_v2.assembly.context.sandbox_context import (
-    SandboxContextAssembler,
-    SandboxProjection,
     build_filesystem_permissions,
 )
-from internal.core.agent_v2.assembly.context.skill_context import SkillContextAssembler
+from internal.core.agent_v2.assembly.context.skill_context import build_skill_context
 from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
 from internal.core.agent_v2.assembly.graph.deep_agent_factory import build_deep_agent
 from internal.core.agent_v2.observability.telemetry import AgentTelemetry
@@ -29,6 +28,7 @@ from internal.core.agent_v2.backends.composition.composite_backend_factory impor
 )
 from internal.core.agent_v2.backends.sandbox.sandbox_backend_factory import (
     build_stable_sandbox_name,
+    build_sandbox_backend,
 )
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.agent_config import AgentConfig
@@ -57,23 +57,29 @@ class AgentRuntimeAssembler:
     ) -> AgentExecutor:
         """装配运行时和图；平台通过回调写入附件，不接管运行资源的生命周期。"""
         # 1.接收平台创建的 Workspace，其底层 Session 由实现自己管理。
-        workspace: WorkspaceBackend | None = None
-        sandbox: SandboxProjection | None = None
-        backend: BackendProtocol | None = None
-        skill_projection = None
+        # 部分资源即创建即登记，组合成功后整体交接所有权。
+        cleanup = ExitStack()
+        workspace_cleanup = ExitStack()
+        skill_cleanup = ExitStack()
+        cleanup.callback(skill_cleanup.close)
+        cleanup.callback(workspace_cleanup.close)
         phase_started_at = time.monotonic()
         try:
             telemetry = AgentTelemetry(observer.record, attributes=context.telemetry_attributes)
             workspace = self.workspace_factory(context, telemetry)
-            skill_projection = SkillContextAssembler().build(
+            workspace_cleanup.callback(close_runtime_backends, workspace)
+            skill_projection = build_skill_context(
                 skills=list(definition.skills),
                 selected_skill_names=definition.selected_skills,
                 subagents=definition.subagents,
             )
-            memory = MemoryContextAssembler(store_provider=get_configured_store).build(
+            for route in skill_projection.routes.values():
+                skill_cleanup.callback(close_runtime_backends, route)
+            memory = build_memory_context(
+                store_provider=get_configured_store,
                 enabled=context.memory_enabled,
             )
-            sandbox = SandboxContextAssembler().build(
+            sandbox = build_sandbox_backend(
                 settings=self.config,
                 workspace=workspace,
                 sandbox_name=build_stable_sandbox_name(
@@ -82,9 +88,14 @@ class AgentRuntimeAssembler:
                     conversation_id=context.conversation_id,
                     agent_id=context.agent_id,
                 ),
-                skill_projection=skill_projection,
+                skill_files=skill_projection.files,
                 telemetry=telemetry,
             )
+
+            if sandbox is not None:
+                # Sandbox 接管 Workspace，不能同时登记两者的关闭回调。
+                workspace_cleanup.pop_all()
+                workspace_cleanup.callback(close_runtime_backends, sandbox)
 
             # 2.组合 Backend 和持久化资源，后续失败由组合 Backend 统一清理。
             backend = build_composite_backend(
@@ -93,8 +104,11 @@ class AgentRuntimeAssembler:
                     **skill_projection.routes,
                     **memory.routes,
                 },
-                sandbox=sandbox.backend if sandbox is not None else None,
+                sandbox=sandbox,
             )
+            # CompositeBackend 已接管全部独占 Backend，取消逐项关闭登记。
+            cleanup.pop_all()
+            cleanup.callback(close_runtime_backends, backend)
             runtime = AgentRuntimeResources(
                 checkpointer=get_configured_checkpointer(),
                 backend=backend,
@@ -106,6 +120,7 @@ class AgentRuntimeAssembler:
                 subagent_skill_sources=skill_projection.subagent_sources,
                 store=memory.store,
                 runtime_context=context,
+                _cleanup=cleanup,
             )
             runtime_ms = (time.monotonic() - phase_started_at) * 1000
             observer.record_stage("assembly.runtime", runtime_ms)
@@ -149,24 +164,12 @@ class AgentRuntimeAssembler:
                 )
             return agent
         except Exception:
-            # 4.只关闭当前资源所有者，避免 Sandbox 与 Workspace 重复释放。
-            if backend is not None:
-                resources = [backend]
-            elif sandbox is not None:
-                # Sandbox 成功创建后已接管 Workspace，关闭时会同步并关闭它。
-                resources = [sandbox.backend]
-            elif workspace is not None:
-                resources = [workspace]
-            else:
-                resources = []
-            if backend is None and skill_projection is not None:
-                resources.extend(skill_projection.routes.values())
-            for resource in resources:
-                try:
-                    close_runtime_backends(resource)
-                except Exception:
-                    logger.exception("Agent 装配失败后的 Backend 清理失败")
+            try:
+                cleanup.close()
+            except Exception:
+                logger.exception("Agent 装配失败后的 Backend 清理失败")
             raise
+
 
 
 __all__ = ["AgentRuntimeAssembler"]

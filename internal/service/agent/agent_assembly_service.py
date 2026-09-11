@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import time
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -15,7 +13,6 @@ from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
-from pydantic import ValidationError
 
 from config.config import Config
 from internal.core.agent_v2 import (
@@ -27,9 +24,8 @@ from internal.core.agent_v2 import (
     SubAgentRuntimeBinding,
 )
 from internal.core.language_model.entities.model_entity import (
-    BaseLanguageModel, ModelEntity, ModelParameter, ModelType,
+    BaseLanguageModel,
 )
-from internal.core.language_model.parameters import canonicalize_parameters
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
@@ -38,7 +34,7 @@ from internal.core.agent_v2.entity.subagent_config import (
     build_published_graph_id,
 )
 from internal.service.agent_protocol.internal_auth import (
-    issue_internal_agent_protocol_token,
+    build_internal_agent_transport,
 )
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
@@ -48,30 +44,25 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
-from internal.model import Account, App, AgentRun
-from internal.core.agent_v2.entity.user_input import build_confirmed_input_context
+from internal.model import Account, App
 from internal.repository import WorkspaceFileStore
 from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
 from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
-from internal.schema.agent.agent_runtime_schema import (
-    AgentInvocation, AgentInvocationContext,
-    WorkbenchModelSettingsResp, WorkbenchModelChoiceResp,
+from internal.entity.agent_invocation import (
+    AgentInvocation,
 )
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
 from internal.schema.app.app_config_schema import AgentAppConfigReq, AppModelConfigReq
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_attachment_service import AgentAttachmentService
+from .agent_model_service import AgentModelService
+from .agent_definition_service import AgentDefinitionService
+from .agent_workbench_run_service import AgentWorkbenchRunService
 from internal.service.app.app_config_service import AppConfigService
 from .assistant_agent_service import AssistantAgentService
 from internal.service.language_model.language_model_service import LanguageModelService
 from internal.service.dataset.retrieval_service import RetrievalService
 from internal.service.skill.skill_service import SkillService
-
-
-_MODEL_SELECTABLE_SOURCES = frozenset({
-    InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT,
-})
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,15 +85,17 @@ class AgentAssemblyService:
     """解析平台应用、授权能力和输入，将资源装配交给 Agent Core。"""
 
     db: SQLAlchemy
+    run_service: AgentWorkbenchRunService
     app_config_service: AppConfigService
     retrieval_service: RetrievalService
     language_model_service: LanguageModelService
+    model_service: AgentModelService
+    definition_service: AgentDefinitionService
     agent_attachment_service: AgentAttachmentService
     assistant_agent_service: AssistantAgentService
     skill_service: SkillService
     workspace_file_store: WorkspaceFileStore
     config: Config
-
 
     def build_agent(
         self,
@@ -138,7 +131,7 @@ class AgentAssemblyService:
             memory_enabled=definition.config.long_term_memory.enable,
             planning_enabled=req.planning_enabled,
             user_input_enabled=req.user_input_enabled and definition.config.user_input.enable,
-            confirmed_user_inputs=self._confirmed_input_context(req),
+            confirmed_user_inputs=self.run_service.get_confirmed_input_context(req),
         )
         skills = self.skill_service.resolve_enabled_skills(definition.config.skills)
         agent_config = AgentConfig(
@@ -189,103 +182,6 @@ class AgentAssemblyService:
         self._log_build_timing(req, "total", build_started_at, observer)
         return agent, input_message
 
-    def get_definition_fingerprint(self, req: AgentInvocation) -> str:
-        """绑定暂停前的应用配置，避免恢复时使用不同的图装配定义。"""
-        name, description, _, config = self._load_app_configuration(req)
-        return self._definition_fingerprint(name, description, config)
-
-    def resolve_workbench_model(
-        self,
-        context: AgentInvocationContext,
-        selection: WorkbenchModelSelection | None = None,
-    ) -> AppModelConfigReq | None:
-        """创建者可覆盖自己的已激活模型；公开入口不能借此选择账号中的其他连接。"""
-        config, _ = self._resolve_workbench_model(context, selection)
-        return config
-
-    def get_workbench_model_settings(
-        self,
-        context: AgentInvocationContext,
-        selection: WorkbenchModelSelection | None = None,
-    ) -> WorkbenchModelSettingsResp:
-        """按已授权入口读取模型设置，公开入口不暴露账号的可选连接目录。"""
-        # 1.复用覆盖校验已经取得的模型；没有模型时返回空设置。
-        config, model = self._resolve_workbench_model(context, selection)
-        account_id = context.account_id
-        if config is None:
-            return WorkbenchModelSettingsResp()
-        if model is None:
-            model = self._get_model_entity(config, account_id)
-        if model is None:
-            return WorkbenchModelSettingsResp()
-
-        # 2.思考强度优先采用应用配置，未设置时才采用模型声明的默认值。
-        parameter = self._reasoning_parameter(model)
-        parameters = canonicalize_parameters(config.parameters)
-        default = parameters.get("reasoning_effort")
-        reasoning_levels = []
-        if parameter is not None:
-            reasoning_levels = [option.value for option in parameter.options]
-            if default is None:
-                default = parameter.default
-
-        # 3.没有显式选择时，仅为允许切换模型的创建者补全当前连接。
-        selected_model = selection
-        can_select_model = context.invoke_from in _MODEL_SELECTABLE_SOURCES and context.created_by == account_id
-        connection_id = config.provider_connection_id or model.attributes.get("provider_api_key_id")
-        needs_default_selection = selected_model is None and can_select_model
-        if needs_default_selection and connection_id:
-            selected_model = WorkbenchModelSelection(
-                provider=config.provider,
-                model=config.model,
-                provider_connection_id=connection_id,
-            )
-
-        # 4.构造响应时只引用已算好的字段，不在响应内部混入权限和回退分支。
-        return WorkbenchModelSettingsResp(
-            model=config.model,
-            provider=config.provider,
-            selected_model=selected_model,
-            model_override=selection,
-            available_models=self._workbench_model_choices(context),
-            reasoning_levels=reasoning_levels,
-            default_reasoning_effort=default,
-        )
-
-    def validate_workbench_reasoning(
-        self,
-        context: AgentInvocationContext,
-        effort: str | None,
-        selection: WorkbenchModelSelection | None = None,
-    ) -> None:
-        """任务覆盖只允许当前模型明确声明的等级，在创建消息前拒绝无效选择。"""
-        # 1.完全没有覆盖时不查模型；只切换模型时仍需校验连接权限。
-        if selection is None and effort is None:
-            return
-        config, model = self._resolve_workbench_model(context, selection)
-        if effort is None:
-            return
-        if model is None and config is not None:
-            model = self._get_model_entity(config, context.account_id)
-
-        # 2.必须在该模型声明的可选强度内，不能仅凭参数名称接受客户端输入。
-        parameter = self._reasoning_parameter(model)
-        if parameter is None:
-            raise ValidateErrorException("当前模型不支持所选思考强度，请重新选择")
-        allowed_efforts = {option.value for option in parameter.options}
-        if effort not in allowed_efforts:
-            raise ValidateErrorException("当前模型不支持所选思考强度，请重新选择")
-
-    def _confirmed_input_context(self, req: AgentInvocation) -> str:
-        """只加载同一授权会话入口的近期答案，不从客户端接收或写入长期记忆。"""
-        rows = (
-            self.db.session.query(AgentRun.state_snapshot["input_history"])
-            .filter(AgentRun.conversation_id == req.conversation_id, AgentRun.app_id == req.app_id,
-                    AgentRun.invoke_from == req.invoke_from.value,
-                    AgentRun.state_snapshot["input_history"].astext.isnot(None))
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(8).all()
-        )
-        return build_confirmed_input_context([history for (history,) in rows if isinstance(history, list)])
 
     def _resolve_definition(
         self,
@@ -295,11 +191,11 @@ class AgentAssemblyService:
         """读取一次应用定义并解析模型、工具和 SubAgent 能力。"""
         # 1.读取草稿或发布配置，并校验本次请求选择的 Skill。
         phase_started_at = time.monotonic()
-        app_name, app_description, account_id, app_config = (
-            self._load_app_configuration(req)
-        )
+        definition = self.definition_service.load(req)
+        app_config = definition.config
+        account_id = definition.account_id
         if req.definition_fingerprint is not None:
-            current_fingerprint = self._definition_fingerprint(app_name, app_description, app_config)
+            current_fingerprint = definition.fingerprint()
             if req.definition_fingerprint != current_fingerprint:
                 raise ValidateErrorException("应用配置已变更，请恢复原配置后继续填写，或创建新会话")
         selected_skills = self._validate_selected_skills(
@@ -316,7 +212,7 @@ class AgentAssemblyService:
                 raise NotFoundException("账号不存在")
             model_override = None
             if req.model_selection:
-                override = self.resolve_workbench_model(req, req.model_selection)
+                override = self.model_service.resolve_for_context(req, req.model_selection)
                 if override is not None:
                     model_override = override.model_dump(mode="json")
             model, tools = self.assistant_agent_service.build_capabilities(
@@ -328,8 +224,10 @@ class AgentAssemblyService:
                 raise ValidateErrorException("Agent 运行配置缺少模型")
             model_config = app_config.model_config_data
             if req.model_selection:
-                model_config = self.resolve_workbench_model(req, req.model_selection)
-            model_config = self._with_reasoning_override(model_config, req.reasoning_effort)
+                model_config, _ = self.model_service.resolve(
+                    req, model_config, req.model_selection, account_id=account_id,
+                )
+            model_config = self.model_service.with_reasoning_override(model_config, req.reasoning_effort)
             model = self.language_model_service.load_language_model(
                 model_config, account_id=account_id,
             )
@@ -358,8 +256,8 @@ class AgentAssemblyService:
 
         # 5.返回不可变的装配快照，供运行时工厂和图工厂继续使用。
         return _ResolvedAgentDefinition(
-            name=app_name,
-            description=app_description,
+            name=definition.name,
+            description=definition.description,
             config=app_config,
             model=model,
             tools=tuple(tools),
@@ -368,147 +266,6 @@ class AgentAssemblyService:
             subagent_bindings=bindings,
         )
 
-    def _resolve_workbench_model(
-        self,
-        context: AgentInvocationContext,
-        selection: WorkbenchModelSelection | None,
-    ) -> tuple[AppModelConfigReq | None, ModelEntity | None]:
-        """保留应用默认参数；只有切换到其他模型或连接时才采用新模型默认值。"""
-        # 1.公开入口不能借用账号的其他模型连接。
-        if selection is not None and context.invoke_from not in _MODEL_SELECTABLE_SOURCES:
-            raise ValidateErrorException("当前入口不允许切换模型")
-
-        # 2.辅助 Agent 读取账号默认模型，其他入口读取草稿或发布配置。
-        if context.invoke_from is InvokeFrom.ASSISTANT_AGENT:
-            default_config = self.language_model_service.get_default_model_config(context.account_id)
-            config = AppModelConfigReq.model_validate(default_config)
-            account_id = context.account_id
-        else:
-            _, _, account_id, app_config = self._load_app_configuration(context)
-            config = app_config.model_config_data
-        if selection is None:
-            return config, None
-
-        # 3.模型覆盖必须同时满足应用归属和调用者身份，且连接仍然启用。
-        if account_id != context.account_id or context.created_by != account_id:
-            raise ValidateErrorException("只能选择当前账号的模型")
-        model = self.language_model_service.get_enabled_model_entity(
-            selection.provider, selection.model, account_id,
-            provider_connection_id=str(selection.provider_connection_id),
-        )
-        if model is None or model.model_type != ModelType.CHAT:
-            raise ValidateErrorException("所选模型未激活或不是对话模型")
-
-        # 4.旧配置未记录连接 ID 时沿用原参数；明确换连接则重建默认参数。
-        same_model = config is not None and (
-            config.provider == selection.provider and config.model == selection.model
-        )
-        same_connection = config is not None and (
-            config.provider_connection_id is None
-            or config.provider_connection_id == selection.provider_connection_id
-        )
-        if same_model and same_connection:
-            return config, model
-        parameters = {
-            parameter.name: parameter.default for parameter in model.parameters
-            if parameter.required and parameter.default is not None
-        }
-        selected_config = AppModelConfigReq(**selection.model_dump(), parameters=parameters)
-        return selected_config, model
-
-    def _workbench_model_choices(self, context: AgentInvocationContext) -> list[WorkbenchModelChoiceResp]:
-        """目录按可信账号和创建者身份过滤，不向 WebApp 或开放 API 暴露。"""
-        if context.invoke_from not in _MODEL_SELECTABLE_SOURCES:
-            return []
-        if context.created_by != context.account_id:
-            return []
-
-        # 1.按账号一次读取模型目录，每个连接保留自己的模型与参数选项。
-        choices = []
-        groups = self.language_model_service.get_language_models(context.account_id, {ModelType.CHAT})
-        for group in groups:
-            for model in group["models"]:
-                parameter = None
-                for item in model.get("parameters", []):
-                    if item["name"] == "reasoning_effort":
-                        parameter = item
-                        break
-                reasoning_levels = []
-                default_effort = None
-                if parameter:
-                    reasoning_levels = [option["value"] for option in parameter.get("options", [])]
-                    default_effort = parameter.get("default")
-                choices.append(WorkbenchModelChoiceResp(
-                    provider=group["provider_name"],
-                    model=model["model_name"],
-                    provider_connection_id=group["connection_id"],
-                    label=model.get("label") or model["model_name"],
-                    connection_name=group["connection_name"],
-                    reasoning_levels=reasoning_levels,
-                    default_reasoning_effort=default_effort,
-                ))
-        return choices
-
-    def _get_model_entity(self, config: AppModelConfigReq, account_id: UUID) -> ModelEntity | None:
-        """查询展示和参数校验共用的模型定义，连接权限仍由模型服务校验。"""
-        connection_id = str(config.provider_connection_id) if config.provider_connection_id else None
-        return self.language_model_service.get_enabled_model_entity(
-            config.provider, config.model, account_id,
-            provider_connection_id=connection_id,
-        )
-
-    @staticmethod
-    def _reasoning_parameter(model: ModelEntity | None) -> ModelParameter | None:
-        """模型不支持推理强度时返回空值，供展示与提交校验一致处理。"""
-        if model is None:
-            return None
-        return next((item for item in model.parameters if item.name == "reasoning_effort"), None)
-
-    @staticmethod
-    def _with_reasoning_override(config: AppModelConfigReq, effort: str | None) -> AppModelConfigReq:
-        """复制调用参数覆盖单个字段，避免改写草稿、发布配置及旧字段别名冲突。"""
-        if effort is None:
-            return config
-        parameters = {key: value for key, value in config.parameters.items()
-                      if key not in {"reasoning_effort", "thinking_level", "thinking"}}
-        return config.model_copy(update={"parameters": {**parameters, "reasoning_effort": effort}})
-
-    @staticmethod
-    def _definition_fingerprint(name: str, description: str, config: AgentAppConfigReq) -> str:
-        """指纹比较规范化后的模型字段，新增模式标记不使未变更的旧待填任务失效。"""
-        payload = config.model_dump(
-            mode="json", exclude={"subagents": {"__all__": {"model_mode"}}},
-        )
-        value = json.dumps([name, description, payload], sort_keys=True, ensure_ascii=True)
-        return hashlib.sha256(value.encode()).hexdigest()
-
-    def _load_app_configuration(
-        self,
-        req: AgentInvocationContext,
-    ) -> tuple[str, str, UUID, AgentAppConfigReq]:
-        """在装配时读取唯一应用配置；内置辅助 Agent 使用代码内定义。"""
-        # 1.Assistant Agent 不依赖 App 配置，直接返回内置定义。
-        if req.invoke_from is InvokeFrom.ASSISTANT_AGENT:
-            return (
-                "应用构建助手",
-                "帮助 Creator 创建应用和工作流。",
-                req.account_id,
-                AgentAppConfigReq(),
-            )
-
-        # 2.读取并校验当前租户可访问的 App。
-        app = self.db.session.get(App, req.app_id)
-        if app is None:
-            raise NotFoundException("应用不存在")
-        try:
-            # 3.Debugger 使用草稿，其余入口使用可执行的发布配置。
-            if req.invoke_from is InvokeFrom.DEBUGGER:
-                app_config = self.app_config_service.get_draft_agent_runtime_config(app)
-            else:
-                app_config = self.app_config_service.get_agent_runtime_config(app)
-        except (ValidationError, ValidateErrorException) as exc:
-            raise ValidateErrorException(f"应用运行配置无效: {exc}") from exc
-        return app.name, app.description, app.account_id, app_config
 
     def _build_configured_tools(
         self,
@@ -634,7 +391,8 @@ class AgentAssemblyService:
         target_id = config.published_app_id
         if target_id is None:
             raise ValidateErrorException(f"子 Agent {config.name!r} 缺少发布应用标识")
-        transport = self._build_internal_async_transport(
+        transport = build_internal_agent_transport(
+            settings=self.config,
             account_id=account_id, parent_app_id=parent_app_id,
             target_app_id=target_id, headers=config.headers,
         )
@@ -704,44 +462,6 @@ class AgentAssemblyService:
         # 4.返回按应用 ID 索引的查询结果。
         return apps_by_id
 
-    def _build_internal_async_transport(
-        self,
-        *,
-        account_id: UUID,
-        parent_app_id: UUID,
-        target_app_id: UUID,
-        headers: dict[str, str],
-    ) -> dict[str, object]:
-        """为平台内部发布 Agent 绑定 URL 和不可伪造的作用域凭证。"""
-        # 1.为父子 Agent 作用域签发短期内部协议 Token。
-        base_url = self.config.AGENT_INTERNAL_PROTOCOL_BASE_URL.rstrip("/")
-        secret = self.config.AGENT_INTERNAL_PROTOCOL_SECRET
-        ttl_seconds = self.config.AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS
-        token = issue_internal_agent_protocol_token(
-            account_id=account_id,
-            parent_app_id=parent_app_id,
-            target_app_id=target_app_id,
-            secret=secret,
-            ttl_seconds=ttl_seconds,
-        )
-
-        # 2.移除配置中可能伪造的内部 Token Header。
-        # 禁止持久化配置伪造内部凭证；大小写不同的 HTTP Header 也必须移除，
-        # 否则 HTTP 客户端可能发送重复 Header，导致服务端解析结果不确定。
-        safe_headers = {
-            key: value
-            for key, value in headers.items()
-            if key.lower() != "x-mydify-internal-token"
-        }
-
-        # 3.返回异步 SubAgent 所需的内部传输参数。
-        return {
-            "url": base_url,
-            "headers": {
-                **safe_headers,
-                "X-MyDify-Internal-Token": token,
-            },
-        }
 
     def _load_subagent_model(
         self,

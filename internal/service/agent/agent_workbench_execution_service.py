@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar
@@ -34,7 +35,7 @@ from internal.core.agent_v2.persistence.postgres_connection import (
 )
 from internal.entity import WorkbenchRun, WorkbenchRunStatus
 from internal.entity.conversation_entity import MessageStatus
-from internal.exception import CustomException
+from internal.exception import CustomException, FailException
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
 from pkg.response import HttpCode
@@ -60,7 +61,28 @@ class AgentWorkbenchRunExecutionService:
     run_service: AgentWorkbenchRunService
     queue_manager: AgentWorkbenchEventQueueManager
 
+    _RUN_WORKERS: ClassVar[int] = 4
+    _run_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=_RUN_WORKERS, thread_name_prefix="agent-workbench")
+    _run_slots: ClassVar[threading.BoundedSemaphore] = threading.BoundedSemaphore(_RUN_WORKERS)
+
     _persistence_batch_size: ClassVar[int] = 8
+
+    def launch(self, run: WorkbenchRun) -> None:
+        """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。"""
+        try:
+            if not self._run_slots.acquire(blocking=False):
+                raise FailException("当前 Agent 执行繁忙，请稍后重试")
+            self.queue_manager.register(run)
+            self._run_executor.submit(
+                self._execute_background_run,
+                current_app._get_current_object(),
+                run,
+            )
+        except Exception as exc:
+            if self.queue_manager.get(run.conversation_id) is run:
+                self._run_slots.release()
+            self._fail_background_run(run, exc)
+            raise
 
     def execute(self, run: WorkbenchRun) -> None:
         """编排执行、尾批交付和终态保存，本地登记始终由最外层清理。"""
@@ -218,7 +240,58 @@ class AgentWorkbenchRunExecutionService:
         """在同一事务中保存消息、快照和终态事件，提交后通知失败不改写结果。"""
         # 1.按执行结果确定消息状态和公开提示；未知异常详情只用于内部排障。
         status = WorkbenchRunStatus(result.status)
-        error = result.error
+        message_updates, lifecycle = self._prepare_result_status(run, status, result.error)
+
+        # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
+        state = self._build_final_state(run, result)
+
+        # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
+        lifecycle.update(
+            message_id=str(run.spec.message_id),
+            input_message_id=run.spec.input_message_id,
+        )
+        raw_events = projector.generated_state_transition(state, lifecycle)
+        events = []
+        for raw in raw_events:
+            event = AgentProtocolEventProjector.to_public_event(raw)
+            if event is not None:
+                events.append(event)
+
+        # 4.回答、用量、Run 状态和事件一次提交；旧执行实例无权覆盖已收敛状态。
+        if result.answer:
+            message_updates["answer"] = result.answer
+        message_updates["latency"] = latency
+        message_updates.update(ConversationService.build_run_usage_updates(result.usage))
+        committed = self.run_service.finalize_run(
+            run,
+            status,
+            error_message=str(result.error) if result.error is not None else "",
+            message_updates=message_updates,
+            observability=result.observability,
+            events=events,
+            state_snapshot=state,
+        )
+        if not committed:
+            return
+        run.status = status
+
+        # 5.提交之后才推进本地游标、通知订阅者；通知失败保留已提交的业务结果。
+        try:
+            for event in events:
+                self._publish_event(run, event, persist_database=False)
+        except Exception:
+            logger.exception(
+                "Agent 工作台终态事件发布失败 run_id=%s，保留已持久化终态",
+                run.run_id,
+            )
+
+    def _prepare_result_status(
+        self,
+        run: WorkbenchRun,
+        status: WorkbenchRunStatus,
+        error: Exception | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """映射公开消息与生命周期；失败详情只写内部日志和运行错误字段。"""
         message_updates: dict[str, Any]
         lifecycle: dict[str, Any]
         if status is WorkbenchRunStatus.WAITING_INPUT:
@@ -264,7 +337,10 @@ class AgentWorkbenchRunExecutionService:
                     exc_info=(type(error), error, error.__traceback__),
                 )
 
-        # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
+        return message_updates, lifecycle
+
+    def _build_final_state(self, run: WorkbenchRun, result: AgentExecutionResult) -> dict[str, Any]:
+        """保留已提交的回答历史，仅从本次执行结果补充公开状态与待填表单。"""
         public_state = {}
         for key in ("todos", "files", "async_tasks"):
             if key in result.state:
@@ -284,50 +360,7 @@ class AgentWorkbenchRunExecutionService:
             input_recovery=None,
         )
 
-        # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
-        raw_events = [projector.generated("values", state)]
-        for item in pending:
-            raw_events.append(projector.generated("input.requested", {
-                "interrupt_id": item["interrupt_id"], "payload": item["payload"],
-            }))
-        lifecycle.update(
-            message_id=str(run.spec.message_id),
-            input_message_id=run.spec.input_message_id,
-        )
-        raw_events.append(projector.generated("lifecycle", lifecycle))
-        events = []
-        for raw in raw_events:
-            event = AgentProtocolEventProjector.to_public_event(raw)
-            if event is not None:
-                events.append(event)
-
-        # 4.回答、用量、Run 状态和事件一次提交；旧执行实例无权覆盖已收敛状态。
-        if result.answer:
-            message_updates["answer"] = result.answer
-        message_updates["latency"] = latency
-        message_updates.update(ConversationService.build_run_usage_updates(result.usage))
-        committed = self.run_service.finalize_run(
-            run,
-            status,
-            error_message=str(result.error) if result.error is not None else "",
-            message_updates=message_updates,
-            observability=result.observability,
-            events=events,
-            state_snapshot=state,
-        )
-        if not committed:
-            return
-        run.status = status
-
-        # 5.提交之后才推进本地游标、通知订阅者；通知失败保留已提交的业务结果。
-        try:
-            for event in events:
-                self._publish_event(run, event, persist_database=False)
-        except Exception:
-            logger.exception(
-                "Agent 工作台终态事件发布失败 run_id=%s，保留已持久化终态",
-                run.run_id,
-            )
+        return state
 
     def _watch_cancel(
         self,
@@ -370,6 +403,91 @@ class AgentWorkbenchRunExecutionService:
         run.last_event_sequence = event.seq
         self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
         return event
+
+    def _execute_background_run(self, flask_app: Flask, run: WorkbenchRun) -> None:
+        """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
+        with flask_app.app_context():
+            lease_done = threading.Event()
+            lease_monitor = threading.Thread(
+                target=self._watch_run_lease,
+                args=(flask_app, run, lease_done),
+                name=f"agent-lease-{run.run_id}",
+                daemon=True,
+            )
+            try:
+                if not self.run_service.renew_lease(run):
+                    raise FailException("Agent Run 执行权已失效")
+                lease_monitor.start()
+                self.execute(run)
+            except Exception as exc:
+                self._fail_background_run(run, exc)
+            finally:
+                lease_done.set()
+                if lease_monitor.ident is not None:
+                    lease_monitor.join(timeout=1)
+                self.db.session.remove()
+                self._run_slots.release()
+
+    def _watch_run_lease(
+        self, flask_app: Flask, run: WorkbenchRun, done: threading.Event
+    ) -> None:
+        """从装配开始独立续租，模型无输出或工具耗时不会被误判为进程退出。"""
+        last_renewed = time.monotonic()
+        with flask_app.app_context():
+            while not done.wait(10):
+                try:
+                    if not self.run_service.renew_lease(run):
+                        run.cancel_requested.set()
+                        return
+                    last_renewed = time.monotonic()
+                except Exception:
+                    logger.exception("Agent Run 心跳更新失败 run_id=%s", run.run_id)
+                    if time.monotonic() - last_renewed >= self.run_service.lease_seconds:
+                        run.cancel_requested.set()
+                        return
+                finally:
+                    self.db.session.remove()
+
+    def _fail_background_run(self, run: WorkbenchRun, exc: Exception) -> None:
+        """后台执行异常时保证数据库状态和本地队列都进入终态。"""
+        run.error_message = str(exc)
+        event = WorkbenchEvent(
+            type="event",
+            event_id=f"{run.run_id}:{run.last_event_sequence + 1}",
+            seq=run.last_event_sequence + 1,
+            method="lifecycle",
+            params={
+                "data": {
+                    "event": "failed",
+                    "status": "failed",
+                    "error": "Agent 运行失败",
+                    "message_id": str(run.spec.message_id),
+                    "input_message_id": run.spec.input_message_id,
+                }
+            },
+        )
+        try:
+            committed = self.run_service.finalize_run(
+                run,
+                WorkbenchRunStatus.FAILED,
+                error_message=str(exc),
+                message_updates={"status": "error", "error": "Agent 运行失败"},
+                events=[event],
+            )
+            if committed:
+                run.status = WorkbenchRunStatus.FAILED
+                run.last_event_sequence = event.seq
+                self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
+        except Exception:
+            logger.exception("保存 Agent Run 后台失败状态失败")
+        finally:
+            self.queue_manager.finish(run)
+        logger.error(
+            "Agent 工作台后台执行失败",
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+
 
 
 __all__ = ["AgentWorkbenchRunExecutionService"]

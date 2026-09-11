@@ -29,7 +29,9 @@ from internal.model import (
     WechatMessage,
     Conversation,
 )
-from internal.schema.agent.agent_runtime_schema import AgentInvocation
+from internal.entity.agent_invocation import (
+    AgentInvocation,
+)
 from pkg.sqlalchemy import SQLAlchemy
 
 from internal.service.agent.agent_assembly_service import AgentAssemblyService

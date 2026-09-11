@@ -19,10 +19,12 @@ from internal.entity.conversation_entity import (
 )
 from internal.extension.logging_extension import logger
 from pkg.sqlalchemy import SQLAlchemy
-from internal.schema.agent.agent_runtime_schema import (
+from internal.schema.agent.agent_cleanup_schema import (
     AgentConversationCleanupReq,
-    AgentInvocationContext,
     AgentMessageCleanupReq,
+)
+from internal.entity.agent_invocation import (
+    AgentInvocationContext,
 )
 from internal.service.common.base_service import BaseService
 from internal.service.agent.agent_conversation_cleanup_service import AgentConversationCleanupService

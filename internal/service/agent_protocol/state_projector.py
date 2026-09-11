@@ -54,6 +54,32 @@ def project_run_history(
     return sorted(events, key=lambda event: event.seq)
 
 
+def project_pending_tasks(
+    status: str,
+    values: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """把待输入快照转换为工作台任务，保持客户端表单协议结构。"""
+    if status != "waiting_input":
+        return []
+
+    tasks = []
+    for item in values.get("pending_inputs", []):
+        interrupt_id = item["interrupt_id"]
+        interrupt = {
+            "id": interrupt_id,
+            "value": item["payload"],
+            "ns": item.get("namespace", []),
+        }
+        tasks.append(
+            {
+                "id": interrupt_id,
+                "name": "ask_user",
+                "interrupts": [interrupt],
+            }
+        )
+    return tasks
+
+
 def _build_terminal_event(run: AgentRun, sequence: int) -> WorkbenchEvent:
     """从权威终态恢复生命周期事件；内部错误详情不进入公开响应。"""
     data = {

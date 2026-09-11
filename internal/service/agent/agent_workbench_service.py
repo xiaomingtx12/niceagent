@@ -1,27 +1,13 @@
-"""工作台运行启动、状态查询、取消和事件订阅。"""
+"""Agent 运行命令：启动、取消、提交答案与重新填写。"""
 
 from __future__ import annotations
 
-import threading
-import time
-from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Iterator, Mapping
-from copy import deepcopy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from flask import Flask, current_app
 from injector import inject
-
-from internal.service.agent_protocol.message_projector import (
-    project_conversation_messages,
-)
-from internal.service.agent_protocol.state_projector import (
-    project_run_history,
-    project_snapshot_values,
-)
 from internal.entity import (
     WORKBENCH_ACTIVE_STATUSES,
     WORKBENCH_TERMINAL_STATUSES,
@@ -29,355 +15,197 @@ from internal.entity import (
     WorkbenchRunInput,
     WorkbenchRunStatus,
 )
-from internal.exception import FailException, NotFoundException, ValidateErrorException
-from internal.core.agent_v2.entity.user_input import PendingUserInput
-from internal.extension.logging_extension import logger
-from internal.model import Account, AgentRun, AgentRunEvent, Conversation, Message
-from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
-from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
-from internal.schema.agent.agent_workbench_read_schema import (
-    WorkbenchRunEventsResp,
-    WorkbenchStateView,
+from internal.entity.agent_run_interaction import (
+    AgentRunInteraction,
+    InvalidInputAnswer,
+    RunAccepted,
+    RunRejected,
+    RunCancellation,
 )
-from internal.schema.agent.agent_runtime_schema import (
+from internal.exception import NotFoundException, ValidateErrorException
+from internal.model import AgentRun
+from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
+from internal.entity.agent_invocation import (
     AgentInvocation,
     AgentInvocationContext,
-    WorkbenchModelSettingsResp,
 )
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
-from internal.schema.agent.agent_workbench_schema import (
-    WorkbenchCancelResp,
-    WorkbenchCommandErrorResp,
-    WorkbenchCommandSuccessResp,
-    WorkbenchEvent,
-    WorkbenchRunObservabilityResp,
-    WorkbenchMessagePageInfoResp,
-    WorkbenchRunMetadataResp,
-    WorkbenchStateResp,
-    WorkbenchEventStreamReq,
-    WorkbenchInputRespondReq,
-    WorkbenchInputReopenReq,
-)
+from internal.service.conversation.conversation_service import ConversationService
 from pkg.sqlalchemy import SQLAlchemy
-
+from .agent_definition_service import AgentDefinitionService
+from .agent_model_service import AgentModelService
 from .agent_attachment_service import AgentAttachmentService
 from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
 from .agent_workbench_execution_service import AgentWorkbenchRunExecutionService
 from .agent_workbench_run_service import AgentWorkbenchRunService
-from internal.service.conversation.conversation_service import ConversationService
+
 
 @inject
 @dataclass
 class AgentWorkbenchService:
-    """消费可信调用上下文，编排 Run、状态、取消和事件订阅。"""
-
-    _SSE_HEARTBEAT_SECONDS = 15
-    _RUN_WORKERS = 4
-    _run_executor = ThreadPoolExecutor(
-        max_workers=_RUN_WORKERS,
-        thread_name_prefix="agent-workbench",
-    )
-    _run_slots = threading.BoundedSemaphore(_RUN_WORKERS)
+    """编排业务规则与事务；查询、协议响应及后台执行由各自模块负责。"""
 
     db: SQLAlchemy
     run_service: AgentWorkbenchRunService
     queue_manager: AgentWorkbenchEventQueueManager
     execution_service: AgentWorkbenchRunExecutionService
+    definition_service: AgentDefinitionService
+    model_service: AgentModelService
     attachment_service: AgentAttachmentService
     conversation_service: ConversationService
 
-    def subscribe(
+    def start_run(
         self,
         *,
         context: AgentInvocationContext,
-        stream_request: WorkbenchEventStreamReq,
-    ) -> Iterator[dict[str, Any] | None]:
-        """创建事件流；数据库 Session 在流开始前释放，避免占用请求连接。"""
-        # 1.权限校验已在 Handler 调用上下文时完成；这里释放请求 Session，避免流连接长期占用。
-        run_id = stream_request.run_id
-        run = self.run_service.get_run(run_id, recover=False)
-        if (
-            run is None
-            or run.app_id != context.app_id
-            or run.conversation_id != context.conversation_id
-            or run.invoke_from != context.invoke_from.value
-        ):
-            raise NotFoundException("Agent Run 不存在或不属于当前会话")
-        self.db.session.close()
-        # 2.返回延迟执行的生成器，首批事件会在 SSE 响应开始迭代后读取。
-        return self._stream_events(
-            context=context, stream_request=stream_request, run_id=run_id
+        run_input: WorkbenchRunInput,
+        user_input_enabled: bool = True,
+    ) -> RunAccepted | RunRejected:
+        """锁定会话后完成去重和创建，提交成功才注册并启动后台执行。"""
+        conversation_id = context.conversation_id
+        self.run_service.recover_stale_runs(conversation_id=conversation_id)
+
+        with self.db.auto_commit():
+            self.run_service.lock_conversation(context)
+            duplicate_response = self._check_duplicate_start(
+                context=context,
+                run_input=run_input,
+            )
+            if duplicate_response is not None:
+                return duplicate_response
+            conflict_response = self._check_start_conflict(
+                context=context,
+            )
+            if conflict_response is not None:
+                return conflict_response
+            run, sequence = self._create_run(
+                context=context,
+                run_input=run_input,
+                user_input_enabled=user_input_enabled,
+            )
+
+        # 提交成功后登记本地 Run，并在独立 Flask 上下文中启动执行。
+        self.execution_service.launch(run)
+        return RunAccepted(
+            run_id=run.run_id,
+            sequence=sequence,
         )
 
-    def _stream_events(
+    def respond_input(
         self,
         *,
         context: AgentInvocationContext,
-        stream_request: WorkbenchEventStreamReq,
-        run_id: UUID,
-    ) -> Iterator[dict[str, Any] | None]:
-        """读取已提交事件并产生 SSE 心跳哨兵，队列管理器只负责事件通知。"""
-        # 1.从客户端游标开始续传；游标只根据已扫描的事件批次推进。
-        cursor = stream_request.since
-        heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
-        with self.queue_manager.watch_events(
-            context.conversation_id, context.invoke_from
-        ) as signal:
-            while True:
-                # 2.先记录通知版本，再查询数据库，避免查询期间的提交被漏掉。
-                version = signal.snapshot()
-                try:
-                    # 3.共享已提交事件批次；失联 Run 由后台 sweeper 收敛。
-                    batch = signal.read_events(
-                        cursor,
-                        load=lambda: self.run_service.get_reconnect_events(
-                            conversation_id=context.conversation_id,
-                            invoke_from=context.invoke_from,
-                            run_id=run_id,
-                            since=cursor,
-                        ),
-                    )
-                finally:
-                    # 4.每批查询结束立即释放线程 Session，下一批读取时重新获取连接。
-                    self.db.session.close()
-
-                # 5.过滤只影响发送内容，不影响内部游标，避免被过滤事件反复扫描。
-                for event in batch.events:
-                    if stream_request.matches(event):
-                        yield event.model_dump(mode="json")
-                terminal = any(
-                    event.method == "lifecycle"
-                    and isinstance(event.params.data, Mapping)
-                    and event.params.data.get("status") in WORKBENCH_TERMINAL_STATUSES
-                    for event in batch.events
+        answers: Mapping[str, Any],
+    ) -> RunAccepted | RunRejected:
+        """锁定会话与暂停 Run，验证答案并原子认领唯一恢复执行权。"""
+        with self.db.auto_commit():
+            # 1.先锁会话再锁最新 Run，与启动和重新填写保持同一锁顺序。
+            self.run_service.lock_conversation(context)
+            row = (
+                self.db.session.query(AgentRun)
+                .populate_existing()
+                .filter(
+                    AgentRun.conversation_id == context.conversation_id,
+                    AgentRun.app_id == context.app_id,
+                    AgentRun.invoke_from == context.invoke_from.value,
                 )
-                cursor = batch.next_sequence
-
-                if time.monotonic() >= heartbeat_at:
-                    # 6.心跳仅维持 SSE 连接；None 由响应适配器编码为注释行，不进入业务事件流。
-                    yield None
-                    heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
-                if not batch.has_more:
-                    if terminal:
-                        return
-                    if not batch.events:
-                        status = self.run_service.get_run_status(run_id)
-                        if status in WORKBENCH_TERMINAL_STATUSES:
-                            return
-                    # 7.当前批次已读完才等待通知；仍有后续批次时立即继续读取。
-                    signal.wait(version, timeout=0.5)
-
-    def get_state(
-        self,
-        *,
-        context: AgentInvocationContext,
-        view: WorkbenchStateView = "full",
-    ) -> WorkbenchStateResp:
-        """使用入口已校验的上下文读取工作台状态。"""
-        if view == "status":
-            metadata = self.run_service.get_run_metadata(
-                conversation_id=context.conversation_id, invoke_from=context.invoke_from,
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                .with_for_update()
+                .first()
             )
-            return WorkbenchStateResp(
-                metadata=metadata,
-                next=["agent"] if metadata.status in WORKBENCH_ACTIVE_STATUSES else [],
-            )
-        # 1.由会话服务读取业务消息和稳定游标，再关联对应的 Agent Run。
-        rows, has_more, next_before = self.conversation_service.get_message_page(
-            conversation_id=context.conversation_id,
-            page_size=20,
-        )
-        message_page = WorkbenchMessagePageInfoResp(
-            has_more=has_more,
-            next_before=next_before,
-        )
-        message_ids = [message.id for message in rows]
-        persisted_runs = self.run_service.list_state_runs(
-            conversation_id=context.conversation_id,
-            invoke_from=context.invoke_from,
-            message_ids=message_ids,
-        )
-        messages = project_conversation_messages(
-            rows, runs_by_message={run.message_id: run for run in persisted_runs}
-        )
-        latest_run = persisted_runs[-1] if persisted_runs else None
-
-        # 2.只读取已提交的快照，状态查询与跨进程 SSE 使用同一数据源。
-        source_snapshot: Mapping[str, Any] = {}
-        if latest_run is not None and isinstance(latest_run.state_snapshot, Mapping):
-            source_snapshot = latest_run.state_snapshot
-        values = project_snapshot_values(source_snapshot)
-        values["messages"] = [
-            message.model_dump(mode="json") for message in messages
-        ]
-        if latest_run is not None and latest_run.status in WORKBENCH_ACTIVE_STATUSES:
-            current_ids = {
-                str(latest_run.input_message_id),
-                f"{latest_run.message_id}:human",
-                f"{latest_run.message_id}:assistant",
-            }
-            pending_messages = []
-            for message in source_snapshot.get("messages", []):
-                if not isinstance(message, dict):
-                    continue
-                if message.get("id") in current_ids:
-                    pending_messages.append(message)
-            by_id = {message["id"]: message for message in values["messages"]}
-            by_id.update({message["id"]: message for message in pending_messages})
-            values["messages"] = list(by_id.values())
-        values["message_page"] = message_page.model_dump(mode="json")
-
-        # 3.恢复运行详情；合成快照仅用于水合，不参与 SSE 游标。
-        values.update(self._project_state_events(persisted_runs, view=view))
-
-        # 4.当前运行优先，找不到运行记录时返回空闲状态。
-        if latest_run is None:
-            run_id, status, last_event_sequence = None, "idle", 0
-        else:
-            run_id = latest_run.id
-            status = str(latest_run.status)
-            last_event_sequence = int(latest_run.last_event_sequence or 0)
-        # 5.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
-        tasks = self._build_pending_tasks(status, values)
-        return WorkbenchStateResp(
-            values=values,
-            next=["agent"] if status in WORKBENCH_ACTIVE_STATUSES else [],
-            tasks=tasks,
-            metadata=WorkbenchRunMetadataResp(
-                run_id=run_id,
-                status=status,
-                last_event_sequence=last_event_sequence,
-            ),
-        )
-
-    def _project_state_events(
-        self,
-        persisted_runs: list[AgentRun],
-        *,
-        view: WorkbenchStateView,
-    ) -> dict[str, Any]:
-        """按视图读取运行事件；compact 终态只读取上下文事件摘要。"""
-        deferred_ids: set[UUID] = set()
-        if view == "compact":
-            deferred_ids = {
-                run.id
-                for run in persisted_runs
-                if run.status in WORKBENCH_TERMINAL_STATUSES
-            }
-
-        event_run_ids = [run.id for run in persisted_runs if run.id not in deferred_ids]
-        events_by_run = self.run_service.list_events_by_run(event_run_ids)
-        if deferred_ids:
-            events_by_run.update(
-                self.run_service.list_context_events_by_run(list(deferred_ids))
-            )
-
-        result = {
-            "workbench_events": [
-                event.model_dump(mode="json")
-                for event in project_run_history(persisted_runs, events_by_run)
-            ]
-        }
-        if view == "compact":
-            result["deferred_run_ids"] = [
-                str(run.id) for run in persisted_runs if run.id in deferred_ids
-            ]
-        return result
-
-    @staticmethod
-    def _build_pending_tasks(
-        status: str,
-        values: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
-        """把待输入快照转换为工作台任务，保持客户端表单协议结构。"""
-        if status != "waiting_input":
-            return []
-
-        tasks = []
-        for item in values.get("pending_inputs", []):
-            interrupt_id = item["interrupt_id"]
-            interrupt = {
-                "id": interrupt_id,
-                "value": item["payload"],
-                "ns": item.get("namespace", []),
-            }
-            tasks.append(
-                {
-                    "id": interrupt_id,
-                    "name": "ask_user",
-                    "interrupts": [interrupt],
-                }
-            )
-        return tasks
-
-    def get_run_events(
-        self, *, run_id: UUID, account: Account, current_page: int, page_size: int,
-    ) -> WorkbenchRunEventsResp:
-        """沿用观测接口的会话所有权校验，详情查询不执行失联恢复。"""
-        row = (
-            self.db.session.query(AgentRun.app_id, AgentRun.conversation_id)
-            .filter(AgentRun.id == run_id)
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("Agent Run 不存在")
-        self.conversation_service.get_owned_conversation(
-            conversation_id=row.conversation_id, app_id=row.app_id, account=account,
-        )
-        return self.run_service.get_run_event_page(
-            run_id=run_id, current_page=current_page, page_size=page_size,
-        )
-
-    def get_model_settings(self, *, context: AgentInvocationContext) -> WorkbenchModelSettingsResp:
-        """独立读取当前可用模型配置，恢复最近一次覆盖时不加载消息和运行事件。"""
-        saved = self.run_service.get_latest_model_overrides(
-            conversation_id=context.conversation_id,
-            invoke_from=context.invoke_from,
-        )
-        # 旧记录没有区分默认展示与手动选择，不能据此固定以后运行的模型。
-        if saved.get("model_selection") and saved.get("model_selection_explicit") is not True:
-            saved = {}
-        assembly = self.execution_service.agent_assembly_service
-        # 1.优先恢复历史选择；解析或授权失败时再尝试当前默认配置。
-        settings = None
-        try:
-            raw_selection = saved.get("model_selection")
-            selection = None
-            if raw_selection:
-                selection = WorkbenchModelSelection.model_validate(raw_selection)
-            settings = assembly.get_workbench_model_settings(context, selection)
-        except (NotFoundException, ValidateErrorException, ValueError):
-            # 旧模型被停用后不再恢复它的思考强度，防止套用到另一个模型。
-            saved = {}
-
-        # 2.默认配置也可能失效，此时让客户端展示空设置而不是中断任务页面。
-        if settings is None:
+            if row is None:
+                raise NotFoundException("待回答任务不存在")
+            interaction = AgentRunInteraction(row.status, row.state_snapshot)
             try:
-                settings = assembly.get_workbench_model_settings(context)
-            except (NotFoundException, ValidateErrorException, ValueError):
-                return WorkbenchModelSettingsResp()
-            return settings
-        effort = saved.get("reasoning_effort")
-        if effort in settings.reasoning_levels:
-            settings = settings.model_copy(update={"selected_reasoning_effort": effort})
-        return settings
+                # 重试必须先于状态判断，已恢复的任务也返回首次提交结果。
+                sequence = interaction.submitted_sequence(answers)
+                if sequence is not None:
+                    return RunAccepted(row.id, sequence)
+                validated = interaction.validate_answers(answers)
+            except InvalidInputAnswer as exc:
+                return RunRejected(str(exc), {exc.interrupt_id: {exc.field_name: str(exc)}})
+            except ValueError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+            # 2.前一执行实例释放资源、配置指纹一致后，才允许认领恢复执行权。
+            local_run = self.queue_manager.get(context.conversation_id)
+            if local_run is not None and not local_run.done.is_set():
+                return RunRejected(message="任务正在保存，请稍后重试")
+            invocation = self._restore_input_invocation(
+                context, interaction,
+                changed_message="应用配置已变更，请恢复原配置后继续填写，或创建新会话",
+            )
+            sequence = int(row.last_event_sequence or 0)
+            run = WorkbenchRun(
+                run_id=row.id, conversation_id=context.conversation_id, spec=invocation,
+                initial_event_sequence=sequence, last_event_sequence=sequence, resume=validated,
+            )
+            self.run_service.queue_resumed_run(
+                row, run, interaction.after_submission(answers, validated, sequence),
+            )
+        # 3.提交成功后才启动执行，避免后台读取到尚未保存的回答。
+        self.execution_service.launch(run)
+        return RunAccepted(
+            run_id=run.run_id, sequence=sequence,
+        )
+
+    def reopen_input(
+        self, *, context: AgentInvocationContext, run_id: UUID, cancellation_sequence: int,
+    ) -> RunAccepted | RunRejected:
+        """原子恢复最近一次取消的表单；重新填写前不启动图或获取执行租约。"""
+        with self.db.auto_commit():
+            # 1.锁定会话和最新 Run，仅允许重新填写当前入口最近停止的表单。
+            self.run_service.lock_conversation(context)
+            row = (
+                self.db.session.query(AgentRun)
+                .populate_existing()
+                .filter(AgentRun.conversation_id == context.conversation_id)
+                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                .with_for_update()
+                .first()
+            )
+            if row is None:
+                raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
+            same_run = row.id == run_id and row.app_id == context.app_id
+            same_source = row.invoke_from == context.invoke_from.value
+            if not same_run or not same_source:
+                raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
+            # 2.先核对取消序号和重复请求，再判断当前状态，保证重试仍返回相同结果。
+            interaction = AgentRunInteraction(row.status, row.state_snapshot)
+            try:
+                sequence = interaction.reopened_sequence(cancellation_sequence)
+            except ValueError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+            if sequence is not None:
+                return RunAccepted(row.id, sequence)
+            local_run = self.queue_manager.get(context.conversation_id)
+            if local_run is not None and not local_run.done.is_set():
+                return RunRejected(message="任务正在停止，请稍后重试")
+            # 3.恢复保留的表单与可信身份，拒绝用变更后的应用配置继续旧任务。
+            try:
+                snapshot = interaction.restored_snapshot()
+            except ValueError as exc:
+                raise ValidateErrorException(str(exc)) from exc
+            self._restore_input_invocation(
+                context, interaction,
+                changed_message="应用配置已变更，请恢复原配置后重新填写，或创建新会话",
+            )
+            sequence = self.run_service.reopen_pending_run(
+                row, interaction, snapshot, cancellation_sequence,
+            )
+        # 4.事务提交后再唤醒订阅者，确保它能读到全部表单事件。
+        self.queue_manager.notify_events(context.conversation_id, context.invoke_from)
+        return RunAccepted(
+            run_id=run_id, sequence=sequence,
+        )
 
     def cancel_run(
         self,
         *,
         context: AgentInvocationContext,
         run_id: UUID,
-    ) -> WorkbenchCancelResp:
+    ) -> RunCancellation:
         """使用入口已校验的上下文停止指定 Agent Run。"""
         # 1.校验目标 Run 是否属于本次请求的会话和入口。
-        row = self.run_service.get_run(run_id, recover=False)
-        if (
-            row is None
-            or row.app_id != context.app_id
-            or row.conversation_id != context.conversation_id
-            or row.invoke_from != context.invoke_from.value
-        ):
-            raise NotFoundException("Agent Run 不存在或不属于当前会话")
+        self.run_service.get_context_run(context, run_id)
         # 归属确认后才允许恢复失联状态；未授权请求不能触发写入。
         row = self.run_service.get_run(run_id, recover=True)
         if row is None:
@@ -400,319 +228,32 @@ class AgentWorkbenchService:
         if cancel_requested and row.status != "cancelled":
             response_status = WorkbenchRunStatus.CANCELLING.value
 
-        return WorkbenchCancelResp(
+        return RunCancellation(
             cancel_requested=cancel_requested,
             run_id=row.id,
             status=response_status,
         )
 
-    def get_run_observability(
+    def _restore_input_invocation(
         self,
-        *,
-        run_id: UUID,
-        account: Account,
-    ) -> WorkbenchRunObservabilityResp:
-        """鉴权后读取平台持久化的 Agent Run 观测链路。"""
-        # 1.读取并校验目标 Run 的稳定归属。
-        row = self.run_service.get_run(run_id, recover=False)
-        if row is None:
-            raise NotFoundException("Agent Run 不存在")
-        self.conversation_service.get_owned_conversation(
-            conversation_id=row.conversation_id,
-            account=account,
-            app_id=row.app_id,
-        )
-        # 2.投影平台保存的观测快照，保持查询接口只读。
-        return WorkbenchRunObservabilityResp(
-            run_id=row.id,
-            trace_id=row.id,
-            status=str(row.status),
-            started_at=row.started_at,
-            finished_at=row.finished_at,
-            observability=dict(row.observability or {}),
-        )
-
-    def start_run(
-        self,
-        *,
         context: AgentInvocationContext,
-        run_input: WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq,
-        command_id: int | None = None,
-        user_input_enabled: bool = True,
-    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
-        """锁定会话后完成去重和创建，提交成功才注册并启动后台执行。"""
-        if isinstance(run_input, WorkbenchInputRespondReq):
-            return self.respond_input(context=context, response=run_input, command_id=command_id)
-        if isinstance(run_input, WorkbenchInputReopenReq):
-            return self.reopen_input(context=context, request=run_input, command_id=command_id)
-        conversation_id = context.conversation_id
-        self.run_service.recover_stale_runs(conversation_id=conversation_id)
-
-        with self.db.auto_commit():
-            self._lock_conversation(context)
-            duplicate_response = self._check_duplicate_start(
-                context=context,
-                run_input=run_input,
-                command_id=command_id,
-            )
-            if duplicate_response is not None:
-                return duplicate_response
-            conflict_response = self._check_start_conflict(
-                context=context,
-                command_id=command_id,
-            )
-            if conflict_response is not None:
-                return conflict_response
-            run, sequence = self._create_run(
-                context=context,
-                run_input=run_input,
-                user_input_enabled=user_input_enabled,
-            )
-
-        # 5.提交成功后登记本地 Run，并在独立 Flask 上下文中启动执行。
-        self._launch_run(run)
-        return WorkbenchCommandSuccessResp.create(
-            command_id=command_id,
-            run_id=run.run_id,
-            applied_through_sequence=sequence,
-        )
-
-    def respond_input(
-        self,
+        interaction: AgentRunInteraction,
         *,
-        context: AgentInvocationContext,
-        response: WorkbenchInputRespondReq,
-        command_id: int | None = None,
-    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
-        """锁定会话与暂停 Run，验证答案并原子认领唯一恢复执行权。"""
-        with self.db.auto_commit():
-            # 1.先锁会话再锁最新 Run，与启动和重新填写保持同一锁顺序。
-            conversation = (
-                self.db.session.query(Conversation.id)
-                .filter(
-                    Conversation.id == context.conversation_id,
-                    Conversation.app_id == context.app_id,
-                    Conversation.is_deleted.is_(False),
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if conversation is None:
-                raise NotFoundException("会话不存在或已删除")
-            row = (
-                self.db.session.query(AgentRun)
-                .populate_existing()
-                .filter(
-                    AgentRun.conversation_id == context.conversation_id,
-                    AgentRun.app_id == context.app_id,
-                    AgentRun.invoke_from == context.invoke_from.value,
-                )
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .with_for_update()
-                .first()
-            )
-            if row is None:
-                raise NotFoundException("待回答任务不存在")
-            snapshot = dict(row.state_snapshot or {})
-            interaction = dict(snapshot.get("_interaction") or {})
-            answers = {item.interrupt_id: item.response for item in response.responses}
-            submissions = list(interaction.get("submissions") or [])
-            # 2.相同表单和答案返回上次结果；同表单修改答案则拒绝，其他表单继续查找。
-            for submitted in submissions:
-                if set(submitted["answers"]) != set(answers):
-                    continue
-                if submitted["answers"] != answers:
-                    raise ValidateErrorException("该表单已提交，不能重复修改")
-                return WorkbenchCommandSuccessResp.create(
-                    command_id=command_id, run_id=row.id,
-                    applied_through_sequence=submitted["sequence"],
-                )
-            # 3.答案必须覆盖全部待填表单；字段错误保留表单标识供客户端定位。
-            if row.status != "waiting_input":
-                raise ValidateErrorException("当前任务没有等待填写的表单")
-            pending = [
-                PendingUserInput.model_validate(item)
-                for item in snapshot.get("pending_inputs", [])
-            ]
-            pending_ids = {item.interrupt_id for item in pending}
-            if not pending or set(answers) != pending_ids:
-                raise ValidateErrorException("表单已失效，请刷新后填写所有待回答问题")
-            validated = {}
-            for item in pending:
-                try:
-                    validated[item.interrupt_id] = item.payload.validate_answers(answers[item.interrupt_id])
-                except ValueError as exc:
-                    field_name = getattr(exc, "field_name", None)
-                    if field_name is None:
-                        raise ValidateErrorException(str(exc)) from exc
-                    return WorkbenchCommandErrorResp(
-                        id=command_id,
-                        message=str(exc),
-                        field_errors={item.interrupt_id: {field_name: str(exc)}},
-                    )
-            # 4.前一执行实例释放资源、配置指纹一致后，才允许认领恢复执行权。
-            local_run = self.queue_manager.get(context.conversation_id)
-            if local_run is not None and not local_run.done.is_set():
-                return WorkbenchCommandErrorResp(id=command_id, message="任务正在保存，请稍后重试")
-            invocation = AgentInvocation.model_validate(interaction.get("invocation"))
-            # 恢复身份始终取自本次鉴权，保留原始附件与 Skill 选择。
-            invocation = invocation.model_copy(update=context.model_dump())
-            assembly = self.execution_service.agent_assembly_service
-            current_fingerprint = assembly.get_definition_fingerprint(invocation)
-            if invocation.definition_fingerprint != current_fingerprint:
-                raise ValidateErrorException("应用配置已变更，请恢复原配置后继续填写，或创建新会话")
-            sequence = int(row.last_event_sequence or 0)
-            run = WorkbenchRun(
-                run_id=row.id, conversation_id=context.conversation_id, spec=invocation,
-                initial_event_sequence=sequence, last_event_sequence=sequence, resume=validated,
-            )
-            # 5.回答历史、去重记录和新执行租约必须与 queued 状态一起提交。
-            history = list(snapshot.get("input_history") or [])
-            for item in pending:
-                answered_input = item.model_dump(mode="json")
-                answered_input["answers"] = validated[item.interrupt_id]
-                history.append(answered_input)
-            submissions.append({"answers": deepcopy(answers), "sequence": sequence})
-            row.state_snapshot = {
-                **snapshot,
-                "pending_inputs": [],
-                "input_history": history,
-                "input_recovery": None,
-                "_interaction": {**interaction, "submissions": submissions},
-            }
-            row.status = "queued"
-            row.executor_id = run.executor_id
-            row.heartbeat_at = datetime.now(UTC).replace(tzinfo=None)
-            row.finished_at = None
-        # 6.提交成功后才启动执行，避免后台读取到尚未保存的回答。
-        self._launch_run(run)
-        return WorkbenchCommandSuccessResp.create(
-            command_id=command_id, run_id=run.run_id, applied_through_sequence=sequence,
-        )
-
-    def reopen_input(
-        self, *, context: AgentInvocationContext, request: WorkbenchInputReopenReq,
-        command_id: int | None = None,
-    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
-        """原子恢复最近一次取消的表单；重新填写前不启动图或获取执行租约。"""
-        with self.db.auto_commit():
-            # 1.锁定会话和最新 Run，仅允许重新填写当前入口最近停止的表单。
-            conversation = (
-                self.db.session.query(Conversation.id)
-                .filter(
-                    Conversation.id == context.conversation_id,
-                    Conversation.app_id == context.app_id,
-                    Conversation.is_deleted.is_(False),
-                )
-                .with_for_update()
-                .one_or_none()
-            )
-            if conversation is None:
-                raise NotFoundException("会话不存在或已删除")
-            row = (
-                self.db.session.query(AgentRun)
-                .populate_existing()
-                .filter(AgentRun.conversation_id == context.conversation_id)
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .with_for_update()
-                .first()
-            )
-            if row is None:
-                raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
-            same_run = row.id == request.run_id and row.app_id == context.app_id
-            same_source = row.invoke_from == context.invoke_from.value
-            if not same_run or not same_source:
-                raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
-            # 2.先核对取消序号和重复请求，再判断当前状态，保证重试仍返回相同结果。
-            snapshot = dict(row.state_snapshot or {})
-            interaction = dict(snapshot.get("_interaction") or {})
-            if interaction.get("input_cancellation_sequence") != request.cancellation_sequence:
-                raise ValidateErrorException("任务状态已更新，请刷新后重新操作")
-            if interaction.get("last_reopened_cancellation_sequence") == request.cancellation_sequence:
-                return WorkbenchCommandSuccessResp.create(
-                    command_id=command_id, run_id=row.id,
-                    applied_through_sequence=interaction["reopened_sequence"],
-                )
-            if row.status != "cancelled" or not interaction.get("cancelled_input"):
-                raise ValidateErrorException("当前任务没有可恢复的表单")
-            local_run = self.queue_manager.get(context.conversation_id)
-            if local_run is not None and not local_run.done.is_set():
-                return WorkbenchCommandErrorResp(id=command_id, message="任务正在停止，请稍后重试")
-            # 3.恢复保留的表单与可信身份，拒绝用变更后的应用配置继续旧任务。
-            pending = []
-            for item in interaction.get("cancelled_inputs", []):
-                pending_input = PendingUserInput.model_validate(item)
-                pending.append(pending_input.model_dump(mode="json"))
-            if not pending:
-                raise ValidateErrorException("此任务没有保留待填写内容，请创建新会话")
-            invocation = AgentInvocation.model_validate(interaction.get("invocation"))
-            invocation = invocation.model_copy(update=context.model_dump())
-            assembly = self.execution_service.agent_assembly_service
-            current_fingerprint = assembly.get_definition_fingerprint(invocation)
-            if invocation.definition_fingerprint != current_fingerprint:
-                raise ValidateErrorException("应用配置已变更，请恢复原配置后重新填写，或创建新会话")
-            # 4.重新发布表单和 waiting_input 状态；此步骤不启动 Agent、不续租。
-            snapshot.update(pending_inputs=pending, input_recovery=None)
-            projector = AgentProtocolEventProjector(row.id, start_sequence=int(row.last_event_sequence or 0))
-            events = [projector.generated("values", project_snapshot_values(snapshot))]
-            for item in pending:
-                events.append(projector.generated("input.requested", {
-                    "interrupt_id": item["interrupt_id"], "payload": item["payload"],
-                }))
-            events.append(projector.generated("lifecycle", {
-                "event": "interrupted", "status": "waiting_input", "reason": "input_reopened",
-                "message_id": str(row.message_id), "input_message_id": row.input_message_id,
-            }))
-            for raw in events:
-                event = WorkbenchEvent.model_validate(raw)
-                self.db.session.add(AgentRunEvent(
-                    run_id=row.id, sequence=event.seq, payload=event.model_dump(mode="json"),
-                ))
-            sequence = projector.last_event_sequence
-            # 5.表单快照、重试序号、消息状态及事件在同一事务内保存。
-            snapshot["_interaction"] = {
-                **interaction,
-                "cancelled_input": False,
-                "cancelled_inputs": [],
-                "last_reopened_cancellation_sequence": request.cancellation_sequence,
-                "reopened_sequence": sequence,
-            }
-            row.state_snapshot = snapshot
-            row.status = "waiting_input"
-            row.finished_at = None
-            row.executor_id = None
-            row.last_event_sequence = sequence
-            message = self.db.session.get(Message, row.message_id)
-            if message is not None:
-                message.status = "normal"
-        # 6.事务提交后再唤醒订阅者，确保它能读到全部表单事件。
-        self.queue_manager.notify_events(context.conversation_id, context.invoke_from)
-        return WorkbenchCommandSuccessResp.create(
-            command_id=command_id, run_id=request.run_id, applied_through_sequence=sequence,
-        )
-
-    def _lock_conversation(self, context: AgentInvocationContext) -> None:
-        """锁定当前会话，保证同一会话的启动检查和创建串行执行。"""
-        conversation = (
-            self.db.session.query(Conversation.id)
-            .filter(
-                Conversation.id == context.conversation_id,
-                Conversation.app_id == context.app_id,
-                Conversation.is_deleted.is_(False),
-            )
-            .with_for_update()
-            .one_or_none()
-        )
-        if conversation is None:
-            raise NotFoundException("会话不存在或已删除")
+        changed_message: str,
+    ) -> AgentInvocation:
+        """恢复原始输入但采用当前鉴权身份，图配置变化时拒绝继续旧任务。"""
+        invocation = AgentInvocation.model_validate(interaction.invocation)
+        invocation = invocation.model_copy(update=context.model_dump())
+        if invocation.definition_fingerprint != self.definition_service.get_definition_fingerprint(invocation):
+            raise ValidateErrorException(changed_message)
+        return invocation
 
     def _check_duplicate_start(
         self,
         *,
         context: AgentInvocationContext,
         run_input: WorkbenchRunInput,
-        command_id: int | None,
-    ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp | None:
+    ) -> RunAccepted | RunRejected | None:
         """处理同一输入的重复提交，保证重试返回同一个 Run。"""
         duplicate_run = self.run_service.get_run_by_input_message(
             conversation_id=context.conversation_id,
@@ -721,8 +262,7 @@ class AgentWorkbenchService:
         if duplicate_run is None:
             return None
         if duplicate_run.invoke_from != context.invoke_from.value:
-            return WorkbenchCommandErrorResp(
-                id=command_id,
+            return RunRejected(
                 message="输入消息已用于其他调用入口",
             )
 
@@ -730,18 +270,16 @@ class AgentWorkbenchService:
         applied_sequence = self.run_service.get_initial_event_sequence(duplicate_run)
         if local_run is not None and local_run.run_id == duplicate_run.id:
             applied_sequence = local_run.initial_event_sequence
-        return WorkbenchCommandSuccessResp.create(
-            command_id=command_id,
+        return RunAccepted(
             run_id=duplicate_run.id,
-            applied_through_sequence=applied_sequence,
+            sequence=applied_sequence,
         )
 
     def _check_start_conflict(
         self,
         *,
         context: AgentInvocationContext,
-        command_id: int | None,
-    ) -> WorkbenchCommandErrorResp | None:
+    ) -> RunRejected | None:
         """判断会话是否仍被活动、停止中或待输入的 Run 占用。"""
         active_run = (
             self.db.session.query(AgentRun)
@@ -766,7 +304,7 @@ class AgentWorkbenchService:
                 reason = "请先完成当前表单"
             else:
                 reason = "当前任务已有正在执行的 Agent"
-            return WorkbenchCommandErrorResp(id=command_id, message=reason)
+            return RunRejected(message=reason)
 
         previous = (
             self.db.session.query(AgentRun)
@@ -776,15 +314,8 @@ class AgentWorkbenchService:
         )
         if previous is None or previous.status != "cancelled":
             return None
-        snapshot = previous.state_snapshot or {}
-        interaction = snapshot.get("_interaction", {})
-        if not interaction.get("cancelled_input"):
-            return None
-        if snapshot.get("input_recovery"):
-            reason = "此任务已在表单处停止，请点击重新填写后继续，或创建新会话"
-        else:
-            reason = "此任务已在表单处停止，请创建新会话"
-        return WorkbenchCommandErrorResp(id=command_id, message=reason)
+        reason = AgentRunInteraction(previous.status, previous.state_snapshot).start_conflict()
+        return RunRejected(reason) if reason else None
 
     def _create_run(
         self,
@@ -794,8 +325,7 @@ class AgentWorkbenchService:
         user_input_enabled: bool,
     ) -> tuple[WorkbenchRun, int]:
         """在当前事务中创建消息、Invocation 和本地 Run。"""
-        assembly = self.execution_service.agent_assembly_service
-        assembly.validate_workbench_reasoning(
+        self.model_service.validate_workbench_reasoning(
             context,
             run_input.reasoning_effort,
             run_input.model_selection,
@@ -825,7 +355,7 @@ class AgentWorkbenchService:
             user_input_enabled=user_input_enabled,
         )
         if user_input_enabled:
-            fingerprint = assembly.get_definition_fingerprint(invocation)
+            fingerprint = self.definition_service.get_definition_fingerprint(invocation)
             invocation = invocation.model_copy(
                 update={"definition_fingerprint": fingerprint}
             )
@@ -843,106 +373,6 @@ class AgentWorkbenchService:
         )
         self.run_service.add_run(run)
         return run, sequence
-
-    def _launch_run(self, run: WorkbenchRun) -> None:
-        """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。"""
-        try:
-            if not self._run_slots.acquire(blocking=False):
-                raise FailException("当前 Agent 执行繁忙，请稍后重试")
-            self.queue_manager.register(run)
-            self._run_executor.submit(
-                self._execute_background_run,
-                current_app._get_current_object(),
-                run,
-            )
-        except Exception as exc:
-            if self.queue_manager.get(run.conversation_id) is run:
-                self._run_slots.release()
-            self._fail_background_run(run, exc)
-            raise
-
-    def _execute_background_run(self, flask_app: Flask, run: WorkbenchRun) -> None:
-        """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
-        with flask_app.app_context():
-            lease_done = threading.Event()
-            lease_monitor = threading.Thread(
-                target=self._watch_run_lease,
-                args=(flask_app, run, lease_done),
-                name=f"agent-lease-{run.run_id}",
-                daemon=True,
-            )
-            try:
-                if not self.run_service.renew_lease(run):
-                    raise FailException("Agent Run 执行权已失效")
-                lease_monitor.start()
-                self.execution_service.execute(run)
-            except Exception as exc:
-                self._fail_background_run(run, exc)
-            finally:
-                lease_done.set()
-                if lease_monitor.ident is not None:
-                    lease_monitor.join(timeout=1)
-                self.db.session.remove()
-                self._run_slots.release()
-
-    def _watch_run_lease(
-        self, flask_app: Flask, run: WorkbenchRun, done: threading.Event
-    ) -> None:
-        """从装配开始独立续租，模型无输出或工具耗时不会被误判为进程退出。"""
-        last_renewed = time.monotonic()
-        with flask_app.app_context():
-            while not done.wait(10):
-                try:
-                    if not self.run_service.renew_lease(run):
-                        run.cancel_requested.set()
-                        return
-                    last_renewed = time.monotonic()
-                except Exception:
-                    logger.exception("Agent Run 心跳更新失败 run_id=%s", run.run_id)
-                    if time.monotonic() - last_renewed >= self.run_service.lease_seconds:
-                        run.cancel_requested.set()
-                        return
-                finally:
-                    self.db.session.remove()
-
-    def _fail_background_run(self, run: WorkbenchRun, exc: Exception) -> None:
-        """后台执行异常时保证数据库状态和本地队列都进入终态。"""
-        run.error_message = str(exc)
-        event = WorkbenchEvent(
-            type="event",
-            event_id=f"{run.run_id}:{run.last_event_sequence + 1}",
-            seq=run.last_event_sequence + 1,
-            method="lifecycle",
-            params={
-                "data": {
-                    "event": "failed",
-                    "status": "failed",
-                    "error": "Agent 运行失败",
-                    "message_id": str(run.spec.message_id),
-                    "input_message_id": run.spec.input_message_id,
-                }
-            },
-        )
-        try:
-            committed = self.run_service.finalize_run(
-                run,
-                WorkbenchRunStatus.FAILED,
-                error_message=str(exc),
-                message_updates={"status": "error", "error": "Agent 运行失败"},
-                events=[event],
-            )
-            if committed:
-                run.status = WorkbenchRunStatus.FAILED
-                run.last_event_sequence = event.seq
-                self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
-        except Exception:
-            logger.exception("保存 Agent Run 后台失败状态失败")
-        finally:
-            self.queue_manager.finish(run)
-        logger.error(
-            "Agent 工作台后台执行失败",
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
 
 
 __all__ = ["AgentWorkbenchService"]

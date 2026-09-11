@@ -14,7 +14,9 @@ from internal.schema.agent.agent_tool_schema import (
     CreateAppToolReq,
     WorkflowGeneratorToolReq,
 )
-from internal.schema.agent.agent_runtime_schema import AgentInvocationContext
+from internal.entity.agent_invocation import (
+    AgentInvocationContext,
+)
 from internal.task.app_task import auto_create_app
 from internal.task.workflow_task import (
     auto_generate_workflow,

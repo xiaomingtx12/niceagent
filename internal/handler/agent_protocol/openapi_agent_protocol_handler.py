@@ -16,6 +16,8 @@ from internal.schema import (
     WorkbenchEventStreamReq,
 )
 from internal.service import AgentWorkbenchService, ConversationService
+from internal.service.agent_protocol.command_adapter import execute_command
+from internal.service.agent.agent_workbench_query_service import AgentWorkbenchQueryService
 from pkg.response import json_response, sse_response
 
 
@@ -24,6 +26,7 @@ from pkg.response import json_response, sse_response
 class OpenAPIAgentProtocolHandler:
     """服务 API command、stream、state 和取消适配器。"""
 
+    query_service: AgentWorkbenchQueryService
     service: AgentWorkbenchService
     conversation_service: ConversationService
 
@@ -49,14 +52,14 @@ class OpenAPIAgentProtocolHandler:
         """提交开放 API 的 Agent Protocol 命令。"""
         body = request.get_json(silent=True)
         command = WorkbenchCommandReq.from_mapping(body)
-        result = self.service.start_run(
+        result = execute_command(
+            self.service,
             context=self.conversation_service.get_service_api_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
                 account=current_user,
             ),
-            run_input=command.to_run_input(),
-            command_id=command.command_id,
+            command=command,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
@@ -67,7 +70,7 @@ class OpenAPIAgentProtocolHandler:
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
-        events = self.service.subscribe(
+        events = self.query_service.subscribe(
             context=self.conversation_service.get_service_api_invocation_context(
                 app_id=app_id,
                 conversation_id=conversation_id,
@@ -80,7 +83,7 @@ class OpenAPIAgentProtocolHandler:
     @login_required
     def state(self, app_id: UUID, conversation_id: UUID) -> Response:
         """读取开放 API 会话状态。"""
-        result = self.service.get_state(
+        result = self.query_service.get_state(
             view=WorkbenchStateReq.from_query(request.args).view.data,
             context=self.conversation_service.get_service_api_invocation_context(
                 app_id=app_id,
@@ -94,7 +97,7 @@ class OpenAPIAgentProtocolHandler:
     @login_required
     def model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
         """开放接口只返回已授权应用的模型配置，不提供账号模型目录。"""
-        result = self.service.get_model_settings(context=self.conversation_service.get_service_api_invocation_context(
+        result = self.query_service.get_model_settings(context=self.conversation_service.get_service_api_invocation_context(
             app_id=app_id, conversation_id=conversation_id, account=current_user,
         ))
         return json_response(result.model_dump(mode="json"))
@@ -115,7 +118,7 @@ class OpenAPIAgentProtocolHandler:
             ),
             run_id=run_id,
         )
-        response = WorkbenchCancelResp.model_validate(result)
+        response = WorkbenchCancelResp.model_validate(result, from_attributes=True)
         return json_response(response.model_dump(mode="json"))
 
 

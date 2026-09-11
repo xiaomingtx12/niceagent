@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass
 from uuid import UUID
 
+from config.config import Config
+
 from internal.exception import FailException, UnauthorizedException
 
 
@@ -90,6 +92,46 @@ def parse_internal_agent_protocol_token(
     return claims
 
 
+def build_internal_agent_transport(
+    *,
+    settings: Config,
+    account_id: UUID,
+    parent_app_id: UUID,
+    target_app_id: UUID,
+    headers: dict[str, str],
+) -> dict[str, object]:
+    """为平台内部发布 Agent 绑定 URL 和不可伪造的作用域凭证。"""
+    # 1.为父子 Agent 作用域签发短期内部协议 Token。
+    base_url = settings.AGENT_INTERNAL_PROTOCOL_BASE_URL.rstrip("/")
+    secret = settings.AGENT_INTERNAL_PROTOCOL_SECRET
+    ttl_seconds = settings.AGENT_INTERNAL_PROTOCOL_TOKEN_TTL_SECONDS
+    token = issue_internal_agent_protocol_token(
+        account_id=account_id,
+        parent_app_id=parent_app_id,
+        target_app_id=target_app_id,
+        secret=secret,
+        ttl_seconds=ttl_seconds,
+    )
+
+    # 2.移除配置中可能伪造的内部 Token Header。
+    # 禁止持久化配置伪造内部凭证；大小写不同的 HTTP Header 也必须移除，
+    # 否则 HTTP 客户端可能发送重复 Header，导致服务端解析结果不确定。
+    safe_headers = {
+        key: value
+        for key, value in headers.items()
+        if key.lower() != "x-mydify-internal-token"
+    }
+
+    # 3.返回异步 SubAgent 所需的内部传输参数。
+    return {
+        "url": base_url,
+        "headers": {
+            **safe_headers,
+            "X-MyDify-Internal-Token": token,
+        },
+    }
+
+
 def _encode(value: dict[str, object]) -> str:
     """生成无填充 Base64URL JSON。"""
     raw = json.dumps(value, ensure_ascii=True, separators=(",", ":")).encode()
@@ -110,6 +152,7 @@ def _sign(value: str, secret: str) -> str:
 
 __all__ = [
     "InternalAgentProtocolClaims",
+    "build_internal_agent_transport",
     "issue_internal_agent_protocol_token",
     "parse_internal_agent_protocol_token",
 ]

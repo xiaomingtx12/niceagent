@@ -38,8 +38,10 @@ from internal.schema.app.app_schema import (
     GetPublishHistoriesWithPageReq,
     GetAppsWithPageReq,
 )
-from internal.schema.agent.agent_runtime_schema import (
+from internal.schema.agent.agent_cleanup_schema import (
     AgentAppCleanupReq,
+)
+from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
 from internal.schema.app.app_config_schema import DraftAppConfigPatchReq

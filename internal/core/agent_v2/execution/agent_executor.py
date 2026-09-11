@@ -5,7 +5,6 @@ from enum import Enum, auto
 from threading import Event, Lock
 from typing import Any, Literal
 
-from deepagents.backends.protocol import BackendProtocol
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables.config import merge_configs
@@ -23,9 +22,6 @@ from internal.core.agent_v2.entity.runtime_resources import (
 )
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
-)
-from internal.core.agent_v2.backends.composition.composite_backend_factory import (
-    close_runtime_backends,
 )
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
@@ -57,7 +53,7 @@ class AgentExecutor:
     ) -> None:
         """接管已编译图和当前 Run 的资源生命周期。"""
         self._graph: CompiledStateGraph = graph
-        self._backend: BackendProtocol = runtime.backend
+        self._resources = runtime
         self._runtime_context: AgentRunContext = runtime.runtime_context
         self._observer = observer
         self._review = ReviewMiddleware(review_config=dict(review_config or {}))
@@ -199,7 +195,7 @@ class AgentExecutor:
             # close 一旦被请求，即使部分 Backend 关闭失败也不能再次运行；
             # FINISHED 状态允许调用方稍后重试幂等关闭。
             self._state = _ExecutorState.FINISHED
-            close_runtime_backends(self._backend)
+            self._resources.close()
             self._state = _ExecutorState.CLOSED
 
     def request_drain(self, reason: str = "cancel_requested") -> bool:

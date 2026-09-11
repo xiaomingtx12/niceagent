@@ -22,61 +22,58 @@ class SkillProjection:
     files: list[tuple[str, bytes]] = field(default_factory=list)
 
 
-class SkillContextAssembler:
-    """把已授权 Skill 投影成 DeepAgents 原生路径。"""
+def build_skill_context(
+    *,
+    skills: list[Any],
+    subagents: Sequence[SubAgentConfig],
+    selected_skill_names: Sequence[str] = (),
+) -> SkillProjection:
+    """装配主 Agent 和 SubAgent 的只读 Skill 路由。"""
+    projection = SkillProjection()
+    packages: dict[str, list[tuple[str, bytes]]] = {}
+    enabled_skills = [skill for skill in skills if getattr(skill, "enabled", True)]
+    selected_names = set(selected_skill_names)
+    main_skills = (
+        [skill for skill in enabled_skills if skill.name in selected_names]
+        if selected_names
+        else enabled_skills
+    )
+    if main_skills:
+        packages["/skills/"] = [
+            file for skill in main_skills
+            for file in _package_files(root=f"/{skill.name}", skill=skill)
+        ]
+        projection.sources = ["/skills/"]
 
-    def build(
-        self,
-        *,
-        skills: list[Any],
-        subagents: Sequence[SubAgentConfig],
-        selected_skill_names: Sequence[str] = (),
-    ) -> SkillProjection:
-        """装配主 Agent 和 SubAgent 的只读 Skill 路由。"""
-        projection = SkillProjection()
-        packages: dict[str, list[tuple[str, bytes]]] = {}
-        enabled_skills = [skill for skill in skills if getattr(skill, "enabled", True)]
-        selected_names = set(selected_skill_names)
-        main_skills = (
-            [skill for skill in enabled_skills if skill.name in selected_names]
-            if selected_names
-            else enabled_skills
-        )
-        if main_skills:
-            packages["/skills/"] = [
-                file for skill in main_skills
-                for file in _package_files(root=f"/{skill.name}", skill=skill)
-            ]
-            projection.sources = ["/skills/"]
+    skill_map = {skill.name: skill for skill in enabled_skills}
+    for subagent_config in subagents:
+        requested = subagent_config.skills
+        missing = sorted(set(requested) - set(skill_map))
+        if missing:
+            raise ValueError(
+                f"subagent {subagent_config.name!r} 引用了未启用的 Skills: "
+                f"{', '.join(missing)}"
+            )
+        if not requested:
+            continue
+        name = subagent_config.name
+        prefix = f"/subagent_skills/{name}/"
+        selected = [skill_map[item] for item in requested]
+        packages[prefix] = [
+            file for skill in selected
+            for file in _package_files(root=f"/{skill.name}", skill=skill)
+        ]
+        projection.subagent_sources[name] = [prefix]
+    try:
+        for prefix, files in packages.items():
+            projection.routes[prefix] = SkillBackend(files)
+            projection.files.extend((f"{prefix.rstrip('/')}{path}", content) for path, content in files)
+    except Exception:
+        for backend in projection.routes.values():
+            backend.close()
+        raise
+    return projection
 
-        skill_map = {skill.name: skill for skill in enabled_skills}
-        for subagent_config in subagents:
-            requested = subagent_config.skills
-            missing = sorted(set(requested) - set(skill_map))
-            if missing:
-                raise ValueError(
-                    f"subagent {subagent_config.name!r} 引用了未启用的 Skills: "
-                    f"{', '.join(missing)}"
-                )
-            if not requested:
-                continue
-            name = subagent_config.name
-            prefix = f"/subagent_skills/{name}/"
-            selected = [skill_map[item] for item in requested]
-            packages[prefix] = [
-                file for skill in selected
-                for file in _package_files(root=f"/{skill.name}", skill=skill)
-            ]
-            projection.subagent_sources[name] = [prefix]
-        try:
-            for prefix, files in packages.items():
-                projection.routes[prefix] = SkillBackend(files)
-                projection.files.extend((f"{prefix.rstrip('/')}{path}", content) for path, content in files)
-        except Exception:
-            for backend in projection.routes.values():
-                backend.close()
-            raise
-        return projection
 
 
 def _package_files(*, root: str, skill: Any) -> list[tuple[str, bytes]]:
@@ -98,4 +95,4 @@ def _package_files(*, root: str, skill: Any) -> list[tuple[str, bytes]]:
     return files
 
 
-__all__ = ["SkillContextAssembler", "SkillProjection"]
+__all__ = ["build_skill_context", "SkillProjection"]

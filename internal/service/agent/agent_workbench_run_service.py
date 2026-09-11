@@ -24,13 +24,20 @@ from internal.service.agent_protocol.event_projector import (
 )
 from internal.service.agent_protocol.state_projector import project_snapshot_values
 from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import FailException, ValidateErrorException
-from internal.model import AgentRun, AgentRunEvent, Message
+from internal.exception import FailException, ValidateErrorException, NotFoundException
+from internal.model import AgentRun, AgentRunEvent, Message, Conversation
+from internal.entity.agent_run_interaction import AgentRunInteraction
+from internal.entity.agent_invocation import (
+    AgentInvocation,
+    AgentInvocationContext,
+)
+from internal.core.agent_v2.entity.user_input import build_confirmed_input_context
 from internal.schema.agent.agent_workbench_schema import (
     WorkbenchEvent,
     WorkbenchRunMetadataResp,
 )
-from internal.schema.agent.agent_workbench_read_schema import WorkbenchEventBatchResp, WorkbenchRunEventsResp
+from internal.schema.agent.agent_workbench_read_schema import WorkbenchRunEventsResp
+from .agent_workbench_event_queue import EventBatch
 from pkg.sqlalchemy import SQLAlchemy
 
 _PERSISTED_EVENT_METHODS = ("tools", "lifecycle", "custom")
@@ -43,6 +50,82 @@ class AgentWorkbenchRunService:
 
     db: SQLAlchemy
     lease_seconds: ClassVar[int] = 120
+
+    def get_confirmed_input_context(self, req: AgentInvocation) -> str:
+        """只加载同一授权会话入口的近期答案，不从客户端接收或写入长期记忆。"""
+        rows = (
+            self.db.session.query(AgentRun.state_snapshot["input_history"])
+            .filter(AgentRun.conversation_id == req.conversation_id, AgentRun.app_id == req.app_id,
+                    AgentRun.invoke_from == req.invoke_from.value,
+                    AgentRun.state_snapshot["input_history"].astext.isnot(None))
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc()).limit(8).all()
+        )
+        return build_confirmed_input_context([history for (history,) in rows if isinstance(history, list)])
+
+    def get_context_run(self, context: AgentInvocationContext, run_id: UUID) -> AgentRun:
+        """确认 Run 同时属于当前应用、会话和入口；此校验不能触发失联恢复写入。"""
+        row = self.get_run(run_id, recover=False)
+        if (
+            row is None
+            or row.app_id != context.app_id
+            or row.conversation_id != context.conversation_id
+            or row.invoke_from != context.invoke_from.value
+        ):
+            raise NotFoundException("Agent Run 不存在或不属于当前会话")
+        return row
+
+    def lock_conversation(self, context: AgentInvocationContext) -> None:
+        """锁定当前会话，保证同一会话的启动检查和创建串行执行。"""
+        conversation = (
+            self.db.session.query(Conversation.id)
+            .filter(
+                Conversation.id == context.conversation_id,
+                Conversation.app_id == context.app_id,
+                Conversation.is_deleted.is_(False),
+            )
+            .with_for_update()
+            .one_or_none()
+        )
+        if conversation is None:
+            raise NotFoundException("会话不存在或已删除")
+
+    def queue_resumed_run(
+        self, row: AgentRun, run: WorkbenchRun, snapshot: Mapping[str, Any],
+    ) -> None:
+        """调用方持有会话和 Run 锁，在同一事务中交接答案、状态和新执行租约。"""
+        if row.status != WorkbenchRunStatus.WAITING_INPUT.value:
+            raise ValidateErrorException("当前任务没有等待填写的表单")
+        row.state_snapshot = dict(snapshot)
+        row.status = WorkbenchRunStatus.QUEUED.value
+        row.executor_id = run.executor_id
+        row.heartbeat_at = datetime.now(UTC).replace(tzinfo=None)
+        row.finished_at = None
+
+    def reopen_pending_run(
+        self, row: AgentRun, interaction: AgentRunInteraction,
+        snapshot: Mapping[str, Any], cancellation_sequence: int,
+    ) -> int:
+        """调用方持锁且已验证恢复规则；表单、事件和消息状态由此原子更新。"""
+        projector = AgentProtocolEventProjector(row.id, start_sequence=int(row.last_event_sequence or 0))
+        events = projector.generated_state_transition(project_snapshot_values(snapshot), {
+            "event": "interrupted", "status": "waiting_input", "reason": "input_reopened",
+            "message_id": str(row.message_id), "input_message_id": row.input_message_id,
+        })
+        for raw in events:
+            event = WorkbenchEvent.model_validate(raw)
+            self.db.session.add(AgentRunEvent(
+                run_id=row.id, sequence=event.seq, payload=event.model_dump(mode="json"),
+            ))
+        sequence = projector.last_event_sequence
+        row.state_snapshot = interaction.after_reopen(snapshot, cancellation_sequence, sequence)
+        row.status = WorkbenchRunStatus.WAITING_INPUT.value
+        row.finished_at = None
+        row.executor_id = None
+        row.last_event_sequence = sequence
+        message = self.db.session.get(Message, row.message_id)
+        if message is not None:
+            message.status = "normal"
+        return sequence
 
     def add_run(self, run: WorkbenchRun) -> AgentRun:
         """在调用方事务中创建平台级 ``AgentRun`` 数据库记录。"""
@@ -519,7 +602,7 @@ class AgentWorkbenchRunService:
         run_id: UUID | None = None,
         since: int,
         limit: int = 256,
-    ) -> WorkbenchEventBatchResp:
+    ) -> EventBatch:
         """按落库序号推进扫描游标，避免隐藏事件占满一批后阻断续传。"""
         query = (
             self.db.session.query(AgentRunEvent.sequence, AgentRunEvent.payload)
@@ -543,7 +626,7 @@ class AgentWorkbenchRunService:
             event = AgentProtocolEventProjector.to_public_event(row.payload)
             if event is not None:
                 events.append(event)
-        return WorkbenchEventBatchResp(
+        return EventBatch(
             events=events,
             next_sequence=rows[-1].sequence if rows else since,
             has_more=len(rows) == limit,
@@ -577,57 +660,46 @@ class AgentWorkbenchRunService:
             if current.status != "waiting_input":
                 current.status = WorkbenchRunStatus.CANCELLING.value
             else:
-                # 3.等待表单时没有运行线程，直接取消；保存原表单用于重新填写。
-                current.status = "cancelled"
-                current.finished_at = datetime.now(UTC).replace(tzinfo=None)
-                snapshot = dict(current.state_snapshot or {})
-                cancelled_inputs = snapshot.get("pending_inputs", [])
-                # 本次追加 values 与 lifecycle 两条事件，恢复标识使用最终序号。
-                cancellation_sequence = int(current.last_event_sequence or 0) + 2
-                snapshot["pending_inputs"] = []
-                snapshot["input_recovery"] = None
-                if cancelled_inputs:
-                    snapshot["input_recovery"] = {
-                        "run_id": str(current.id),
-                        "cancellation_sequence": cancellation_sequence,
-                    }
-                interaction = dict(snapshot.get("_interaction") or {})
-                interaction.update(
-                    cancelled_input=True,
-                    cancelled_inputs=cancelled_inputs,
-                    input_cancellation_sequence=cancellation_sequence,
-                )
-                snapshot["_interaction"] = interaction
-                current.executor_id = None
-                current.state_snapshot = snapshot
-
-                # 4.表单清空、消息停止和结束事件必须一次提交，重连才能恢复相同状态。
-                projector = AgentProtocolEventProjector(
-                    current.id, start_sequence=int(current.last_event_sequence or 0),
-                )
-                public_state = project_snapshot_values(snapshot)
-                events = [projector.generated("values", public_state)]
-                events.append(projector.generated("lifecycle", {
-                    "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
-                    "message_id": str(current.message_id), "input_message_id": current.input_message_id,
-                }))
-                for raw in events:
-                    event = WorkbenchEvent.model_validate(raw)
-                    self.db.session.add(AgentRunEvent(
-                        run_id=current.id,
-                        sequence=event.seq,
-                        payload=event.model_dump(mode="json"),
-                    ))
-                current.last_event_sequence = projector.last_event_sequence
-                message = self.db.session.get(Message, current.message_id)
-                if message is not None:
-                    message.status = "stop"
+                self._cancel_pending_input(current)
                 row.status = "cancelled"
                 return True
 
-        # 5.调用方在提交后用最新状态发送本地取消信号。
+        # 调用方在提交后用最新状态发送本地取消信号。
         row.status = WorkbenchRunStatus.CANCELLING.value
         return True
+
+    def _cancel_pending_input(self, current: AgentRun) -> None:
+        """在调用方锁定的事务中保留表单恢复信息，并同步消息与终态事件。"""
+        # 1.等待表单时没有运行线程，直接取消；保存原表单用于重新填写。
+        current.status = "cancelled"
+        current.finished_at = datetime.now(UTC).replace(tzinfo=None)
+        cancellation_sequence = int(current.last_event_sequence or 0) + 2
+        snapshot = AgentRunInteraction("waiting_input", current.state_snapshot).after_cancel(
+            current.id, cancellation_sequence,
+        )
+        current.executor_id = None
+        current.state_snapshot = snapshot
+
+        # 2.表单清空、消息停止和结束事件必须一次提交，重连才能恢复相同状态。
+        projector = AgentProtocolEventProjector(
+            current.id, start_sequence=int(current.last_event_sequence or 0),
+        )
+        public_state = project_snapshot_values(snapshot)
+        events = projector.generated_state_transition(public_state, {
+            "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
+            "message_id": str(current.message_id), "input_message_id": current.input_message_id,
+        })
+        for raw in events:
+            event = WorkbenchEvent.model_validate(raw)
+            self.db.session.add(AgentRunEvent(
+                run_id=current.id,
+                sequence=event.seq,
+                payload=event.model_dump(mode="json"),
+            ))
+        current.last_event_sequence = projector.last_event_sequence
+        message = self.db.session.get(Message, current.message_id)
+        if message is not None:
+            message.status = "stop"
 
 
 __all__ = ["AgentWorkbenchRunService"]

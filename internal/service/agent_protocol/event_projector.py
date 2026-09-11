@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -28,45 +29,6 @@ _CUSTOM_EVENT_SCHEMAS = {
     "context_window": ContextWindowResp,
     "context_compaction": ContextCompactionResp,
 }
-
-
-def _json_value(value: Any) -> Any:
-    """把框架对象转换为可进入 Agent Protocol 的 JSON 值。"""
-    if isinstance(value, BaseMessage):
-        try:
-            return value.model_dump(mode="json")
-        except (TypeError, ValueError):
-            return {
-                "type": value.type,
-                "content": value.content,
-                "id": value.id,
-            }
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_json_value(item) for item in value]
-    if isinstance(value, UUID):
-        return str(value)
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        try:
-            return _json_value(model_dump(mode="json"))
-        except (TypeError, ValueError):
-            return str(value)
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def _normalize_namespace(value: Any) -> tuple[str, ...]:
-    """校验 v3 事件的图路径，不隐式转换非法元素。"""
-    if value is None:
-        return ()
-    if not isinstance(value, (list, tuple)):
-        raise ValueError("protocol event namespace must be an array")
-    if not all(isinstance(item, str) for item in value):
-        raise ValueError("protocol event namespace items must be strings")
-    return tuple(value)
 
 
 def project_public_state(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -114,34 +76,14 @@ def project_public_state(value: Mapping[str, Any]) -> dict[str, Any]:
     return projected
 
 
-def _project_custom_event_data(event: Mapping[str, Any]) -> dict[str, Any] | None:
-    """校验公开 custom 事件，只允许已定义的上下文观测载荷。"""
-    params = event.get("params")
-    if not isinstance(params, Mapping):
-        return None
-    custom_data = params.get("data")
-    payload = custom_data
-    has_named_payload = (
-        isinstance(custom_data, Mapping)
-        and custom_data.get("name") in _CUSTOM_EVENT_SCHEMAS
-    )
-    if has_named_payload:
-        payload = custom_data.get("payload")
-    if not isinstance(payload, Mapping):
-        return None
+@dataclass
+class _TextStream:
+    """一个图路径与消息节点的文本累积状态，生命周期限于当前投影器。"""
 
-    schema_type = payload.get("type")
-    schema = _CUSTOM_EVENT_SCHEMAS.get(schema_type)
-    if schema is None:
-        return None
-    try:
-        validated = schema.model_validate(payload)
-    except ValidationError:
-        return None
-    return {
-        "name": validated.type,
-        "payload": validated.model_dump(mode="json"),
-    }
+    id: str
+    namespace: list[str]
+    node: str | None
+    text: str = ""
 
 
 class AgentProtocolEventProjector:
@@ -158,13 +100,14 @@ class AgentProtocolEventProjector:
         start_sequence: int = 0,
         root_message_id: str | None = None,
     ) -> None:
+        """每个 Run 独占序号和文本缓存，不与其他运行共享流状态。"""
         self.run_id = str(run_id or uuid4())
         if start_sequence < 0:
             raise ValueError("protocol start sequence must be non-negative")
         self.last_event_sequence = start_sequence
         self._last_raw_sequence = 0
         self._root_message_id = root_message_id
-        self._text_streams: dict[tuple[tuple[str, ...], str], dict[str, Any]] = {}
+        self._text_streams: dict[tuple[tuple[str, ...], str], _TextStream] = {}
 
     @staticmethod
     def to_public_event(
@@ -185,6 +128,49 @@ class AgentProtocolEventProjector:
                 return None
             raw_event["params"]["data"] = public_data
         return WorkbenchEvent.model_validate(raw_event)
+
+    def generated(
+        self,
+        method: str,
+        data: Mapping[str, Any],
+        *,
+        namespace: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """生成由工作台运行边界补充的协议事件。"""
+        return self._event(
+            method=method,
+            namespace=namespace or [],
+            timestamp=None,
+            data=data,
+            source="workbench",
+        )
+
+    def generated_state_transition(
+        self,
+        state: Mapping[str, Any],
+        lifecycle: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """按状态、待填表单、生命周期排序；调用方负责将整批事件原子落库。"""
+        events = [self.generated("values", state)]
+        for item in state.get("pending_inputs", []):
+            events.append(self.generated("input.requested", {
+                "interrupt_id": item["interrupt_id"], "payload": item["payload"],
+            }))
+        events.append(self.generated("lifecycle", lifecycle))
+        return events
+
+    def finish_pending_messages(self) -> list[dict[str, Any]]:
+        """在运行结束边界关闭未携带 provider finish 标记的文本流。"""
+        return self._finish_text_streams(timestamp=None, source="workbench")
+
+    def project_many(self, event: AgentEvent) -> list[dict[str, Any]]:
+        """校验原始顺序后按通道分派；输入表单只由事务提交后的工作台事件公开。"""
+        raw_sequence = self._advance_source_sequence(event.sequence)
+        if event.channel == "input.requested":
+            return []
+        if event.channel == "messages":
+            return self._project_message_event(event, raw_sequence)
+        return self._project_state_event(event, raw_sequence)
 
     def _event(
         self,
@@ -224,29 +210,9 @@ class AgentProtocolEventProjector:
             "params": params,
         }
 
-    def generated(
-        self,
-        method: str,
-        data: Mapping[str, Any],
-        *,
-        namespace: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """生成由工作台运行边界补充的协议事件。"""
-        return self._event(
-            method=method,
-            namespace=namespace or [],
-            timestamp=None,
-            data=data,
-            source="workbench",
-        )
-
-    def finish_pending_messages(self) -> list[dict[str, Any]]:
-        """在运行结束边界关闭未携带 provider finish 标记的文本流。"""
-        return self._finish_text_streams(timestamp=None, source="workbench")
-
-    def project_many(self, event: AgentEvent) -> list[dict[str, Any]]:
-        """把一个 Core 事件展开为浏览器消息分片或状态事件。"""
-        raw_sequence_value = event.sequence
+    def _advance_source_sequence(self, sequence: int | None) -> int:
+        """原始事件即使被过滤也消耗源序号，禁止乱序或重复输入。"""
+        raw_sequence_value = sequence
         if raw_sequence_value is None:
             raw_sequence = self._last_raw_sequence + 1
         elif isinstance(raw_sequence_value, bool) or not isinstance(
@@ -258,62 +224,67 @@ class AgentProtocolEventProjector:
         if raw_sequence <= self._last_raw_sequence:
             raise ValueError("protocol event sequence must be strictly increasing")
         self._last_raw_sequence = raw_sequence
+        return raw_sequence
+
+    def _project_state_event(self, event: AgentEvent, raw_sequence: int) -> list[dict[str, Any]]:
+        """状态和工具边界先封存对应文本流，根终态留给工作台落库后发布。"""
         method = event.channel
         namespace = event.namespace
         timestamp = event.timestamp
         data = event.data
-
-        # 待回答事件与等待状态须先原子落库，再由运行服务统一发布。
-        if method == "input.requested":
-            return []
-
-        if method != "messages":
-            if method == "lifecycle" and isinstance(data, Mapping):
-                child_namespace = data.get("namespace")
-                if not namespace and child_namespace is not None:
-                    namespace = _normalize_namespace(child_namespace)
-            flushed = []
-            if (
-                method == "tools"
-                and isinstance(data, Mapping)
-                and data.get("event") == "tool-started"
-            ):
-                # 部分供应商不发送 finish chunk；工具边界也必须封存前一阶段。
-                # 只关闭当前图，不能截断仍在并行输出的子图。
-                for key in list(self._text_streams):
-                    if key[0] == tuple(namespace):
-                        flushed.extend(
-                            self._finish_text_stream(
-                                key, timestamp=timestamp, source_sequence=raw_sequence,
-                            )
+        if method == "lifecycle" and isinstance(data, Mapping):
+            child_namespace = data.get("namespace")
+            if not namespace and child_namespace is not None:
+                namespace = _normalize_namespace(child_namespace)
+        flushed = []
+        if (
+            method == "tools"
+            and isinstance(data, Mapping)
+            and data.get("event") == "tool-started"
+        ):
+            # 部分供应商不发送 finish chunk；工具边界也必须封存前一阶段。
+            # 只关闭当前图，不能截断仍在并行输出的子图。
+            for key in list(self._text_streams):
+                if key[0] == tuple(namespace):
+                    flushed.extend(
+                        self._finish_text_stream(
+                            key, timestamp=timestamp, source_sequence=raw_sequence,
                         )
-            if method == "lifecycle" and isinstance(data, Mapping):
-                lifecycle_value = data.get("event") or data.get("status") or ""
-                lifecycle_event = (
-                    lifecycle_value if isinstance(lifecycle_value, str) else ""
-                )
-                if lifecycle_event in _TERMINAL_LIFECYCLE_EVENTS:
-                    flushed = self._finish_text_streams(
-                        timestamp=timestamp,
-                        namespace=namespace,
-                        source_sequence=raw_sequence,
                     )
-                    if not namespace:
-                        # 根 Run 的终态由平台在结果提交后发布，图结束不等于落库成功。
-                        return flushed
-            projected_event_data = data
-            if method == "values" and isinstance(data, Mapping):
-                projected_event_data = project_public_state(data)
-            return [
-                *flushed,
-                self._event(
-                    method=method,
-                    namespace=namespace,
+        if method == "lifecycle" and isinstance(data, Mapping):
+            lifecycle_value = data.get("event") or data.get("status") or ""
+            lifecycle_event = (
+                lifecycle_value if isinstance(lifecycle_value, str) else ""
+            )
+            if lifecycle_event in _TERMINAL_LIFECYCLE_EVENTS:
+                flushed = self._finish_text_streams(
                     timestamp=timestamp,
-                    data=projected_event_data,
+                    namespace=namespace,
                     source_sequence=raw_sequence,
-                ),
-            ]
+                )
+                if not namespace:
+                    # 根 Run 的终态由平台在结果提交后发布，图结束不等于落库成功。
+                    return flushed
+        projected_event_data = data
+        if method == "values" and isinstance(data, Mapping):
+            projected_event_data = project_public_state(data)
+        return [
+            *flushed,
+            self._event(
+                method=method,
+                namespace=namespace,
+                timestamp=timestamp,
+                data=projected_event_data,
+                source_sequence=raw_sequence,
+            ),
+        ]
+
+
+    def _project_message_event(self, event: AgentEvent, raw_sequence: int) -> list[dict[str, Any]]:
+        """模型消息只转换公开分片；摘要调用不作为用户可见回答。"""
+        namespace = event.namespace
+        timestamp = event.timestamp
+        data = event.data
 
         payload = data
         metadata: Mapping[str, Any] = {}
@@ -321,7 +292,7 @@ class AgentProtocolEventProjector:
             payload = data[0]
             if isinstance(data[1], Mapping):
                 metadata = data[1]
-        # Framework summary calls are internal context work, not assistant answers.
+        # 摘要用于框架内部上下文压缩，不属于助手回答。
         if metadata.get("lc_source") == "summarization":
             return []
         node_value = metadata.get("langgraph_node")
@@ -383,46 +354,31 @@ class AgentProtocolEventProjector:
 
         if text:
             if state is None:
-                state = {
-                    "id": str(
+                state = _TextStream(
+                    id=str(
                         self._root_message_id
                         if not normalized_namespace and self._root_message_id
                         else chunk.id or uuid4()
                     ),
-                    "text": "",
-                    "namespace": list(normalized_namespace),
-                    "node": node,
-                }
-                self._text_streams[key] = state
-                events.extend(
-                    [
-                        self._event(
-                            method="messages",
-                            namespace=namespace,
-                            timestamp=timestamp,
-                            node=node,
-                            source_sequence=source_sequence,
-                            data={
-                                "event": "message-start",
-                                "role": "ai",
-                                "id": state["id"],
-                            },
-                        ),
-                        self._event(
-                            method="messages",
-                            namespace=namespace,
-                            timestamp=timestamp,
-                            node=node,
-                            source_sequence=source_sequence,
-                            data={
-                                "event": "content-block-start",
-                                "index": 0,
-                                "content": {"type": "text", "text": ""},
-                            },
-                        ),
-                    ]
+                    namespace=list(normalized_namespace),
+                    node=node,
                 )
-            state["text"] += text
+                self._text_streams[key] = state
+                start_fragments = (
+                    {"event": "message-start", "role": "ai", "id": state.id},
+                    {
+                        "event": "content-block-start", "index": 0,
+                        "content": {"type": "text", "text": ""},
+                    },
+                )
+                events.extend(
+                    self._event(
+                        method="messages", namespace=namespace, timestamp=timestamp,
+                        node=node, source_sequence=source_sequence, data=fragment,
+                    )
+                    for fragment in start_fragments
+                )
+            state.text += text
             events.append(
                 self._event(
                     method="messages",
@@ -461,28 +417,29 @@ class AgentProtocolEventProjector:
         source_sequence: int | None = None,
         source: str = "deepagents",
     ) -> list[dict[str, Any]]:
+        """移除文本流并一次补齐正文和消息结束事件，重复关闭不产生事件。"""
         state = self._text_streams.pop(key, None)
         if state is None:
             return []
         return [
             self._event(
                 method="messages",
-                namespace=state["namespace"],
+                namespace=state.namespace,
                 timestamp=timestamp,
-                node=state["node"],
+                node=state.node,
                 source_sequence=source_sequence,
                 source=source,
                 data={
                     "event": "content-block-finish",
                     "index": 0,
-                    "content": {"type": "text", "text": state["text"]},
+                    "content": {"type": "text", "text": state.text},
                 },
             ),
             self._event(
                 method="messages",
-                namespace=state["namespace"],
+                namespace=state.namespace,
                 timestamp=timestamp,
-                node=state["node"],
+                node=state.node,
                 source_sequence=source_sequence,
                 source=source,
                 data={"event": "message-finish"},
@@ -515,6 +472,75 @@ class AgentProtocolEventProjector:
                 )
             )
         return events
+
+
+def _json_value(value: Any) -> Any:
+    """把框架对象转换为可进入 Agent Protocol 的 JSON 值。"""
+    if isinstance(value, BaseMessage):
+        try:
+            return value.model_dump(mode="json")
+        except (TypeError, ValueError):
+            return {
+                "type": value.type,
+                "content": value.content,
+                "id": value.id,
+            }
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_value(item) for item in value]
+    if isinstance(value, UUID):
+        return str(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return _json_value(model_dump(mode="json"))
+        except (TypeError, ValueError):
+            return str(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def _normalize_namespace(value: Any) -> tuple[str, ...]:
+    """校验 v3 事件的图路径，不隐式转换非法元素。"""
+    if value is None:
+        return ()
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("protocol event namespace must be an array")
+    if not all(isinstance(item, str) for item in value):
+        raise ValueError("protocol event namespace items must be strings")
+    return tuple(value)
+
+
+def _project_custom_event_data(event: Mapping[str, Any]) -> dict[str, Any] | None:
+    """校验公开 custom 事件，只允许已定义的上下文观测载荷。"""
+    params = event.get("params")
+    if not isinstance(params, Mapping):
+        return None
+    custom_data = params.get("data")
+    payload = custom_data
+    has_named_payload = (
+        isinstance(custom_data, Mapping)
+        and custom_data.get("name") in _CUSTOM_EVENT_SCHEMAS
+    )
+    if has_named_payload:
+        payload = custom_data.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+
+    schema_type = payload.get("type")
+    schema = _CUSTOM_EVENT_SCHEMAS.get(schema_type)
+    if schema is None:
+        return None
+    try:
+        validated = schema.model_validate(payload)
+    except ValidationError:
+        return None
+    return {
+        "name": validated.type,
+        "payload": validated.model_dump(mode="json"),
+    }
 
 
 __all__ = ["AgentProtocolEventProjector", "project_public_state"]
