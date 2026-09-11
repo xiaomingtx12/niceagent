@@ -48,11 +48,12 @@ class AgentWorkbenchEventBuffer:
             if event is None:
                 continue
             self._pending.append(event)
-            event_name = event.params.data.get("event")
+            data = event.params.data
+            event_name = data.get("event") if isinstance(data, Mapping) else None
 
             # 2.首字计时只认文本增量，推理、工具和空文本不计入。
             first_text = False
-            delta = event.params.data.get("delta")
+            delta = data.get("delta") if isinstance(data, Mapping) else None
             is_text_message = event.method == "messages" and event_name == "content-block-delta"
             is_text_delta = isinstance(delta, Mapping) and delta.get("type") == "text-delta"
             if is_text_message and is_text_delta:

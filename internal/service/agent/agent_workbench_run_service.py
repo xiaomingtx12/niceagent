@@ -347,7 +347,11 @@ class AgentWorkbenchRunService:
                 query = query.filter(AgentRun.id == run_id)
             for row in query.populate_existing().with_for_update().all():
                 cancelled = row.status == WorkbenchRunStatus.CANCELLING.value
-                row.status = "cancelled" if cancelled else "failed"
+                row.status = (
+                    WorkbenchRunStatus.CANCELLED.value
+                    if cancelled
+                    else WorkbenchRunStatus.FAILED.value
+                )
                 row.error_message = "Agent 执行进程已失联，请重新发送消息。"
                 row.finished_at = now
                 # 撤销执行权，使迟到的事件、结果和续租无法覆盖恢复后的状态。
@@ -642,7 +646,9 @@ class AgentWorkbenchRunService:
                 .with_for_update()
                 .filter(
                     AgentRun.id == row.id,
-                    AgentRun.status.in_((*WORKBENCH_ACTIVE_STATUSES, "waiting_input")),
+                    AgentRun.status.in_(
+                        (*WORKBENCH_ACTIVE_STATUSES, WorkbenchRunStatus.WAITING_INPUT.value)
+                    ),
                 )
                 .one_or_none()
             )
@@ -657,11 +663,11 @@ class AgentWorkbenchRunService:
                 return False
 
             # 2.有执行实例时只写 cancelling，实际资源释放和终态由执行线程负责。
-            if current.status != "waiting_input":
+            if current.status != WorkbenchRunStatus.WAITING_INPUT.value:
                 current.status = WorkbenchRunStatus.CANCELLING.value
             else:
                 self._cancel_pending_input(current)
-                row.status = "cancelled"
+                row.status = WorkbenchRunStatus.CANCELLED.value
                 return True
 
         # 调用方在提交后用最新状态发送本地取消信号。
@@ -671,10 +677,12 @@ class AgentWorkbenchRunService:
     def _cancel_pending_input(self, current: AgentRun) -> None:
         """在调用方锁定的事务中保留表单恢复信息，并同步消息与终态事件。"""
         # 1.等待表单时没有运行线程，直接取消；保存原表单用于重新填写。
-        current.status = "cancelled"
+        current.status = WorkbenchRunStatus.CANCELLED.value
         current.finished_at = datetime.now(UTC).replace(tzinfo=None)
         cancellation_sequence = int(current.last_event_sequence or 0) + 2
-        snapshot = AgentRunInteraction("waiting_input", current.state_snapshot).after_cancel(
+        snapshot = AgentRunInteraction(
+            WorkbenchRunStatus.WAITING_INPUT.value, current.state_snapshot
+        ).after_cancel(
             current.id, cancellation_sequence,
         )
         current.executor_id = None

@@ -285,7 +285,9 @@ class AgentWorkbenchService:
             self.db.session.query(AgentRun)
             .filter(
                 AgentRun.conversation_id == context.conversation_id,
-                AgentRun.status.in_((*WORKBENCH_ACTIVE_STATUSES, "waiting_input")),
+                AgentRun.status.in_(
+                    (*WORKBENCH_ACTIVE_STATUSES, WorkbenchRunStatus.WAITING_INPUT.value)
+                ),
             )
             .first()
         )
@@ -297,7 +299,7 @@ class AgentWorkbenchService:
             waiting_input = False
             if active_run is not None:
                 stopping = stopping or active_run.status == WorkbenchRunStatus.CANCELLING.value
-                waiting_input = active_run.status == "waiting_input"
+                waiting_input = active_run.status == WorkbenchRunStatus.WAITING_INPUT.value
             if stopping:
                 reason = "当前任务正在停止，请稍后重试"
             elif waiting_input:
@@ -312,7 +314,7 @@ class AgentWorkbenchService:
             .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
             .first()
         )
-        if previous is None or previous.status != "cancelled":
+        if previous is None or previous.status != WorkbenchRunStatus.CANCELLED.value:
             return None
         reason = AgentRunInteraction(previous.status, previous.state_snapshot).start_conflict()
         return RunRejected(reason) if reason else None
