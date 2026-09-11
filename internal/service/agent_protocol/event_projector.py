@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from langchain_core.language_models._compat_bridge import message_to_events
@@ -111,14 +111,10 @@ class AgentProtocolEventProjector:
 
     @staticmethod
     def to_public_event(
-        event: Mapping[str, Any] | WorkbenchEvent,
+        event: Mapping[str, Any],
     ) -> WorkbenchEvent | None:
-        """完成 Agent Protocol 公开通道投影和结构校验。"""
-        raw_event = _json_value(
-            event.model_dump(mode="python")
-            if isinstance(event, WorkbenchEvent)
-            else event
-        )
+        """校验原始或历史事件；已投影的 WorkbenchEvent 不再经过此入口。"""
+        raw_event = _json_value(event)
         method = raw_event.get("method") if isinstance(raw_event, Mapping) else None
         if not isinstance(method, str) or method not in _PUBLIC_METHODS:
             return None
@@ -131,25 +127,26 @@ class AgentProtocolEventProjector:
 
     def generated(
         self,
-        method: str,
+        method: Literal["values", "lifecycle", "input.requested"],
         data: Mapping[str, Any],
         *,
         namespace: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """生成由工作台运行边界补充的协议事件。"""
-        return self._event(
+    ) -> WorkbenchEvent:
+        """工作台只生成状态、表单和生命周期事件，返回已校验的公开对象。"""
+        raw_event = self._event(
             method=method,
             namespace=namespace or [],
             timestamp=None,
             data=data,
             source="workbench",
         )
+        return WorkbenchEvent.model_validate(_json_value(raw_event))
 
     def generated_state_transition(
         self,
         state: Mapping[str, Any],
         lifecycle: Mapping[str, Any],
-    ) -> list[dict[str, Any]]:
+    ) -> list[WorkbenchEvent]:
         """按状态、待填表单、生命周期排序；调用方负责将整批事件原子落库。"""
         events = [self.generated("values", state)]
         for item in state.get("pending_inputs", []):
@@ -159,18 +156,28 @@ class AgentProtocolEventProjector:
         events.append(self.generated("lifecycle", lifecycle))
         return events
 
-    def finish_pending_messages(self) -> list[dict[str, Any]]:
+    def finish_pending_messages(self) -> list[WorkbenchEvent]:
         """在运行结束边界关闭未携带 provider finish 标记的文本流。"""
-        return self._finish_text_streams(timestamp=None, source="workbench")
+        return self._public_events(self._finish_text_streams(timestamp=None, source="workbench"))
 
-    def project_many(self, event: AgentEvent) -> list[dict[str, Any]]:
-        """校验原始顺序后按通道分派；输入表单只由事务提交后的工作台事件公开。"""
+    def project_many(self, event: AgentEvent) -> list[WorkbenchEvent]:
+        """消费源序号并返回公开事件；原始表单由工作台事务保存后另行发布。"""
         raw_sequence = self._advance_source_sequence(event.sequence)
         if event.channel == "input.requested":
             return []
         if event.channel == "messages":
-            return self._project_message_event(event, raw_sequence)
-        return self._project_state_event(event, raw_sequence)
+            projected = self._project_message_event(event, raw_sequence)
+        else:
+            projected = self._project_state_event(event, raw_sequence)
+        return self._public_events(projected)
+
+    @classmethod
+    def _public_events(cls, events: list[dict[str, Any]]) -> list[WorkbenchEvent]:
+        """编号完成后过滤并校验，保留被过滤事件占用的序号。"""
+        return [
+            public for event in events
+            if (public := cls.to_public_event(event)) is not None
+        ]
 
     def _event(
         self,
@@ -186,9 +193,9 @@ class AgentProtocolEventProjector:
         """分配序号并创建统一事件外壳。"""
         self.last_event_sequence += 1
         params = {
-            "namespace": _json_value(namespace or []),
+            "namespace": namespace or [],
             "timestamp": timestamp if timestamp is not None else int(time.time() * 1000),
-            "data": _json_value(data),
+            "data": data,
         }
         if node:
             params["node"] = node

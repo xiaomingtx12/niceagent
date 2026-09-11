@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
@@ -13,7 +12,6 @@ from injector import inject
 from flask import Flask, current_app
 from psycopg_pool import PoolTimeout
 from langgraph.types import Command
-from internal.core.agent_v2.entity.user_input import PendingUserInput
 
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
@@ -25,7 +23,10 @@ from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
 from internal.core.agent_v2.middleware.review_middleware import ReviewBlocked
 from internal.service.agent_protocol.event_projector import (
     AgentProtocolEventProjector,
-    project_public_state,
+)
+from internal.service.agent_protocol.state_projector import (
+    project_execution_lifecycle,
+    project_execution_state,
 )
 from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
     get_postgres_pool_stats,
@@ -249,19 +250,11 @@ class AgentWorkbenchRunExecutionService:
         message_updates, lifecycle = self._prepare_result_status(run, status, result.error)
 
         # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
-        state = self._build_final_state(run, result)
+        row = self.run_service.get_run(run.run_id, recover=False)
+        state = project_execution_state(result, row.state_snapshot if row is not None else None)
 
         # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
-        lifecycle.update(
-            message_id=str(run.spec.message_id),
-            input_message_id=run.spec.input_message_id,
-        )
-        raw_events = projector.generated_state_transition(state, lifecycle)
-        events = []
-        for raw in raw_events:
-            event = AgentProtocolEventProjector.to_public_event(raw)
-            if event is not None:
-                events.append(event)
+        events = projector.generated_state_transition(state, lifecycle)
 
         # 4.回答、用量、Run 状态和事件一次提交；旧执行实例无权覆盖已收敛状态。
         if result.answer:
@@ -296,22 +289,13 @@ class AgentWorkbenchRunExecutionService:
         status: WorkbenchRunStatus,
         error: Exception | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """映射公开消息与生命周期；失败详情只写内部日志和运行错误字段。"""
+        """确定业务消息状态和公开错误，生命周期字段交给协议投影。"""
         message_updates: dict[str, Any]
-        lifecycle: dict[str, Any]
-        if status is WorkbenchRunStatus.WAITING_INPUT:
+        error_code = None
+        if status in (WorkbenchRunStatus.WAITING_INPUT, WorkbenchRunStatus.COMPLETED):
             message_updates = {"status": MessageStatus.NORMAL}
-            lifecycle = {"event": "interrupted", "status": "waiting_input", "reason": "user_input_required"}
-        elif status is WorkbenchRunStatus.COMPLETED:
-            message_updates = {"status": MessageStatus.NORMAL}
-            lifecycle = {"event": "completed", "status": "completed"}
         elif status is WorkbenchRunStatus.CANCELLED:
             message_updates = {"status": MessageStatus.STOP}
-            lifecycle = {
-                "event": "interrupted",
-                "status": "cancelled",
-                "reason": "cancel_requested",
-            }
         else:
             public_error = "Agent 运行失败"
             error_code = HttpCode.FAIL.value
@@ -323,12 +307,6 @@ class AgentWorkbenchRunExecutionService:
             elif isinstance(error, ReviewBlocked):
                 public_error = "输出内容未通过审核。"
             message_updates = {"status": MessageStatus.ERROR, "error": public_error}
-            lifecycle = {
-                "event": "failed",
-                "status": "failed",
-                "code": error_code,
-                "error": public_error,
-            }
             run.error_message = str(error) if error is not None else ""
             if isinstance(error, _AGENT_PERSISTENCE_ERRORS):
                 logger.error(
@@ -342,30 +320,13 @@ class AgentWorkbenchRunExecutionService:
                     exc_info=(type(error), error, error.__traceback__),
                 )
 
-        return message_updates, lifecycle
-
-    def _build_final_state(self, run: WorkbenchRun, result: AgentExecutionResult) -> dict[str, Any]:
-        """保留已提交的回答历史，仅从本次执行结果补充公开状态与待填表单。"""
-        public_state = {}
-        for key in ("todos", "files", "async_tasks"):
-            if key in result.state:
-                public_state[key] = result.state[key]
-        state = project_public_state(public_state)
-        pending = []
-        for item in result.interrupts:
-            pending_input = PendingUserInput.model_validate(item)
-            pending.append(pending_input.model_dump(mode="json"))
-        row = self.run_service.get_run(run.run_id, recover=False)
-        snapshot = {}
-        if row is not None:
-            snapshot = row.state_snapshot or {}
-        state.update(
-            pending_inputs=pending,
-            input_history=list(snapshot.get("input_history", [])),
-            input_recovery=None,
+        return message_updates, project_execution_lifecycle(
+            status,
+            message_id=run.spec.message_id,
+            input_message_id=run.spec.input_message_id,
+            public_error=message_updates.get("error"),
+            error_code=error_code,
         )
-
-        return state
 
     def _watch_cancel(
         self,
@@ -393,15 +354,11 @@ class AgentWorkbenchRunExecutionService:
     def _publish_event(
         self,
         run: WorkbenchRun,
-        raw_event: Mapping[str, Any] | WorkbenchEvent,
+        event: WorkbenchEvent,
         *,
         persist_database: bool = True,
-    ) -> WorkbenchEvent | None:
-        """统一公开事件投影、内存更新和发布顺序；批量消费时由调用方落库。"""
-        event = AgentProtocolEventProjector.to_public_event(raw_event)
-        if event is None:
-            return None
-
+    ) -> WorkbenchEvent:
+        """接收已校验事件，提交后才推进游标并通知；终态批次由调用方落库。"""
         if persist_database:
             self.run_service.record_events(run, [event])
 
@@ -462,13 +419,11 @@ class AgentWorkbenchRunExecutionService:
             seq=run.last_event_sequence + 1,
             method="lifecycle",
             params={
-                "data": {
-                    "event": "failed",
-                    "status": "failed",
-                    "error": "Agent 运行失败",
-                    "message_id": str(run.spec.message_id),
-                    "input_message_id": run.spec.input_message_id,
-                }
+                "data": project_execution_lifecycle(
+                    WorkbenchRunStatus.FAILED,
+                    message_id=run.spec.message_id,
+                    input_message_id=run.spec.input_message_id,
+                )
             },
         )
         try:

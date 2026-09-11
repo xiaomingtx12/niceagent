@@ -158,8 +158,7 @@ class AgentWorkbenchRunService:
             "event": "interrupted", "status": "waiting_input", "reason": "input_reopened",
             "message_id": str(row.message_id), "input_message_id": row.input_message_id,
         })
-        for raw in events:
-            event = WorkbenchEvent.model_validate(raw)
+        for event in events:
             self.db.session.add(AgentRunEvent(
                 run_id=row.id, sequence=event.seq, payload=event.model_dump(mode="json"),
             ))
@@ -747,8 +746,7 @@ class AgentWorkbenchRunService:
             "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
             "message_id": str(current.message_id), "input_message_id": current.input_message_id,
         })
-        for raw in events:
-            event = WorkbenchEvent.model_validate(raw)
+        for event in events:
             self.db.session.add(AgentRunEvent(
                 run_id=current.id,
                 sequence=event.seq,

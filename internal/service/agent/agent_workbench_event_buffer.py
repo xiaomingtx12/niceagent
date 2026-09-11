@@ -43,11 +43,8 @@ class AgentWorkbenchEventBuffer:
 
     def receive(self, agent_event: AgentEvent) -> None:
         """按事件到达顺序缓冲，首段推理、首字和阶段边界立即提交。"""
-        for projected in self._projector.project_many(agent_event):
-            # 1.跳过非公开事件，仅将客户端可重放的事件加入待提交批次。
-            event = AgentProtocolEventProjector.to_public_event(projected)
-            if event is None:
-                continue
+        for event in self._projector.project_many(agent_event):
+            # 1.投影器只返回已校验、可重放的公开事件。
             self._pending.append(event)
             data = event.params.data
             event_name = data.get("event") if isinstance(data, Mapping) else None
@@ -102,10 +99,7 @@ class AgentWorkbenchEventBuffer:
 
     def finish(self) -> None:
         """补齐消息结束分片后刷新尾批；失败时保留批次供上层处理原始错误。"""
-        for raw in self._projector.finish_pending_messages():
-            event = AgentProtocolEventProjector.to_public_event(raw)
-            if event is not None:
-                self._pending.append(event)
+        self._pending.extend(self._projector.finish_pending_messages())
         self._flush()
 
     def _flush(self) -> None:

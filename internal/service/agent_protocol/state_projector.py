@@ -4,11 +4,59 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID
 
-from internal.entity import WORKBENCH_TERMINAL_STATUSES
+from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
+from internal.core.agent_v2.entity.user_input import PendingUserInput
+from internal.entity import WORKBENCH_TERMINAL_STATUSES, WorkbenchRunStatus
 from internal.model import AgentRun
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
+from .event_projector import project_public_state
 
 _PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history", "input_recovery")
+
+
+def project_execution_state(
+    result: AgentExecutionResult, previous_snapshot: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """只公开执行结果的展示状态和已校验表单，答案历史沿用平台已提交快照。"""
+    state = project_public_state({
+        key: result.state[key] for key in ("todos", "files", "async_tasks")
+        if key in result.state
+    })
+    state.update(
+        pending_inputs=[
+            PendingUserInput.model_validate(item).model_dump(mode="json")
+            for item in result.interrupts
+        ],
+        input_history=list((previous_snapshot or {}).get("input_history", [])),
+        input_recovery=None,
+    )
+    return state
+
+
+def project_execution_lifecycle(
+    status: WorkbenchRunStatus,
+    *,
+    message_id: UUID,
+    input_message_id: str | None,
+    public_error: str | None = None,
+    error_code: str | None = None,
+) -> dict[str, Any]:
+    """将执行结束状态映射为实时生命周期；业务层仅传入可公开的错误信息。"""
+    data: dict[str, Any] = {
+        "event": status.value,
+        "status": status.value,
+        "message_id": str(message_id),
+        "input_message_id": input_message_id,
+    }
+    if status is WorkbenchRunStatus.WAITING_INPUT:
+        data.update(event="interrupted", reason="user_input_required")
+    elif status is WorkbenchRunStatus.CANCELLED:
+        data.update(event="interrupted", reason="cancel_requested")
+    elif status is WorkbenchRunStatus.FAILED:
+        data["error"] = public_error or "Agent 运行失败"
+        if error_code is not None:
+            data["code"] = error_code
+    return data
 
 
 def project_snapshot_values(snapshot: Mapping[str, Any] | None) -> dict[str, Any]:

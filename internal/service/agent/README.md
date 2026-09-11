@@ -26,6 +26,12 @@
 4. `_finish_run` 依次处理结果状态、最终快照、原子落库和提交通知。
 5. 查询服务的 `subscribe` 读取已提交事件；进程内通知只是唤醒机制，数据库是重连的数据源。
 
+详细时序、资源所有权和人工验证步骤见 [Agent 运行基线](../../../docs/agent-runtime-baseline.md)。
+
+事件投影器的公开方法直接返回 `WorkbenchEvent`，事件缓冲、取消和重新填写流程不再二次校验。Run 服务读取历史字典时仍使用 `to_public_event`。
+
+终态展示由 `agent_protocol.state_projector` 的 `project_execution_state` 和 `project_execution_lifecycle` 生成；执行服务保留数据库读取、业务消息状态、错误脱敏和原子提交顺序。
+
 ## 待填写与取消
 
 - `respond_input` 复核答案、身份和配置指纹，提交后才恢复图执行。
