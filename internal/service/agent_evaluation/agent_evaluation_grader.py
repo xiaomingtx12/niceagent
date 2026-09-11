@@ -38,8 +38,14 @@ def evaluate_answer(llm: BaseChatModel, source: dict, criteria: list[str]) -> di
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
     )
+    _validate_grade(grade, source, criterion_count=len(criteria))
+    return _summarize_grade(grade)
+
+
+def _validate_grade(grade: EvaluationGrade, source: dict, *, criterion_count: int) -> None:
+    """结构校验之外再核对标准覆盖及原文引用，防止不完整或伪造评分进入汇总。"""
     ids = [check.criterion_id for check in grade.checks]
-    if sorted(ids) != list(range(1, len(criteria) + 1)):
+    if sorted(ids) != list(range(1, criterion_count + 1)):
         raise ValueError("评分未逐项覆盖标准")
     for check in grade.checks:
         quote = check.evidence_quote
@@ -50,6 +56,10 @@ def evaluate_answer(llm: BaseChatModel, source: dict, criteria: list[str]) -> di
             raise ValueError("评分引用不在原始文本中")
         if check.verdict == "passed" and not quote:
             raise ValueError("通过项缺少证据")
+
+
+def _summarize_grade(grade: EvaluationGrade) -> dict:
+    """证据不足时仅汇总可评项目；总体评分留空，避免把弃评当作零分或通过。"""
     checks = [
         check.model_dump()
         for check in sorted(grade.checks, key=lambda check: check.criterion_id)
@@ -64,6 +74,12 @@ def evaluate_answer(llm: BaseChatModel, source: dict, criteria: list[str]) -> di
     ]
     evaluated = passed + failed
     evaluated_score = round(sum(score_values) / evaluated, 3) if evaluated else None
+    if failed:
+        outcome = "failed"
+    elif insufficient:
+        outcome = "insufficient_evidence"
+    else:
+        outcome = "passed"
     return {
         "checks": checks,
         "passed": passed,
@@ -78,9 +94,5 @@ def evaluate_answer(llm: BaseChatModel, source: dict, criteria: list[str]) -> di
         "evaluated_pass_rate": (
             round(passed / evaluated * 100, 1) if evaluated else None
         ),
-        "outcome": (
-            "failed"
-            if failed
-            else "insufficient_evidence" if insufficient else "passed"
-        ),
+        "outcome": outcome,
     }

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
+from functools import partial
 from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
 from injector import inject
@@ -134,81 +135,20 @@ class AgentEvaluationService(BaseService):
             if existing is None:
                 raise
             return self._reuse_submission(existing, req)
-        try:
-            run_agent_evaluation.apply_async(
-                args=[str(evaluation_id)],
-                retry=False,
-                expires=EVALUATION_DEADLINE_SECONDS,
-                soft_time_limit=720 if req.mode == "execute" else 240,
-                time_limit=750 if req.mode == "execute" else 270,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Evaluation dispatch failed for %s (%s)",
-                evaluation_id,
-                type(exc).__name__,
-            )
-            self._finish(
-                evaluation_id, ("queued",), error="测评队列暂不可用，请稍后新建测评。"
-            )
+        self._dispatch(evaluation_id, execute=req.mode == "execute")
         self.db.session.refresh(evaluation)
         return evaluation
 
     def process(self, evaluation_id: UUID) -> None:
         """数据库条件更新保证重复投递最多执行一次；只使用提交时冻结的材料。"""
-        self._expire_pending(
-            self.db.session.query(AgentEvaluation).filter(
-                AgentEvaluation.id == evaluation_id
-            )
-        )
-        with self.db.auto_commit():
-            claimed = (
-                self.db.session.query(AgentEvaluation)
-                .filter(
-                    AgentEvaluation.id == evaluation_id,
-                    AgentEvaluation.status == "queued",
-                )
-                .update({"status": "running"}, synchronize_session=False)
-            )
-        if not claimed:
+        # 1.先收敛过期任务并争取执行权，重复投递不再调用模型。
+        evaluation = self._claim(evaluation_id)
+        if evaluation is None:
             return
-        evaluation = self.db.session.get(AgentEvaluation, evaluation_id)
-        self.db.session.refresh(evaluation)
-        config, source, criteria = (
-            evaluation.judge_config,
-            evaluation.source_snapshot,
-            evaluation.criteria,
-        )
-        account_id, app_id = evaluation.account_id, evaluation.app_id
+
+        # 2.执行与保存分开：数据库异常交回基础设施，模型异常写为本次测评失败。
         try:
-            self._owned_app(app_id, account_id)
-            llm = self.language_model_service.load_language_model(config, account_id)
-            execution = source.get("execution")
-            working_model = (
-                self.language_model_service.load_language_model(
-                    execution["definition"]["model_config"],
-                    account_id,
-                )
-                if execution
-                else None
-            )
-            # 模型调用期间不持有数据库事务和连接。
-            self.db.session.commit()
-            if execution:
-                runtime = execute_with_rubric(
-                    working_model=working_model,
-                    judge_model=llm,
-                    query=source["query"],
-                    criteria=criteria,
-                    execution=execution,
-                    evaluation_id=str(evaluation_id),
-                    on_progress=lambda progress: self._save_runtime_progress(
-                        evaluation_id, progress
-                    ),
-                )
-                result = {"runtime": runtime}
-            else:
-                result = evaluate_answer(llm, source, criteria)
+            result = self._evaluate_snapshot(evaluation)
         except SQLAlchemyError:
             # 数据库故障交回基础设施处理，不能误写成模型评分失败。
             self.db.session.rollback()
@@ -224,6 +164,7 @@ class AgentEvaluationService(BaseService):
                 error="评分模型调用失败或返回无效评分，请检查模型后新建测评。",
             )
             return
+        # 3.模型返回后再次检查截止时间，迟到结果不能覆盖已经超时的记录。
         self._expire_pending(
             self.db.session.query(AgentEvaluation).filter(
                 AgentEvaluation.id == evaluation_id
@@ -265,6 +206,75 @@ class AgentEvaluationService(BaseService):
         if row is None:
             raise NotFoundException("测评记录不存在")
         return row
+
+    def _dispatch(self, evaluation_id: UUID, *, execute: bool) -> None:
+        """只投递已提交的记录 ID；投递失败收敛排队状态，保留记录供页面说明原因。"""
+        try:
+            run_agent_evaluation.apply_async(
+                args=[str(evaluation_id)],
+                retry=False,
+                expires=EVALUATION_DEADLINE_SECONDS,
+                soft_time_limit=720 if execute else 240,
+                time_limit=750 if execute else 270,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Evaluation dispatch failed for %s (%s)",
+                evaluation_id,
+                type(exc).__name__,
+            )
+            self._finish(
+                evaluation_id, ("queued",), error="测评队列暂不可用，请稍后新建测评。"
+            )
+
+    def _claim(self, evaluation_id: UUID) -> AgentEvaluation | None:
+        """先检查提交截止时间，再原子认领排队记录；未取得执行权时不加载冻结材料。"""
+        self._expire_pending(
+            self.db.session.query(AgentEvaluation).filter(AgentEvaluation.id == evaluation_id)
+        )
+        with self.db.auto_commit():
+            claimed = (
+                self.db.session.query(AgentEvaluation)
+                .filter(
+                    AgentEvaluation.id == evaluation_id,
+                    AgentEvaluation.status == "queued",
+                )
+                .update({"status": "running"}, synchronize_session=False)
+            )
+        if not claimed:
+            return None
+        evaluation = self.db.session.get(AgentEvaluation, evaluation_id)
+        self.db.session.refresh(evaluation)
+        return evaluation
+
+    def _evaluate_snapshot(self, evaluation: AgentEvaluation) -> dict:
+        """从冻结材料加载模型；提交读取事务后不再访问 ORM 对象，避免模型调用占用连接。"""
+        evaluation_id = evaluation.id
+        config, source, criteria = (
+            evaluation.judge_config, evaluation.source_snapshot, evaluation.criteria,
+        )
+        account_id, app_id = evaluation.account_id, evaluation.app_id
+        self._owned_app(app_id, account_id)
+        judge_model = self.language_model_service.load_language_model(config, account_id)
+        execution = source.get("execution")
+        working_model = None
+        if execution:
+            working_model = self.language_model_service.load_language_model(
+                execution["definition"]["model_config"], account_id,
+            )
+        self.db.session.commit()
+        if not execution:
+            return evaluate_answer(judge_model, source, criteria)
+        runtime = execute_with_rubric(
+            working_model=working_model,
+            judge_model=judge_model,
+            query=source["query"],
+            criteria=criteria,
+            execution=execution,
+            evaluation_id=str(evaluation_id),
+            on_progress=partial(self._save_runtime_progress, evaluation_id),
+        )
+        return {"runtime": runtime}
 
     @staticmethod
     def _check_schema_error(error: IntegrityError) -> None:
