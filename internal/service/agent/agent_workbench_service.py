@@ -9,7 +9,6 @@ from uuid import UUID, uuid4
 
 from injector import inject
 from internal.entity import (
-    WORKBENCH_ACTIVE_STATUSES,
     WORKBENCH_TERMINAL_STATUSES,
     WorkbenchRun,
     WorkbenchRunInput,
@@ -23,7 +22,6 @@ from internal.entity.agent_run_interaction import (
     RunCancellation,
 )
 from internal.exception import NotFoundException, ValidateErrorException
-from internal.model import AgentRun
 from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
 from internal.entity.agent_invocation import (
     AgentInvocation,
@@ -100,18 +98,7 @@ class AgentWorkbenchService:
         with self.db.auto_commit():
             # 1.先锁会话再锁最新 Run，与启动和重新填写保持同一锁顺序。
             self.run_service.lock_conversation(context)
-            row = (
-                self.db.session.query(AgentRun)
-                .populate_existing()
-                .filter(
-                    AgentRun.conversation_id == context.conversation_id,
-                    AgentRun.app_id == context.app_id,
-                    AgentRun.invoke_from == context.invoke_from.value,
-                )
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .with_for_update()
-                .first()
-            )
+            row = self.run_service.lock_latest_context_run(context)
             if row is None:
                 raise NotFoundException("待回答任务不存在")
             interaction = AgentRunInteraction(row.status, row.state_snapshot)
@@ -154,13 +141,8 @@ class AgentWorkbenchService:
         with self.db.auto_commit():
             # 1.锁定会话和最新 Run，仅允许重新填写当前入口最近停止的表单。
             self.run_service.lock_conversation(context)
-            row = (
-                self.db.session.query(AgentRun)
-                .populate_existing()
-                .filter(AgentRun.conversation_id == context.conversation_id)
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .with_for_update()
-                .first()
+            row = self.run_service.get_latest_conversation_run(
+                context.conversation_id, for_update=True,
             )
             if row is None:
                 raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
@@ -281,16 +263,7 @@ class AgentWorkbenchService:
         context: AgentInvocationContext,
     ) -> RunRejected | None:
         """判断会话是否仍被活动、停止中或待输入的 Run 占用。"""
-        active_run = (
-            self.db.session.query(AgentRun)
-            .filter(
-                AgentRun.conversation_id == context.conversation_id,
-                AgentRun.status.in_(
-                    (*WORKBENCH_ACTIVE_STATUSES, WorkbenchRunStatus.WAITING_INPUT.value)
-                ),
-            )
-            .first()
-        )
+        active_run = self.run_service.get_blocking_run(context.conversation_id)
         local_run = self.queue_manager.get(context.conversation_id)
         has_active_database_run = active_run is not None
         has_active_local_run = local_run is not None and not local_run.done.is_set()
@@ -308,12 +281,7 @@ class AgentWorkbenchService:
                 reason = "当前任务已有正在执行的 Agent"
             return RunRejected(message=reason)
 
-        previous = (
-            self.db.session.query(AgentRun)
-            .filter(AgentRun.conversation_id == context.conversation_id)
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-            .first()
-        )
+        previous = self.run_service.get_latest_conversation_run(context.conversation_id)
         if previous is None or previous.status != WorkbenchRunStatus.CANCELLED.value:
             return None
         reason = AgentRunInteraction(previous.status, previous.state_snapshot).start_conflict()

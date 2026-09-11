@@ -89,6 +89,50 @@ class AgentWorkbenchRunService:
         if conversation is None:
             raise NotFoundException("会话不存在或已删除")
 
+    def lock_latest_context_run(self, context: AgentInvocationContext) -> AgentRun | None:
+        """调用方先锁会话；提交答案只锁定当前应用和入口的最新 Run，不提前释放事务。"""
+        return (
+            self.db.session.query(AgentRun)
+            .populate_existing()
+            .filter(
+                AgentRun.conversation_id == context.conversation_id,
+                AgentRun.app_id == context.app_id,
+                AgentRun.invoke_from == context.invoke_from.value,
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .with_for_update()
+            .first()
+        )
+
+    def get_latest_conversation_run(
+        self, conversation_id: UUID, *, for_update: bool = False,
+    ) -> AgentRun | None:
+        """跨入口读取会话最后一次运行；重新填写不能跳过其他入口后来创建的 Run。
+
+        锁定时调用方须先锁会话，本方法保留调用方 Session 和事务。
+        """
+        query = self.db.session.query(AgentRun)
+        if for_update:
+            query = query.populate_existing().with_for_update()
+        return (
+            query.filter(AgentRun.conversation_id == conversation_id)
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .first()
+        )
+
+    def get_blocking_run(self, conversation_id: UUID) -> AgentRun | None:
+        """启动前检查整个会话的占用，等待表单也阻止新运行；调用方持有会话锁。"""
+        return (
+            self.db.session.query(AgentRun)
+            .filter(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.status.in_(
+                    (*WORKBENCH_ACTIVE_STATUSES, WorkbenchRunStatus.WAITING_INPUT.value)
+                ),
+            )
+            .first()
+        )
+
     def queue_resumed_run(
         self, row: AgentRun, run: WorkbenchRun, snapshot: Mapping[str, Any],
     ) -> None:

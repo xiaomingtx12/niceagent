@@ -1,6 +1,8 @@
 """Agent 模型选择规则：默认、手动覆盖、连接授权与推理参数共用一个解析入口。"""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 from injector import inject
 
@@ -8,7 +10,7 @@ from internal.core.language_model.entities.model_entity import ModelEntity, Mode
 from internal.core.language_model.parameters import canonicalize_parameters
 from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import ValidateErrorException
+from internal.exception import NotFoundException, ValidateErrorException
 from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
@@ -32,6 +34,32 @@ class AgentModelService:
 
     language_model_service: LanguageModelService
     definition_service: AgentDefinitionService
+
+    def restore_workbench_model_settings(
+        self,
+        context: AgentInvocationContext,
+        saved: Mapping[str, Any],
+    ) -> WorkbenchModelSettingsResp:
+        """仅恢复明确的历史模型选择；失效覆盖回退到当前默认模型，不沿用旧思考强度。"""
+        # 1.旧客户端回传的默认展示值不能把会话永久绑定到旧模型。
+        if saved.get("model_selection") and saved.get("model_selection_explicit") is not True:
+            saved = {}
+        try:
+            raw_selection = saved.get("model_selection")
+            selection = WorkbenchModelSelection.model_validate(raw_selection) if raw_selection else None
+            settings = self.get_workbench_model_settings(context, selection)
+        except (NotFoundException, ValidateErrorException, ValueError):
+            # 2.历史连接停用或配置失效时重新解析默认值；默认也失效则返回空设置。
+            try:
+                return self.get_workbench_model_settings(context)
+            except (NotFoundException, ValidateErrorException, ValueError):
+                return WorkbenchModelSettingsResp()
+
+        # 3.只有模型恢复成功，且当前模型仍声明该等级，才恢复历史思考强度。
+        effort = saved.get("reasoning_effort")
+        if effort in settings.reasoning_levels:
+            return settings.model_copy(update={"selected_reasoning_effort": effort})
+        return settings
 
     def get_workbench_model_settings(
         self,

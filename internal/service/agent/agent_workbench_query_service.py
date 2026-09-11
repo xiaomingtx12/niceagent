@@ -8,8 +8,7 @@ from uuid import UUID
 
 from injector import inject
 from internal.entity import WORKBENCH_ACTIVE_STATUSES, WORKBENCH_TERMINAL_STATUSES
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
-from internal.exception import NotFoundException, ValidateErrorException
+from internal.exception import NotFoundException
 from internal.model import Account, AgentRun
 from internal.entity.agent_invocation import (
     AgentInvocationContext,
@@ -155,32 +154,7 @@ class AgentWorkbenchQueryService:
             conversation_id=context.conversation_id,
             invoke_from=context.invoke_from,
         )
-        # 旧记录没有区分默认展示与手动选择，不能据此固定以后运行的模型。
-        if saved.get("model_selection") and saved.get("model_selection_explicit") is not True:
-            saved = {}
-        # 1.优先恢复历史选择；解析或授权失败时再尝试当前默认配置。
-        settings = None
-        try:
-            raw_selection = saved.get("model_selection")
-            selection = None
-            if raw_selection:
-                selection = WorkbenchModelSelection.model_validate(raw_selection)
-            settings = self.model_service.get_workbench_model_settings(context, selection)
-        except (NotFoundException, ValidateErrorException, ValueError):
-            # 旧模型被停用后不再恢复它的思考强度，防止套用到另一个模型。
-            saved = {}
-
-        # 2.默认配置也可能失效，此时让客户端展示空设置而不是中断任务页面。
-        if settings is None:
-            try:
-                settings = self.model_service.get_workbench_model_settings(context)
-            except (NotFoundException, ValidateErrorException, ValueError):
-                return WorkbenchModelSettingsResp()
-            return settings
-        effort = saved.get("reasoning_effort")
-        if effort in settings.reasoning_levels:
-            settings = settings.model_copy(update={"selected_reasoning_effort": effort})
-        return settings
+        return self.model_service.restore_workbench_model_settings(context, saved)
 
     def get_run_observability(
         self,
