@@ -2,7 +2,6 @@
 
 from .agent_memory import (
     AGENT_MEMORY_NAMESPACE_ROOT,
-    AGENT_MEMORY_SOURCE,
     AGENT_MEMORY_VIRTUAL_ROOT,
     AgentMemoryFile,
     AgentMemoryIdentity,
@@ -34,7 +33,6 @@ from .workspace_scope import build_workspace_scope_id
 
 __all__ = [
     "AGENT_MEMORY_NAMESPACE_ROOT",
-    "AGENT_MEMORY_SOURCE",
     "AGENT_MEMORY_VIRTUAL_ROOT",
     "AgentMemoryFile",
     "AgentMemoryIdentity",

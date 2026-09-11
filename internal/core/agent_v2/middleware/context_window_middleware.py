@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from math import ceil
 from typing import Any
 from uuid import uuid4
 
@@ -13,7 +14,6 @@ from langchain_core.messages import BaseMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.stream import CustomTransformer
 
-from internal.core.agent_v2.entity.memory_entry import estimate_memory_tokens
 from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.execution.message_parser import message_content_to_text, response_messages
 
@@ -52,13 +52,13 @@ class ContextWindowMiddleware(AgentMiddleware[AgentState, AgentRunContext, Any])
 def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
     """输出固定分类的计数；未知窗口容量或输出上限保持 null，不猜测模型配置。"""
     system = message_content_to_text(request.system_message.content) if request.system_message else ""
-    memory_blocks = re.findall(r"<agent_memory>.*?</agent_memory>|<memory_guidelines>.*?</memory_guidelines>|<长期记忆(?:规则|参考)>.*?</长期记忆(?:规则|参考)>", system, re.DOTALL)
+    memory_blocks = re.findall(r"<agent_memory>.*?</agent_memory>|<memory_guidelines>.*?</memory_guidelines>|<长期记忆规则>.*?</长期记忆规则>", system, re.DOTALL)
     memory = "\n".join(memory_blocks)
     for block in memory_blocks:
         system = system.replace(block, "", 1)
     sections = {
-        "system": {"key": "system", "label": "系统与技能", "tokens": estimate_memory_tokens(system), "count": int(bool(system))},
-        "memory": {"key": "memory", "label": "长期记忆与规则", "tokens": estimate_memory_tokens(memory), "count": len(memory_blocks)},
+        "system": {"key": "system", "label": "系统与技能", "tokens": _estimate_text_tokens(system), "count": int(bool(system))},
+        "memory": {"key": "memory", "label": "长期记忆与规则", "tokens": _estimate_text_tokens(memory), "count": len(memory_blocks)},
         "human": {"key": "human", "label": "用户消息", "tokens": 0, "count": 0},
         "assistant": {"key": "assistant", "label": "助手消息与工具调用", "tokens": 0, "count": 0},
         "tool": {"key": "tool", "label": "工具返回", "tokens": 0, "count": 0},
@@ -81,10 +81,10 @@ def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
         text = message_content_to_text(content)
         if calls:
             text += json.dumps(calls, ensure_ascii=False, default=str)
-        sections[key]["tokens"] += estimate_memory_tokens(text) + 4
+        sections[key]["tokens"] += _estimate_text_tokens(text) + 4
         sections[key]["count"] += 1
     tools = [dict(item) if isinstance(item, Mapping) else convert_to_openai_tool(item) for item in request.tools or []]
-    sections["tools"]["tokens"] = estimate_memory_tokens(json.dumps(tools, ensure_ascii=False)) if tools else 0
+    sections["tools"]["tokens"] = _estimate_text_tokens(json.dumps(tools, ensure_ascii=False)) if tools else 0
     metadata = getattr(request.model, "metadata", None) or {}
     profile = getattr(request.model, "profile", None) or {}
     window = positive_int(metadata.get("context_window"))
@@ -134,3 +134,8 @@ def complete_context_snapshot(snapshot: dict, response: Any) -> dict:
 def positive_int(value: Any) -> int | None:
     """排除 bool、零和未知配置，避免展示虚假的窗口容量。"""
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _estimate_text_tokens(value: str) -> int:
+    """窗口展示使用保守的 UTF-8 字节估算，不代表供应商实际计费用量。"""
+    return ceil(len(value.encode("utf-8")) / 2)

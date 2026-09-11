@@ -29,8 +29,6 @@ _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
         "glob",
         "grep",
         "execute",
-        "search_memory",
-        "update_memory",
         "delete_memory_file",
         "ask_user",
     }

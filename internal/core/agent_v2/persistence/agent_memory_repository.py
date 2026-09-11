@@ -22,11 +22,6 @@ from internal.core.agent_v2.entity.agent_memory import (
     memory_virtual_path_to_store_key,
 )
 from .memory_file_transaction import memory_file_transaction
-from .legacy_memory_import import (
-    ensure_legacy_memories_imported,
-    legacy_entries_namespace,
-    legacy_import_metadata_namespace,
-)
 from internal.core.agent_v2.persistence.langgraph_store_provider import (
     get_configured_store,
 )
@@ -52,10 +47,10 @@ class AgentMemoryRepository:
     store_provider: Callable[[], BaseStore] = get_configured_store
 
     def list_files(self, identity: AgentMemoryIdentity) -> list[AgentMemoryFile]:
-        """兼容首次读取时的旧目录转换，再列出当前主体的全部文本记忆。"""
+        """只读取当前主体的文件记忆，不在查询时写入或转换数据。"""
 
         def operation(store: BaseStore) -> list[AgentMemoryFile]:
-            ensure_legacy_memories_imported(store, identity)
+            """在同一 Store 上完成分页读取和更新时间排序。"""
             rows = [
                 self._item_to_entity(item)
                 for item in self._search_all(store, identity.namespace)
@@ -182,20 +177,6 @@ class AgentMemoryRepository:
                     store.delete(namespace, item.key)
 
         self._execute(operation)
-
-        # 结构化目录使用独立 namespace，同一应用清理必须覆盖两种存储。
-        identity = AgentMemoryIdentity(account_id=account_id, app_id=app_id)
-        self._execute(
-            lambda store: store.delete(
-                legacy_entries_namespace(identity), "catalog"
-            )
-        )
-        self._execute(
-            lambda store: store.delete(
-                legacy_import_metadata_namespace(identity),
-                "imported",
-            )
-        )
 
     @classmethod
     def _check_expected(cls, item: Any, expected: str | None) -> None:

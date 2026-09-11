@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AGENT_MEMORY_NAMESPACE_ROOT = ("mydify", "agent-memory")
 AGENT_MEMORY_VIRTUAL_ROOT = "/memories/"
-AGENT_MEMORY_SOURCE = "/memories/MEMORY.md"
 AGENT_MEMORY_INDEX = "/memories/.index.md"
 AGENT_MEMORY_CATEGORIES = {
     "preferences": "用户偏好",
@@ -186,7 +185,6 @@ def _normalize_relative_path(relative: str, *, original: str) -> str:
 
 __all__ = [
     "AGENT_MEMORY_NAMESPACE_ROOT",
-    "AGENT_MEMORY_SOURCE",
     "AGENT_MEMORY_VIRTUAL_ROOT",
     "AgentMemoryFile",
     "AgentMemoryIdentity",

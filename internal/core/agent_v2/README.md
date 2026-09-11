@@ -13,7 +13,7 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | 沙箱提供者选择及会话复用 | `backends/sandbox/sandbox_backend_factory.py` |
 | 工作空间同步和版本冲突 | `backends/sandbox/sandbox_workspace_sync.py` |
 | Skill 路由和长期记忆路由 | `assembly/context/skill_context.py`、`memory_context.py` |
-| 旧记忆目录兼容转换 | `persistence/legacy_memory_import.py` |
+| 文件记忆存取与并发校验 | `persistence/agent_memory_repository.py` |
 | 用户提问工具装配与暂停识别 | `middleware/user_input_middleware.py`、`observability/user_input_interrupt_tracker.py` |
 | 框架 Checkpoint 与 Store | `persistence/` |
 | 模型调用、工具调用与用量记录 | `observability/run_observer.py` |
@@ -41,4 +41,4 @@ Core 的 `PendingUserInput` 验证表单字段与答案。平台的 `AgentRunInt
 
 输出审核由图中间件保护状态写入，`AgentEventDelivery` 保护事件公开，两处检查职责不同。开启审核时仍需缓存整轮原生事件；失败和取消立即丢弃缓存，不对任意工具对象增加序列化要求。
 
-长期记忆列表首次读取仍在原有事务内触发旧目录转换。文件仓储处理正常存取；兼容模块负责文件命名、旧摘要抑制和导入标记，不改变存储格式。
+长期记忆统一使用 `/memories/` 下的分类 Markdown 文件，StoreBackend 按账号与应用隔离存储。`ReloadingMemoryMiddleware` 每次模型请求刷新只读目录 `.index.md`，文件增改复用原生工具，删除使用 `delete_memory_file`。文件仓储负责存取、容量限制和内容摘要并发校验；列表查询只读，不做旧目录导入，也不维护结构化条目、修订历史或导入标记。

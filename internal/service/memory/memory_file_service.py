@@ -79,7 +79,6 @@ class MemoryFileService:
             normalized_path = normalize_agent_memory_path(path)
             if normalized_path == AGENT_MEMORY_INDEX:
                 raise AgentMemoryPathError("记忆索引由系统生成，不能编辑")
-            self.agent_memory_repository.list_files(identity)
             return self.agent_memory_repository.put_file(
                 identity,
                 path=normalized_path,
