@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from uuid import UUID
 
-from internal.exception import UnauthorizedException
+from internal.exception import FailException, UnauthorizedException
 
 
 @dataclass(frozen=True)
@@ -35,7 +35,7 @@ def issue_internal_agent_protocol_token(
 ) -> str:
     """签发绑定账号、父应用和目标应用的短期凭证。"""
     if not secret:
-        raise RuntimeError("AGENT_INTERNAL_PROTOCOL_SECRET 未配置")
+        raise FailException("内部 Agent Protocol 密钥未配置")
     issued_at = int(time.time() if now is None else now)
     expires_at = issued_at + max(60, int(ttl_seconds))
     payload = {

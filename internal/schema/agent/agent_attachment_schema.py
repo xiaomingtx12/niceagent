@@ -37,16 +37,14 @@ class AgentAttachmentResp(BaseModel):
             mime_type=attachment.mime_type,
         )
 
-    def dump(self) -> dict[str, Any]:
-        """使用 JSON 模式输出稳定的协议字典。"""
-        return self.model_dump(mode="json")
-
-
 def dump_agent_attachments(
     attachments: Sequence[AgentAttachment],
 ) -> list[dict[str, Any]]:
     """批量投影附件响应并保持提交顺序。"""
-    return [AgentAttachmentResp.from_entity(item).dump() for item in attachments]
+    return [
+        AgentAttachmentResp.from_entity(item).model_dump(mode="json")
+        for item in attachments
+    ]
 
 
 __all__ = [

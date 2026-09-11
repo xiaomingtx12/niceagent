@@ -7,7 +7,7 @@ from langchain_core.tools import BaseTool, tool
 from config import Config
 from internal.core.language_model.entities.model_entity import BaseLanguageModel
 from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import NotFoundException
+from internal.exception import FailException, NotFoundException
 from internal.model import Account, Conversation
 from internal.schema.agent.agent_tool_schema import (
     AppWithWorkflowGeneratorToolReq,
@@ -49,7 +49,7 @@ class AssistantAgentService(BaseService):
         try:
             app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
         except (AttributeError, TypeError, ValueError) as exc:
-            raise RuntimeError("辅助 Agent 应用配置无效") from exc
+            raise FailException("辅助 Agent 应用配置无效") from exc
 
         with self.db.auto_commit():
             locked_account = (
@@ -76,7 +76,7 @@ class AssistantAgentService(BaseService):
         try:
             app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
         except (AttributeError, TypeError, ValueError) as exc:
-            raise RuntimeError("辅助 Agent 应用配置无效") from exc
+            raise FailException("辅助 Agent 应用配置无效") from exc
         conversation = self.conversation_service.get_owned_conversation(
             conversation_id=conversation_id,
             account=account,
