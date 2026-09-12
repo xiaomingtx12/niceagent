@@ -5,7 +5,8 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | 要修改的行为 | 阅读入口 |
 | --- | --- |
 | 一次运行如何创建资源和执行器 | `assembly/runtime_assembler.py` |
-| 主图、子图及中间件组成 | `assembly/graph/deep_agent_factory.py` |
+| 主图、子图及 DeepAgents 参数 | `assembly/graph/deep_agent_factory.py` |
+| 中间件启用条件、顺序、重试与调用限制 | `assembly/graph/platform_middleware.py` |
 | 已解析子 Agent 到框架规格的转换 | `assembly/graph/subagent_spec_adapter.py` |
 | 执行、取消、恢复与结果提取 | `execution/agent_executor.py` |
 | 输出审核与原生事件交付 | `execution/event_delivery.py` |
@@ -66,3 +67,11 @@ Core 的 `PendingUserInput` 验证表单字段与答案。平台的 `AgentRunInt
 长期记忆统一使用 `/memories/` 下的分类 Markdown 文件，StoreBackend 按账号与应用隔离存储。`ReloadingMemoryMiddleware` 每次模型请求刷新只读目录 `.index.md`，文件增改复用原生工具，删除使用 `delete_memory_file`。文件仓储负责存取、容量限制和内容摘要并发校验；列表查询只读，不做旧目录导入，也不维护结构化条目、修订历史或导入标记。
 
 目录排版由 `render_memory_index` 消费文件快照，不访问 Store；目录与偏好正文的 UTF-8 字节预算在该函数所在模块维护。HTTP 管理接口与模型工具共用领域层的可写路径规则，新建、覆盖、重命名源/目标和删除都禁止修改系统索引。模型编辑在同一事务内读取、替换、校验和写回，文件格式转换与时间戳更新复用框架实现。
+
+## 中间件顺序与职责
+
+`platform_middleware.py` 是平台策略的装配入口。平台链顺序固定为：Skill 授权刷新 → 工具消息校验 → Runtime Context → Review → 模型重试 → 只读工具重试 → 模型调用限制 → 工具调用限制 → 可选 Memory 刷新 → Context Window → 可选 User Input。调整分组不代表可以重排执行顺序。
+
+DeepAgents 在平台链之前提供 Todo、Skills、Filesystem、SubAgent、摘要和工具调用补齐，尾部保留框架缓存及按权限生成的人工审批。平台 `ReloadingSkillsMiddleware(system_prompt=None)` 只刷新本轮授权元数据，官方 Skills 负责提示词，不重复注入；`memory=None` 则避免默认 Memory 与平台刷新逻辑重复。工具调用补齐负责中断后的消息配对，平台校验负责拒绝无效工具调用，不能互相替代。
+
+`ContextWindowMiddleware` 观测当前模型请求，不负责摘要压缩。User Input 只在本轮允许提问且存在 Checkpointer 时加入主图，其提示词由 `agent_system_prompt.py` 统一构建。自定义子 Agent 显式绑定已授权工具、Skill 和权限；测评专用中间件由测评入口装配。

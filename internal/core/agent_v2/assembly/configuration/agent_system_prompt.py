@@ -36,9 +36,10 @@ def build_app_system_prompt(
     app_description: str,
     preset_prompt: str,
     memory_enabled: bool = False,
+    user_input_enabled: bool = False,
 ) -> str:
     """构造稳定的应用身份提示词。"""
-    return BASE_AGENT_PROMPT.format(
+    prompt = BASE_AGENT_PROMPT.format(
         app_name=(app_name or "智能助手").strip(),
         app_description=(app_description or "提供准确、可靠的任务协助。").strip(),
         preset_prompt=(preset_prompt or "准确理解用户需求并完成任务。").strip(),
@@ -51,6 +52,16 @@ def build_app_system_prompt(
             else ""
         ),
     )
+    if user_input_enabled:
+        prompt += (
+            "\n当缺少影响任务结果的必要信息时，调用 ask_user 向用户展示表单。"
+            "一次收集相关问题，已有答案不要重复询问。等待用户填写后再继续依赖这些信息的工作。"
+            "需要用户补充的信息由主 Agent 汇总提问。"
+            "工具返回的答案是本任务已确认约束，继续执行时遵守；用户没有提出修改时不要重复提问。"
+            "用户标记 unavailable 或 skipped 时，不要声称已获得信息；可行时说明假设继续，否则解释缺少什么。"
+            "delegate 只允许代选对应字段，不代表用户授权执行其他操作。优先一次询问最关键的 1 至 3 个问题。"
+        )
+    return prompt
 
 
 def build_dynamic_context(*, invoked_at: str, planning_enabled: bool = False) -> str:
