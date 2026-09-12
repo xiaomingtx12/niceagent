@@ -24,12 +24,11 @@ from internal.core.agent_v2 import (
     AsyncSubAgentDefinition,
     SubAgentDefinition,
     SyncSubAgentDefinition,
+    PlatformAgentRunObserver,
+    AgentWorkspaceLimits,
 )
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
-)
-from internal.core.agent_v2.observability.run_observer import (
-    PlatformAgentRunObserver,
 )
 from internal.entity.subagent_config import (
     SubAgentConfig,
@@ -49,7 +48,6 @@ from internal.extension.logging_extension import logger
 from internal.model import Account, App
 from internal.repository import WorkspaceFileStore
 from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
-from internal.core.agent_v2.entity.workspace_quota import AgentWorkspaceLimits
 from internal.entity.agent_invocation import (
     AgentInvocation,
 )

@@ -31,8 +31,10 @@ from internal.entity.agent_invocation import (
     AgentInvocation,
     AgentInvocationContext,
 )
-from internal.core.agent_v2.entity.user_input import build_confirmed_input_context
-from internal.core.agent_v2.observability.run_snapshot import merge_run_observability
+from internal.core.agent_v2 import (
+    build_confirmed_input_context,
+    merge_run_observability,
+)
 from internal.service.conversation.conversation_service import ConversationService
 from internal.schema.agent.agent_workbench_schema import (
     WorkbenchEvent,

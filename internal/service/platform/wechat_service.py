@@ -12,7 +12,7 @@ from wechatpy.exceptions import InvalidSignatureException
 from wechatpy.replies import TextReply
 from wechatpy.utils import check_signature
 
-from internal.core.agent_v2.observability.run_observer import (
+from internal.core.agent_v2 import (
     PlatformAgentRunObserver,
 )
 from internal.entity.app_entity import AppStatus

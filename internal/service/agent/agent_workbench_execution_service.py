@@ -11,28 +11,22 @@ from typing import Any, ClassVar
 
 from injector import inject
 from flask import Flask, current_app
-from psycopg_pool import PoolTimeout
 
-from internal.core.agent_v2.observability.run_observer import (
+from internal.core.agent_v2 import (
     PlatformAgentRunObserver,
-)
-from internal.core.agent_v2 import AgentExecutor, AgentExecutionResult
-from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
+    AgentExecutor,
+    AgentExecutionResult,
     AgentMessageError,
+    ReviewBlocked,
+    get_postgres_pool_stats,
+    AGENT_PERSISTENCE_ERRORS,
 )
-from internal.core.agent_v2.middleware.review_middleware import ReviewBlocked
 from internal.service.agent_protocol.event_projector import (
     AgentProtocolEventProjector,
 )
 from internal.service.agent_protocol.state_projector import (
     project_execution_lifecycle,
     project_execution_state,
-)
-from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import (
-    get_postgres_pool_stats,
-)
-from internal.core.agent_v2.persistence.postgres_connection import (
-    POSTGRES_CONNECTION_ERRORS,
 )
 from internal.entity import WorkbenchRun, WorkbenchRunStatus
 from internal.entity.conversation_entity import MessageStatus
@@ -47,8 +41,6 @@ from .agent_workbench_event_buffer import AgentWorkbenchEventBuffer
 from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
 from .agent_workbench_run_service import AgentWorkbenchRunService
 
-
-_AGENT_PERSISTENCE_ERRORS = (*POSTGRES_CONNECTION_ERRORS, PoolTimeout)
 
 
 @inject
@@ -307,7 +299,7 @@ class AgentWorkbenchRunExecutionService:
                 public_error = "输出内容未通过审核。"
             message_updates = {"status": MessageStatus.ERROR, "error": public_error}
             run.error_message = str(error) if error is not None else ""
-            if isinstance(error, _AGENT_PERSISTENCE_ERRORS):
+            if isinstance(error, AGENT_PERSISTENCE_ERRORS):
                 logger.error(
                     "Agent PostgreSQL 持久化失败 error_type=%s checkpoint_pool_stats=%s",
                     type(error).__name__,

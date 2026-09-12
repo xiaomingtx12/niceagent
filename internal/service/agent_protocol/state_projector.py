@@ -4,8 +4,10 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from uuid import UUID
 
-from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
-from internal.core.agent_v2.entity.user_input import PendingUserInput
+from internal.core.agent_v2 import (
+    AgentExecutionResult,
+    PendingUserInput,
+)
 from internal.entity import WORKBENCH_TERMINAL_STATUSES, WorkbenchRunStatus
 from internal.model import AgentRun
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent

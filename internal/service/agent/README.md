@@ -60,3 +60,11 @@
 - `internal/schema/agent/agent_model_schema.py`：工作台模型选项的公开响应。
 - `internal/schema/agent/agent_cleanup_schema.py`：应用、会话和消息的清理请求。
 - `ApplicationAgentDefinition`：一次读取的应用名称、所有者和配置，替代需要记住字段位置的四元组。
+
+## Core 依赖入口
+
+运行装配、执行、事件缓冲及 Run 持久化统一从 `internal.core.agent_v2` 获取执行器、观测入口、错误分类、恢复上下文和观测合并函数。执行服务不从具体中间件实现导入异常，也不自行拼接 psycopg 错误集合；异常分类及池诊断入口由 Core 提供。
+
+装配服务仍负责模型/工具/Skill 授权、可信上下文和附件准备，Workspace 数据库适配器通过工厂交给 Core。附件服务使用 BackendProtocol 作为文件写入契约，不构造框架中间件或图。会话删除属于业务资源清理，持久化和沙箱删除适配器保留独立入口。
+
+执行服务的调度、跨进程取消、租约和公开错误映射仍在平台层；Run 服务负责数据库锁、事件/消息/快照的原子提交，观测合并函数只处理数据。没有引入新的 Service 或转发类。

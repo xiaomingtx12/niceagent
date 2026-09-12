@@ -12,7 +12,9 @@ from langchain_core.language_models._compat_bridge import message_to_events
 from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
-from internal.core.agent_v2.entity.agent_event import AgentEvent
+from internal.core.agent_v2 import (
+    AgentEvent,
+)
 from internal.schema.agent.agent_context_schema import (
     ContextCompactionResp,
     ContextWindowResp,

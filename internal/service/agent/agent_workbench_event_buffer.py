@@ -3,8 +3,10 @@
 import time
 from collections.abc import Mapping
 
-from internal.core.agent_v2.entity.agent_event import AgentEvent
-from internal.core.agent_v2.observability.run_observer import PlatformAgentRunObserver
+from internal.core.agent_v2 import (
+    AgentEvent,
+    PlatformAgentRunObserver,
+)
 from internal.entity import WorkbenchRun
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent

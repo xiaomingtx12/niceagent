@@ -16,6 +16,7 @@ POSTGRES_CONNECTION_ERRORS = (
     PsycopgOperationalError,
     PsycopgInterfaceError,
 )
+AGENT_PERSISTENCE_ERRORS = (*POSTGRES_CONNECTION_ERRORS, PoolTimeout)
 T = TypeVar("T")
 
 
@@ -85,6 +86,7 @@ def execute_with_postgres_retry(
 
 __all__ = [
     "POSTGRES_CONNECTION_ERRORS",
+    "AGENT_PERSISTENCE_ERRORS",
     "build_langgraph_pool_config",
     "execute_with_postgres_retry",
     "pg_uri_for_langgraph",
