@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
@@ -111,11 +112,12 @@ class AgentWorkbenchRunExecutionService:
                 result = self._execute_agent(run, observer, projector, events)
             except Exception as exc:
                 observer.finish("failed", error=exc)
+                snapshot = observer.snapshot()
                 result = AgentExecutionResult(
                     status="failed",
                     error=exc,
-                    usage=observer.build_run_usage(),
-                    observability=observer.snapshot(),
+                    usage=deepcopy(snapshot["usage"]),
+                    observability=snapshot,
                 )
 
             # 2.补齐消息结束分片；尾批失败不能掩盖原始执行错误。
@@ -162,10 +164,11 @@ class AgentWorkbenchRunExecutionService:
             self.run_service.set_status(run, WorkbenchRunStatus.RUNNING)
         if run.cancel_requested.is_set():
             observer.finish("cancelled")
+            snapshot = observer.snapshot()
             return AgentExecutionResult(
                 status="cancelled",
-                usage=observer.build_run_usage(),
-                observability=observer.snapshot(),
+                usage=deepcopy(snapshot["usage"]),
+                observability=snapshot,
             )
 
         # 2.先公开运行状态；恢复执行时清空待填表单，保留已提交回答。

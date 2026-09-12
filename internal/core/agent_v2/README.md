@@ -75,3 +75,15 @@ Core 的 `PendingUserInput` 验证表单字段与答案。平台的 `AgentRunInt
 DeepAgents 在平台链之前提供 Todo、Skills、Filesystem、SubAgent、摘要和工具调用补齐，尾部保留框架缓存及按权限生成的人工审批。平台 `ReloadingSkillsMiddleware(system_prompt=None)` 只刷新本轮授权元数据，官方 Skills 负责提示词，不重复注入；`memory=None` 则避免默认 Memory 与平台刷新逻辑重复。工具调用补齐负责中断后的消息配对，平台校验负责拒绝无效工具调用，不能互相替代。
 
 `ContextWindowMiddleware` 观测当前模型请求，不负责摘要压缩。User Input 只在本轮允许提问且存在 Checkpointer 时加入主图，其提示词由 `agent_system_prompt.py` 统一构建。自定义子 Agent 显式绑定已授权工具、Skill 和权限；测评专用中间件由测评入口装配。
+
+## 观测接口与消费者
+
+LangChain Callback 自动记录模型、工具及子 Agent，业务入口只创建 Observer、记录阶段、结束执行并取快照。结果交付从同一次 `snapshot()` 取得观测与用量；用量保留独立副本，修改结果统计不会改写快照。只需要用量的微信异常兜底仍使用 `build_run_usage()`，避免复制完整明细。
+
+| 数据 | 消费者与保留原因 |
+| --- | --- |
+| Token、缓存/推理明细、调用数、分模型用量 | `ConversationService` 写入消息统计；Protocol 消息 metrics、工作台用量展示和 `AnalysisService` 报表使用。 |
+| Span、阶段、事件、截断计数 | Run 的观测 JSON 和 `/agent-runs/<run_id>/observability` 查询接口用于排障；即使当前页面不展示全部明细，也不能据此删除。 |
+| execution_id、executions、汇总用量 | Run 服务在事务内合并恢复片段并去重，保留已有历史字段与用量别名兼容。 |
+
+Observer 内部只保存可见 Span 的 ID 集合用于查找父节点；Span 实体仍由明细列表及活动调用表持有。锁、晚到回调处理、明细上限和重复结束不计费规则保持不变。

@@ -137,7 +137,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         self._error_type: str | None = None
         self._parents: dict[str, str | None] = {}
         self._active_spans: dict[str, _ObservedSpan] = {}
-        self._observable_spans: dict[str, _ObservedSpan] = {}
+        self._observable_span_ids: set[str] = set()
         self._spans: list[_ObservedSpan] = []
         self._stages: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
@@ -607,7 +607,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
                 self._dropped["spans"] += 1
                 return
             self._spans.append(span)
-            self._observable_spans[span_id] = span
+            self._observable_span_ids.add(span_id)
 
     def _finish_span(
         self,
@@ -655,7 +655,7 @@ class PlatformAgentRunObserver(BaseCallbackHandler):
         current = parent_id
         visited: set[str] = set()
         while current is not None and current not in visited:
-            if current in self._observable_spans:
+            if current in self._observable_span_ids:
                 return current
             visited.add(current)
             current = self._parents.get(current)

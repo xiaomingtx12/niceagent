@@ -1,6 +1,7 @@
 """Agent V2 单次 Deep Agents 图执行与资源生命周期。"""
 
 from collections.abc import Callable, Generator, Mapping
+from copy import deepcopy
 from enum import Enum, auto
 from threading import Event, Lock
 from typing import Any, Literal
@@ -255,13 +256,14 @@ class AgentExecutor:
         elif self._interrupts:
             status = "waiting_input"
         self._observer.finish(status, error=error)
+        snapshot = self._observer.snapshot()
         return AgentExecutionResult(
             status=status,
             interrupts=self._interrupts if status == "waiting_input" else (),
             answer=answer,
             state=state,
-            usage=self._observer.build_run_usage(),
-            observability=self._observer.snapshot(),
+            usage=deepcopy(snapshot["usage"]),
+            observability=snapshot,
             error=error,
         )
 
