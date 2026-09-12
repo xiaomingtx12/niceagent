@@ -109,7 +109,7 @@ AgentInvocation（可信身份、输入、入口、运行选择）
 
 > 我把运行时拆成业务解析和图装配两层。业务层确定应用版本、模型连接以及授权工具和技能，Core 再组合文件 Backend、Checkpointer、Store 和 DeepAgents 图。规划与委派复用原生能力，平台给每个同步子 Agent 显式绑定工具和技能范围，并适配远程异步协议。可靠性上分消息格式、工具 Schema、业务权限三层校验，只重试明确的瞬时错误和只读工具。调用限制是当前图的保护措施，还不是跨远程 Agent 的全局预算。
 
-代码：[业务装配](/D:/spring_project/py/my-dify/internal/service/agent/agent_assembly_service.py)、[资源装配](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/runtime_assembler.py)、[构图与重试](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/graph/deep_agent_factory.py)、[子 Agent 适配](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/graph/subagent_spec_adapter.py)、[消息校验](/D:/spring_project/py/my-dify/internal/core/agent_v2/middleware/tool_call_validation_middleware.py)。
+代码：[业务装配](/D:/spring_project/py/my-dify/internal/service/agent/agent_assembly_service.py)、[资源装配](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/runtime_assembler.py)、[构图](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/graph/deep_agent_factory.py)、[中间件与重试](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/graph/platform_middleware.py)、[子 Agent 适配](/D:/spring_project/py/my-dify/internal/core/agent_v2/assembly/graph/subagent_spec_adapter.py)、[消息校验](/D:/spring_project/py/my-dify/internal/core/agent_v2/middleware/tool_call_validation_middleware.py)。
 
 ## 第二条：任务控制与恢复
 

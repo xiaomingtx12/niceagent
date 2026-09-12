@@ -144,7 +144,6 @@ class AgentAssemblyService:
                 AgentSkill(
                     name=skill.name,
                     skill_md=skill.skill_md,
-                    package_root=skill.package_root,
                     package_files=dict(skill.package_files),
                 )
                 for skill in skills

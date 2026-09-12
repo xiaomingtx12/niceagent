@@ -109,3 +109,11 @@ sequenceDiagram
 - [ ] 装配失败清理：无效 Sandbox Provider、附件准备失败、Checkpointer/构图失败；确认原始错误保留，Skill 临时目录与 Workspace Session 已释放，共享持久化资源仍可供下一轮使用。
 
 对应规划：[agent-platform-refactor-plan.md](agent-platform-refactor-plan.md)。
+
+## 本地改造验收记录（2026-09-12）
+
+阶段 0–8 的代码改造和适用本地验证已完成，各阶段结果见优化规划。运行服务依赖 Core 公开入口；中间件启用条件与顺序集中在 `assembly/graph/platform_middleware.py`；执行结果从一次观测快照取得独立用量副本。
+
+综合验证使用真实 DeepAgents 与 LangGraph，模型使用内存确定性替身，持久化使用 InMemoryStore/InMemorySaver。已验证 Memory/Skill 四种组合、单次 Skill 提示、ask_user 暂停与恢复、同线程消息不重复、恢复用量合并去重、运行前/运行中取消、模型失败和一次资源关闭。此前的构造失败与资源交接差分继续有效。
+
+以上验证未覆盖真实数据库事务、远程沙箱同步、浏览器 SSE 和多进程租约，不替代本页人工清单；环境验收状态仍为待完成。

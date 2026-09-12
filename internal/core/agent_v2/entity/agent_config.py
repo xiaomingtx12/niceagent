@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -43,7 +42,6 @@ class AgentSkill:
 
     name: str
     skill_md: str
-    package_root: Path
     package_files: Mapping[str, str]
 
 

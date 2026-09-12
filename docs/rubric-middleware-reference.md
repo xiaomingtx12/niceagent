@@ -59,7 +59,7 @@ internal_status: max_iterations_reached
 
 ## 项目接入风险与建议
 
-当前 Agent 装配层使用 `ReviewMiddleware`，没有挂载 `RubricMiddleware`；前者不能代表已实现 rubric 验收。执行器在没有异常、取消或等待输入时默认返回 `completed`，这个值只描述执行生命周期，应额外保留验收结果，不能直接映射成 `satisfied`。参见 `internal/core/agent_v2/assembly/graph/deep_agent_factory.py:132`、`internal/core/agent_v2/execution/agent_executor.py:174`。
+当前 Agent 装配层使用 `ReviewMiddleware`，没有挂载 `RubricMiddleware`；前者不能代表已实现 rubric 验收。执行器在没有异常、取消或等待输入时默认返回 `completed`，这个值只描述执行生命周期，应额外保留验收结果，不能直接映射成 `satisfied`。参见 `internal/core/agent_v2/assembly/graph/platform_middleware.py`、`internal/core/agent_v2/execution/agent_executor.py`。
 
 公开事件投影器对 `custom` 事件目前只允许 `context_window` 和 `context_compaction` 两类 Schema。仅将 rubric middleware 装入运行链路，其 `rubric_evaluation_start/end` 也不会自动成为有效的前端事件；需要增加明确的事件 DTO、投影和消费逻辑，并保留运行 ID 与轮次信息。参见 `internal/service/agent_protocol/event_projector.py:143`。
 

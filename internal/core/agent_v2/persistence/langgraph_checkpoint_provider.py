@@ -32,11 +32,6 @@ from internal.core.agent_v2.persistence.postgres_connection import (
 from internal.extension.logging_extension import logger
 
 
-def _pg_uri_for_langgraph(sqlalchemy_uri: str) -> str:
-    """兼容原有导入路径的 PostgreSQL URI 转换入口。"""
-    return pg_uri_for_langgraph(sqlalchemy_uri)
-
-
 class ResilientPostgresSaver(PostgresSaver):
     """为幂等 Checkpoint 数据库操作补充一次瞬时断连重试。"""
 
@@ -140,7 +135,7 @@ def create_postgres_saver(
 ) -> tuple[Any, Any]:
     """创建并初始化一个长期存活的 PostgresSaver 和连接池。"""
     config = config_factory()
-    connection_string = _pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
+    connection_string = pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
     pool_config = build_langgraph_pool_config(
         config,
         min_size=config.AGENT_CHECKPOINT_POOL_MIN_SIZE,
@@ -275,7 +270,6 @@ __all__ = [
     "InMemorySaver",
     "PostgresSaver",
     "ResilientPostgresSaver",
-    "_pg_uri_for_langgraph",
     "close_connection_pool",
     "close_postgres_saver",
     "create_postgres_saver",

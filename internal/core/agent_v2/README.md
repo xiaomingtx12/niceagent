@@ -52,7 +52,7 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 
 沙箱工厂直接返回 Backend，已移除只包装一个 Backend 的 `SandboxProjection` 和无状态转发类。不同沙箱提供者的适配保留在各自文件中。
 
-Skill 与 Memory 使用 `build_skill_context`、`build_memory_context` 直接构建结果，不再为一次调用创建无状态装配对象。Memory 关闭时不会调用 Store 工厂；Skill 路由构建失败仍由构建函数清理已创建的部分资源。
+Core 的 `AgentSkill` 只携带授权包内容，宿主目录归平台 Skill 服务管理。Skill 与 Memory 使用 `build_skill_context`、`build_memory_context` 直接构建结果，不再为一次调用创建无状态装配对象。Memory 关闭时不会调用 Store 工厂；Skill 路由构建失败仍由构建函数清理已创建的部分资源。
 
 ## 与服务层的分工
 

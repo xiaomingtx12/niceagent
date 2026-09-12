@@ -21,11 +21,6 @@ from internal.core.agent_v2.persistence.postgres_connection import (
 from internal.extension.logging_extension import logger
 
 
-def _pg_uri_for_langgraph(sqlalchemy_uri: str) -> str:
-    """兼容原有导入路径的 PostgreSQL URI 转换入口。"""
-    return pg_uri_for_langgraph(sqlalchemy_uri)
-
-
 class ResilientPostgresStore(PostgresStore):
     """为 Store 批处理补充一次瞬时断连重试。"""
 
@@ -58,7 +53,7 @@ def create_postgres_store(
 ) -> tuple[PostgresStore, Any]:
     """创建并初始化一个长期存活的 PostgresStore。"""
     config = config_factory()
-    connection_string = _pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
+    connection_string = pg_uri_for_langgraph(config.SQLALCHEMY_DATABASE_URI)
     pool_config = build_langgraph_pool_config(
         config,
         min_size=config.AGENT_MEMORY_POOL_MIN_SIZE,
