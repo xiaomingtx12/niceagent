@@ -99,7 +99,7 @@ def build_internal_agent_transport(
     parent_app_id: UUID,
     target_app_id: UUID,
     headers: dict[str, str],
-) -> dict[str, object]:
+) -> tuple[str, dict[str, str]]:
     """为平台内部发布 Agent 绑定 URL 和不可伪造的作用域凭证。"""
     # 1.为父子 Agent 作用域签发短期内部协议 Token。
     base_url = settings.AGENT_INTERNAL_PROTOCOL_BASE_URL.rstrip("/")
@@ -123,13 +123,7 @@ def build_internal_agent_transport(
     }
 
     # 3.返回异步 SubAgent 所需的内部传输参数。
-    return {
-        "url": base_url,
-        "headers": {
-            **safe_headers,
-            "X-MyDify-Internal-Token": token,
-        },
-    }
+    return base_url, {**safe_headers, "X-MyDify-Internal-Token": token}
 
 
 def _encode(value: dict[str, object]) -> str:

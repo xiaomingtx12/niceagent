@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID, uuid4
+import time
 
 from injector import inject
 from internal.entity import (
@@ -87,6 +88,42 @@ class AgentWorkbenchService:
             run_id=run.run_id,
             sequence=sequence,
         )
+
+    def replace_run(
+        self, *, context: AgentInvocationContext, run_input: WorkbenchRunInput,
+    ) -> RunAccepted | RunRejected:
+        """内部 SDK 更新：先校验，再停止并等待前序执行释放，最后沿用正常启动事务。"""
+        # 1.先校验新输入，任何失败都不能影响旧 Run。
+        # 停止前验证参数和附件归属；等待后 start_run 再复核，避免使用失效授权。
+        self.model_service.validate_workbench_reasoning(
+            context, run_input.reasoning_effort, run_input.model_selection,
+        )
+        self.attachment_service.resolve(run_input.file_ids, owner_id=context.account_id)
+        previous = self.run_service.get_latest_run(
+            conversation_id=context.conversation_id, invoke_from=context.invoke_from,
+        )
+        if previous is not None:
+            previous_id = previous.id
+            if previous.status not in WORKBENCH_TERMINAL_STATUSES:
+                self.cancel_run(context=context, run_id=previous_id)
+            # 不能同时创建 queued 与 cancelling：数据库约束同会话只有一个活动 Run。
+            local = self.queue_manager.get(context.conversation_id)
+            deadline = time.monotonic() + 10
+            while True:
+                # 2.取消请求与数据库终态都确认后，才允许创建新 Run。
+                try:
+                    status = self.run_service.get_run_status(previous_id)
+                finally:
+                    self.db.session.close()
+                locally_released = local is None or local.run_id != previous_id or local.done.is_set()
+                if status in WORKBENCH_TERMINAL_STATUSES and locally_released:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    # 3.超时返回未启动，调用方可以安全重试。
+                    return RunRejected("前序任务尚未停止，本次更新未启动，请稍后重试")
+                time.sleep(min(0.1, remaining))
+        return self.start_run(context=context, run_input=run_input, user_input_enabled=False)
 
     def respond_input(
         self,
@@ -189,7 +226,8 @@ class AgentWorkbenchService:
         # 1.校验目标 Run 是否属于本次请求的会话和入口。
         self.run_service.get_context_run(context, run_id)
         # 归属确认后才允许恢复失联状态；未授权请求不能触发写入。
-        row = self.run_service.get_run(run_id, recover=True)
+        self.run_service.recover_stale_runs(run_id=run_id)
+        row = self.run_service.get_run(run_id)
         if row is None:
             raise NotFoundException("Agent Run 不存在")
         # 2.先提交数据库取消状态，再通知本地执行线程。
@@ -332,7 +370,6 @@ class AgentWorkbenchService:
         sequence = self.run_service.get_last_event_sequence(
             conversation_id=context.conversation_id,
             invoke_from=context.invoke_from,
-            close_session=False,
         )
         run = WorkbenchRun(
             run_id=uuid4(),

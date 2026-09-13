@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
@@ -31,9 +30,7 @@ class InternalRunCreateReq(BaseModel):
     assistant_id: StrictStr
     input: dict[str, Any] | None = None
     command: dict[str, Any] | None = None
-    multitask_strategy: Literal[
-        "reject", "interrupt", "rollback", "enqueue"
-    ] | None = None
+    multitask_strategy: Literal["reject", "interrupt"] | None = None
 
     @model_validator(mode="after")
     def validate_execution_payload(self) -> "InternalRunCreateReq":
@@ -50,26 +47,15 @@ class InternalRunResp(BaseModel):
     thread_id: UUID
     assistant_id: StrictStr
     status: Literal["pending", "running", "success", "error", "cancelled"]
-    multitask_strategy: Literal[
-        "reject", "interrupt", "rollback", "enqueue"
-    ] = "reject"
+    multitask_strategy: Literal["reject", "interrupt"] = "reject"
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: StrictStr
     updated_at: StrictStr
     error: StrictStr | None = None
 
 
-@dataclass(frozen=True)
-class InternalRunLaunchResp:
-    """内部 SDK 创建 Run 的业务结果。"""
-
-    run: InternalRunResp | None = None
-    conflict_message: str | None = None
-
-
 __all__ = [
     "InternalRunCreateReq",
-    "InternalRunLaunchResp",
     "InternalRunResp",
     "InternalThreadResp",
 ]

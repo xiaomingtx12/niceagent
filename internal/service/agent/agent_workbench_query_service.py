@@ -164,7 +164,7 @@ class AgentWorkbenchQueryService:
     ) -> WorkbenchRunObservabilityResp:
         """鉴权后读取平台持久化的 Agent Run 观测链路。"""
         # 1.读取并校验目标 Run 的稳定归属。
-        row = self.run_service.get_run(run_id, recover=False)
+        row = self.run_service.get_run(run_id)
         if row is None:
             raise NotFoundException("Agent Run 不存在")
         self.conversation_service.get_owned_conversation(
@@ -200,18 +200,16 @@ class AgentWorkbenchQueryService:
                 # 2.先记录通知版本，再查询数据库，避免查询期间的提交被漏掉。
                 version = signal.snapshot()
                 try:
-                    # 3.共享已提交事件批次；失联 Run 由后台 sweeper 收敛。
-                    batch = signal.read_events(
-                        cursor,
-                        load=lambda: self.run_service.get_reconnect_events(
-                            conversation_id=context.conversation_id,
-                            invoke_from=context.invoke_from,
-                            run_id=run_id,
-                            since=cursor,
-                        ),
+                    # 3.先观察状态再扫描事件，看到终态时本次扫描一定覆盖终态提交。
+                    status = self.run_service.get_run_status(run_id)
+                    batch = self.run_service.get_reconnect_events(
+                        conversation_id=context.conversation_id,
+                        invoke_from=context.invoke_from,
+                        run_id=run_id,
+                        since=cursor,
                     )
                 finally:
-                    # 4.每批查询结束立即释放线程 Session，下一批读取时重新获取连接。
+                    # 3.事件和状态查询结束后立即释放连接，等待通知期间不占用 Session。
                     self.db.session.close()
 
                 # 5.过滤只影响发送内容，不影响内部游标，避免被过滤事件反复扫描。
@@ -220,6 +218,7 @@ class AgentWorkbenchQueryService:
                         yield event.model_dump(mode="json")
                 terminal = any(
                     event.method == "lifecycle"
+                    and not event.params.namespace
                     and isinstance(event.params.data, Mapping)
                     and event.params.data.get("status") in WORKBENCH_TERMINAL_STATUSES
                     for event in batch.events
@@ -233,10 +232,8 @@ class AgentWorkbenchQueryService:
                 if not batch.has_more:
                     if terminal:
                         return
-                    if not batch.events:
-                        status = self.run_service.get_run_status(run_id)
-                        if status in WORKBENCH_TERMINAL_STATUSES:
-                            return
+                    if not batch.events and status in WORKBENCH_TERMINAL_STATUSES:
+                        return
                     # 7.当前批次已读完才等待通知；仍有后续批次时立即继续读取。
                     signal.wait(version, timeout=0.5)
 
@@ -246,7 +243,7 @@ class AgentWorkbenchQueryService:
         *,
         view: WorkbenchStateView,
     ) -> dict[str, Any]:
-        """按视图读取运行事件；compact 终态只读取上下文事件摘要。"""
+        """compact 只读取上下文与真实终态摘要，保留过滤旧分片所需的水合标记。"""
         deferred_ids: set[UUID] = set()
         if view == "compact":
             deferred_ids = {
@@ -259,13 +256,13 @@ class AgentWorkbenchQueryService:
         events_by_run = self.run_service.list_events_by_run(event_run_ids)
         if deferred_ids:
             events_by_run.update(
-                self.run_service.list_context_events_by_run(list(deferred_ids))
+                self.run_service.list_summary_events_by_run(list(deferred_ids))
             )
 
         result = {
             "workbench_events": [
                 event.model_dump(mode="json")
-                for event in project_run_history(persisted_runs, events_by_run)
+                for event in project_run_history(persisted_runs, events_by_run, deferred_run_ids=deferred_ids)
             ]
         }
         if view == "compact":

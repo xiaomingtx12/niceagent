@@ -42,7 +42,7 @@ from .memory.memory_file_service import MemoryFileService
 from .workflow.workflow_service import WorkflowService
 from .agent.agent_workbench_service import AgentWorkbenchService
 from .agent.agent_workbench_run_service import AgentWorkbenchRunService
-from .agent_protocol.internal_agent_protocol_service import InternalAgentProtocolService
+from .internal_agent_protocol.service import InternalAgentProtocolService
 from .agent.creator_task_service import CreatorTaskService
 
 __all__ = [

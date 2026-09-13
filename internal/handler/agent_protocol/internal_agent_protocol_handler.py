@@ -16,7 +16,8 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.schema.agent_protocol.internal_agent_protocol_schema import InternalRunCreateReq
-from internal.service.agent_protocol.internal_agent_protocol_service import (
+from internal.entity.agent_run_interaction import RunRejected
+from internal.service.internal_agent_protocol.service import (
     InternalAgentProtocolService,
 )
 from pkg.response import json_response
@@ -62,12 +63,12 @@ class InternalAgentProtocolHandler:
                 conversation_id=conversation_id,
                 request=payload,
             )
-            if result.run is None:
+            if isinstance(result, RunRejected):
                 return json_response(
-                    {"detail": result.conflict_message or "Run 创建冲突"},
+                    {"detail": result.message},
                     status=409,
                 )
-            return json_response(result.run.model_dump(mode="json"), status=202)
+            return json_response(result.model_dump(mode="json"), status=202)
         except CustomException as exc:
             return _protocol_error(exc)
 

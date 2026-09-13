@@ -112,7 +112,7 @@ class AgentWorkbenchRunExecutionService:
                     observability=snapshot,
                 )
 
-            # 2.补齐消息结束分片；尾批失败不能掩盖原始执行错误。
+            # 2.Core 已补齐消息结束分片；刷新尾批时保留原始执行错误。
             try:
                 events.finish()
             except Exception as exc:
@@ -152,8 +152,7 @@ class AgentWorkbenchRunExecutionService:
         """集中完成启动、装配和执行；提前取消只结束本阶段，不跳过外层结果保存。"""
         # 1.写入运行状态后再次检查取消，覆盖数据库写入期间到达的取消请求。
         if not run.cancel_requested.is_set():
-            run.status = WorkbenchRunStatus.RUNNING
-            self.run_service.set_status(run, WorkbenchRunStatus.RUNNING)
+            self.run_service.mark_running(run)
         if run.cancel_requested.is_set():
             observer.finish("cancelled")
             snapshot = observer.snapshot()
@@ -171,7 +170,7 @@ class AgentWorkbenchRunExecutionService:
             "input_message_id": run.spec.input_message_id,
         }))
         if run.resume is not None:
-            row = self.run_service.get_run(run.run_id, recover=False)
+            row = self.run_service.get_run(run.run_id)
             snapshot = {}
             if row is not None:
                 snapshot = row.state_snapshot or {}
@@ -241,7 +240,7 @@ class AgentWorkbenchRunExecutionService:
         message_updates, lifecycle = self._prepare_result_status(run, status, result.error)
 
         # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
-        row = self.run_service.get_run(run.run_id, recover=False)
+        row = self.run_service.get_run(run.run_id)
         state = project_execution_state(result, row.state_snapshot if row is not None else None)
 
         # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
@@ -262,12 +261,12 @@ class AgentWorkbenchRunExecutionService:
         )
         if not committed:
             return
-        run.status = status
 
         # 5.提交之后才推进本地游标、通知订阅者；通知失败保留已提交的业务结果。
         try:
-            for event in events:
-                self._publish_event(run, event, persist_database=False)
+            if events:
+                run.last_event_sequence = events[-1].seq
+                self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
         except Exception:
             logger.exception(
                 "Agent 工作台终态事件发布失败 run_id=%s，保留已持久化终态",
@@ -298,7 +297,6 @@ class AgentWorkbenchRunExecutionService:
             elif isinstance(error, ReviewBlocked):
                 public_error = "输出内容未通过审核。"
             message_updates = {"status": MessageStatus.ERROR, "error": public_error}
-            run.error_message = str(error) if error is not None else ""
             if isinstance(error, AGENT_PERSISTENCE_ERRORS):
                 logger.error(
                     "Agent PostgreSQL 持久化失败 error_type=%s checkpoint_pool_stats=%s",
@@ -346,16 +344,11 @@ class AgentWorkbenchRunExecutionService:
         self,
         run: WorkbenchRun,
         event: WorkbenchEvent,
-        *,
-        persist_database: bool = True,
-    ) -> WorkbenchEvent:
-        """接收已校验事件，提交后才推进游标并通知；终态批次由调用方落库。"""
-        if persist_database:
-            self.run_service.record_events(run, [event])
-
+    ) -> None:
+        """保存单个执行事件，提交成功后推进本地游标并通知订阅者。"""
+        self.run_service.record_events(run, [event])
         run.last_event_sequence = event.seq
         self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
-        return event
 
     def _execute_background_run(self, flask_app: Flask, run: WorkbenchRun) -> None:
         """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
@@ -403,7 +396,6 @@ class AgentWorkbenchRunExecutionService:
 
     def _fail_background_run(self, run: WorkbenchRun, exc: Exception) -> None:
         """后台执行异常时保证数据库状态和本地队列都进入终态。"""
-        run.error_message = str(exc)
         event = WorkbenchEvent(
             type="event",
             event_id=f"{run.run_id}:{run.last_event_sequence + 1}",
@@ -426,7 +418,6 @@ class AgentWorkbenchRunExecutionService:
                 events=[event],
             )
             if committed:
-                run.status = WorkbenchRunStatus.FAILED
                 run.last_event_sequence = event.seq
                 self.queue_manager.notify_events(run.conversation_id, run.spec.invoke_from)
         except Exception:

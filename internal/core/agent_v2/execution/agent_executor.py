@@ -26,6 +26,7 @@ from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
 from internal.core.agent_v2.entity.agent_event import AgentEvent
 from internal.core.agent_v2.execution.message_parser import final_answer
 from internal.core.agent_v2.execution.event_delivery import AgentEventDelivery
+from internal.core.agent_v2.execution.event_normalizer import json_value
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.extension.logging_extension import logger
 
@@ -110,6 +111,13 @@ class AgentExecutor:
                     else:
                         logger.exception("Agent 执行失败后的资源关闭失败")
 
+        try:
+            delivery.finish()
+        except Exception as exc:
+            if error is None:
+                error = exc
+            else:
+                logger.exception("结束 Agent 消息流失败，保留原始执行错误")
         return self._build_result(
             state=state,
             error=error,
@@ -222,10 +230,11 @@ class AgentExecutor:
         cancelled = False
         drain_requested = False
         for raw_event in raw_stream:
-            event = AgentEvent.from_raw(raw_event)
-            if event.channel == "values" and not event.namespace and isinstance(event.data, Mapping):
+            params = raw_event.get("params", {})
+            data = params.get("data")
+            if raw_event.get("method") == "values" and not params.get("namespace") and isinstance(data, Mapping):
                 state.clear()
-                state.update(event.data)
+                state.update(data)
             if cancel_requested.is_set():
                 cancelled = True
                 if not drain_requested:
@@ -233,7 +242,7 @@ class AgentExecutor:
                     if not drain_requested:
                         break
                 continue
-            delivery.accept(event)
+            delivery.accept(raw_event)
         return cancelled
 
     def _build_result(
@@ -261,7 +270,7 @@ class AgentExecutor:
             status=status,
             interrupts=self._interrupts if status == "waiting_input" else (),
             answer=answer,
-            state=state,
+            state=json_value(state),
             usage=deepcopy(snapshot["usage"]),
             observability=snapshot,
             error=error,

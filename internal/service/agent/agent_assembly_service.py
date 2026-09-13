@@ -34,7 +34,7 @@ from internal.entity.subagent_config import (
     SubAgentConfig,
     build_published_graph_id,
 )
-from internal.service.agent_protocol.internal_auth import (
+from internal.service.internal_agent_protocol.auth import (
     build_internal_agent_transport,
 )
 from internal.entity.app_entity import AppStatus
@@ -405,14 +405,12 @@ class AgentAssemblyService:
             target_id = config.published_app_id
             if target_id is None:
                 raise ValidateErrorException(f"子 Agent {config.name!r} 缺少发布应用标识")
-            transport = build_internal_agent_transport(
+            url, headers = build_internal_agent_transport(
                 settings=self.config,
                 account_id=account_id, parent_app_id=parent_app_id,
                 target_app_id=target_id, headers=headers,
             )
             graph_id = build_published_graph_id(target_id)
-            url = cast(str, transport["url"])
-            headers = cast(dict[str, str], transport["headers"])
         if not graph_id:
             raise ValidateErrorException(f"子 Agent {config.name!r} 缺少 graph_id")
         return AsyncSubAgentDefinition(

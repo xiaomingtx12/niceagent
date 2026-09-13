@@ -71,10 +71,8 @@ class WorkbenchRun(Generic[_InvocationReqT]):
     conversation_id: UUID
     spec: _InvocationReqT
     executor_id: UUID = field(default_factory=uuid4)
-    status: WorkbenchRunStatus = WorkbenchRunStatus.QUEUED
     initial_event_sequence: int = 0
     last_event_sequence: int = 0
-    error_message: str = ""
     done: threading.Event = field(default_factory=threading.Event)
     cancel_requested: threading.Event = field(default_factory=threading.Event)
     resume: dict[str, Any] | None = None

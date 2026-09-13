@@ -1,6 +1,6 @@
 """将持久化快照与历史事件合并为客户端恢复状态，不访问数据库。"""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 from uuid import UUID
 
@@ -11,9 +11,52 @@ from internal.core.agent_v2 import (
 from internal.entity import WORKBENCH_TERMINAL_STATUSES, WorkbenchRunStatus
 from internal.model import AgentRun
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
-from .event_projector import project_public_state
+from copy import deepcopy
 
 _PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history", "input_recovery")
+
+
+def project_public_state(value: Mapping[str, Any]) -> dict[str, Any]:
+    """绑定业务消息标识和异步会话字段；输入已由 Core 转为 JSON 兼容数据。"""
+    projected = deepcopy(dict(value))
+    # 会话摘要保留最后一条回答；阶段正文由公开 messages 事件独立重放。
+    messages = projected.get("messages")
+    if isinstance(messages, list):
+        visible = []
+        business_id = None
+        run_id = None
+        answer_index = None
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            role = message.get("type") or message.get("role")
+            if role in {"human", "user"}:
+                extra = message.get("additional_kwargs") or {}
+                business_id = extra.get("business_message_id")
+                run_id = extra.get("run_id")
+                answer_index = None
+                visible.append(message)
+            elif role in {"ai", "assistant"} and business_id:
+                message["id"] = f"{business_id}:assistant"
+                message.setdefault("additional_kwargs", {})["run_id"] = run_id
+                if answer_index is None:
+                    answer_index = len(visible)
+                    visible.append(message)
+                else:
+                    visible[answer_index] = message
+            else:
+                visible.append(message)
+        projected["messages"] = visible
+    async_tasks = projected.get("async_tasks")
+    if not isinstance(async_tasks, dict):
+        return projected
+    for task in async_tasks.values():
+        if not isinstance(task, dict):
+            continue
+        framework_thread_id = task.pop("thread_id", None)
+        if framework_thread_id is not None:
+            task.setdefault("conversation_id", framework_thread_id)
+    return projected
 
 
 def project_execution_state(
@@ -90,17 +133,31 @@ def build_state_snapshot_event(
 
 def project_run_history(
     runs: Sequence[AgentRun], events_by_run: Mapping[UUID, Sequence[WorkbenchEvent]],
+    *, deferred_run_ids: Collection[UUID] = (),
 ) -> list[WorkbenchEvent]:
     """历史事件提供过程，数据库快照和终态负责补齐最终结果。"""
     events: list[WorkbenchEvent] = []
     for run in runs:
-        events.extend(events_by_run.get(run.id, ()))
+        history = events_by_run.get(run.id, ())
         sequence = int(run.last_event_sequence or 0)
+        terminal = next((
+            event for event in reversed(history)
+            if run.status in WORKBENCH_TERMINAL_STATUSES
+            and event.method == "lifecycle" and not event.params.namespace
+            and event.seq == sequence and isinstance(event.params.data, Mapping)
+            and event.params.data.get("status") == run.status
+        ), None)
+        events.extend(event for event in history if event is not terminal)
         snapshot = build_state_snapshot_event(run.id, sequence, run.state_snapshot)
         if snapshot is not None:
             events.append(snapshot)
         if run.status in WORKBENCH_TERMINAL_STATUSES:
-            events.append(_build_terminal_event(run, sequence))
+            if terminal is None:
+                terminal = _build_terminal_event(run, sequence)
+            elif run.id in deferred_run_ids:
+                # compact 用该标记过滤旧分片；真实错误、时间和其他字段保持不变。
+                terminal = terminal.model_copy(update={"event_id": f"{run.id}:terminal-hydration"})
+            events.append(terminal)
     return sorted(events, key=lambda event: event.seq)
 
 
@@ -132,14 +189,10 @@ def project_pending_tasks(
 
 def _build_terminal_event(run: AgentRun, sequence: int) -> WorkbenchEvent:
     """从权威终态恢复生命周期事件；内部错误详情不进入公开响应。"""
-    data = {
-        "event": "interrupted" if run.status == "cancelled" else run.status,
-        "status": run.status,
-        "message_id": str(run.message_id),
-        "input_message_id": run.input_message_id,
-    }
-    if run.status == "failed":
-        data["error"] = "Agent 运行失败"
+    data = project_execution_lifecycle(
+        WorkbenchRunStatus(run.status), message_id=run.message_id,
+        input_message_id=run.input_message_id,
+    )
     return WorkbenchEvent(
         type="event",
         event_id=f"{run.id}:terminal-hydration",

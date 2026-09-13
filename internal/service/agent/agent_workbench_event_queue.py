@@ -3,46 +3,22 @@
 from __future__ import annotations
 
 import threading
-import time
-from collections import OrderedDict
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from uuid import UUID
 
-from internal.entity import WorkbenchRun, WorkbenchRunStatus
+from internal.entity import WorkbenchRun
 from internal.entity.conversation_entity import InvokeFrom
-from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
-
-
-@dataclass(frozen=True)
-class EventBatch:
-    """内部扫描结果；游标独立于过滤后的事件，不作为 HTTP 响应校验或序列化。"""
-
-    events: list[WorkbenchEvent]
-    next_sequence: int
-    has_more: bool
-
-
-@dataclass(frozen=True)
-class _CachedEventBatch:
-    """保留读取时的通知版本，提交期间形成的旧缓存不会命中新版本。"""
-
-    version: int
-    expires_at: float
-    batch: EventBatch
 
 
 @dataclass
 class _EventSignal:
-    """会话通知与短暂的共享读取；先查版本再查库可避免丢失唤醒。"""
+    """只维护会话通知版本；先查版本再查库可避免丢失唤醒。"""
 
     condition: threading.Condition = field(default_factory=threading.Condition)
     version: int = 0
     subscribers: int = 0
-    read_lock: threading.Lock = field(default_factory=threading.Lock)
-    batches: OrderedDict[int, _CachedEventBatch] = field(default_factory=OrderedDict)
-    recovery_at: float = 0.0
 
     def snapshot(self) -> int:
         """在读取数据库前取得版本，查询期间的提交也会触发下一次读取。"""
@@ -59,38 +35,6 @@ class _EventSignal:
         """通知已经到达时立即返回，超时兜底覆盖其他进程的提交。"""
         with self.condition:
             self.condition.wait_for(lambda: self.version != version, timeout=timeout)
-
-    def read_events(
-        self,
-        cursor: int,
-        *,
-        load: Callable[[], EventBatch],
-        recover: Callable[[], None] | None = None,
-    ) -> EventBatch:
-        """同游标订阅共享已提交批次；最多保留两批 0.5 秒，通知后立即失效。"""
-        with self.read_lock:
-            # 1.在查库前取通知版本，查询期间到达的新事件会使本批缓存失效。
-            version = self.snapshot()
-            now = time.monotonic()
-            cached = self.batches.get(cursor)
-            cache_valid = False
-            if cached is not None:
-                same_version = cached.version == version
-                not_expired = now < cached.expires_at
-                cache_valid = same_version and not_expired
-            if cache_valid:
-                return cached.batch
-            # 2.多个订阅者共享恢复节流，避免每次轮询都执行失联恢复查询。
-            if recover is not None and now >= self.recovery_at:
-                recover()
-                self.recovery_at = time.monotonic() + 10
-            # 3.缓存只保留最近两个游标，连接断开时由 watch_events 回收整个信号。
-            batch = load()
-            self.batches[cursor] = _CachedEventBatch(version, time.monotonic() + 0.5, batch)
-            self.batches.move_to_end(cursor)
-            while len(self.batches) > 2:
-                self.batches.popitem(last=False)
-            return batch
 
 
 class AgentWorkbenchEventQueueManager:
@@ -161,7 +105,6 @@ class AgentWorkbenchEventQueueManager:
                 return False
             if not run.done.is_set():
                 run.cancel_requested.set()
-                run.status = WorkbenchRunStatus.CANCELLING
                 self.notify_events(run.conversation_id, run.spec.invoke_from)
             return True
 
