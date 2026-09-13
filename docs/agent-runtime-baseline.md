@@ -45,17 +45,18 @@ sequenceDiagram
 | `AgentAssemblyService.build_agent` | AgentInvocation → 执行器、消息 | 读取配置并授权模型、工具和 Skill；校验恢复指纹，装配结束后释放查询 Session。 |
 | `AgentRuntimeAssembler.build` | 已解析配置 → AgentExecutor | 用待清理列表登记 Workspace、Skill、Memory Backend；Sandbox 接管 Workspace 时替换登记，组合成功后列表只保留根 Backend。`AgentRuntimeResources` 创建成功后转交所有权，之前失败按实例去重清理并保留原始错误。 |
 | `AgentExecutor.execute` | message 或恢复答案映射 → AgentExecutionResult | Core 构造框架输入，消费图流、处理取消、提取结果并关闭资源。共享 Store / Checkpointer 不随单轮关闭；清理失败不能覆盖已有执行错误。 |
-| `AgentEventDelivery` | 原生事件 → 可交付原生事件 | 开启输出审核时缓存整轮；失败或取消丢弃尚未交付事件。与图状态写入审核用途不同。 |
-| `AgentProtocolEventProjector` | AgentEvent → WorkbenchEvent 列表 | 维护源序号、公开序号、每个图路径的消息累积；不访问数据库。一次原生事件可产生多个公开事件。 |
+| `AgentEventDelivery` | 原生事件 → 规范化 AgentEvent | 开启输出审核时缓存整轮；失败或取消丢弃尚未交付事件。与图状态写入审核用途不同。 |
+| `AgentEventNormalizer` | 原生事件 → AgentEvent 列表 | Core 校验框架顺序、解析消息分片和分支边界，每个分支只保留当前文本块。 |
+| `AgentProtocolEventProjector` | AgentEvent → WorkbenchEvent 或 None | 只绑定业务消息标识、公开通道和持久化序号，不解析框架类型。 |
 | `AgentWorkbenchEventBuffer` | 公开事件 → 已提交批次 | 首段推理、首段正文和阶段边界立即刷新，其余按批量或到达时的时间阈值刷新。先写库，再推进游标并通知。 |
 | `AgentWorkbenchRunService.finalize_run` | 结果状态、消息更新、事件和快照 → 是否成功提交 | 锁 Run，校验 executor_id、终态和观测执行标识；一个事务提交全部结果。迟到的执行实例不能覆盖已收敛状态。 |
-| `AgentWorkbenchQueryService._stream_events` | 订阅条件、游标 → SSE | 数据库是重连依据，通知只用于唤醒；过滤不阻止扫描游标推进，每批读取后关闭 Session。 |
+| `AgentWorkbenchQueryService._stream_events` | 订阅条件、游标 → SSE | 数据库是重连依据，先观察状态再扫描事件；过滤不阻止游标推进，两次查询后统一关闭 Session，终态排空后退出。 |
 
 ## 必须保留的行为
 
 ### 事件和游标
 
-- 原生事件先消费源序号，即使被过滤也不能接受重复或倒序的源事件。
+- Core 规范化器先消费源序号，即使被过滤也不能接受重复或倒序的源事件。
 - 源序号与公开序号分别维护。过滤和相邻增量合并都可能产生序号空洞，不能改成客户端要求连续编号。
 - 正文和推理按 namespace 与节点分别累积；工具开始只结束当前图的文本，子图结束只影响对应子树。
 - 根图终态不能直接作为平台完成通知。最终消息、快照与生命周期事件需要先落库。

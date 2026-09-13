@@ -5,15 +5,18 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | 要修改的行为 | 阅读入口 |
 | --- | --- |
 | 一次运行如何创建资源和执行器 | `assembly/runtime_assembler.py` |
+| CompositeBackend 的默认存储和路径路由 | `assembly/runtime_assembler.py` 中直接构造 |
 | 主图、子图及 DeepAgents 参数 | `assembly/graph/deep_agent_factory.py` |
 | 中间件启用条件、顺序、重试与调用限制 | `assembly/graph/platform_middleware.py` |
 | 已解析子 Agent 到框架规格的转换 | `assembly/graph/subagent_spec_adapter.py` |
 | 执行、取消、恢复与结果提取 | `execution/agent_executor.py` |
-| 输出审核与原生事件交付 | `execution/event_delivery.py` |
+| 输出审核与交付生命周期 | `execution/event_delivery.py` |
+| 框架事件规范化与文本分片 | `execution/event_normalizer.py` |
 | 一次运行资源的关闭 | `execution/runtime_resources.py` |
 | 沙箱提供者选择及会话复用 | `backends/sandbox/sandbox_backend_factory.py` |
-| 工作空间同步和版本冲突 | `backends/sandbox/sandbox_workspace_sync.py` |
-| Skill 路由和长期记忆路由 | `assembly/context/skill_context.py`、`memory_context.py` |
+| 本轮文件副本与 Sandbox 初始化 | `backends/workspace/workspace_projection.py`、`backends/sandbox/sandbox_initialization.py` |
+| 文件按需加载、显式交付与版本冲突 | `execution/workspace_delivery.py`、`persistence/workspace_store.py` |
+| Skill 路由和长期记忆路由 | `assembly/context/skill_context.py`、`assembly/runtime_assembler.py` |
 | 文件记忆存取与并发校验 | `persistence/agent_memory_repository.py` |
 | 文件记忆工具适配与配额事务 | `backends/memory/agent_memory_backend.py` |
 | 记忆目录排版与提示词字节预算 | `backends/memory/memory_index.py` |
@@ -41,18 +44,18 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 
 | 创建阶段 | 当前清理责任 |
 | --- | --- |
-| Workspace、Skill、Memory | Workspace 首先登记，Skill 与 Memory 路由随后追加；失败时逆序、整批按实例去重清理。 |
-| Sandbox 成功返回 | 替换列表中的 Workspace，由 Sandbox 负责它的关闭；惰性 Sandbox 未启动时也遵循此规则。 |
-| CompositeBackend 成功返回 | 列表替换为唯一的根 Backend；后续 Checkpointer、权限或资源对象构造失败仍能回收全部直接路由。 |
-| AgentRuntimeResources 成功返回 | 独占 Backend 交给资源对象；附件准备或构图失败时装配器调用它的 close，执行器取得后负责运行结束时关闭。 |
+| Workspace、Skill、Memory | Workspace 与 Skill 投影持有临时目录，交付存储持有独立仓储会话；Memory 使用进程共享 Store。 |
+| Sandbox 成功返回 | 只负责本次 Provider 实例或租约，本轮工作副本仍由装配器持有。 |
+| CompositeBackend 成功返回 | 接管 Backend 路由，临时投影和交付存储继续单独登记，后续构造失败也逐项释放。 |
+| AgentRuntimeResources 成功返回 | 接管组合 Backend、临时投影和交付存储；先释放 Provider，再释放目录与会话，不提交任何工作文件。 |
 
-`close_runtime_backends` 统一处理根 Backend 与直接路由的去重、继续清理和错误汇总。Sandbox 工厂失败时可能已关闭 Workspace，装配器的兜底依赖 Workspace.close 的幂等契约；不重复启动或同步 Sandbox。
+`close_runtime_backends` 统一处理根 Backend 与直接路由的去重、继续清理和错误汇总。Sandbox 工厂只处理 Provider 自身资源；工作副本、Skill 投影和交付存储由运行资源分别持有，失败也逐项清理。
 
-资源获取和图编译分别由装配器内部方法负责，Store 与 Checkpointer 工厂可注入。构造失败时关闭已经取得的资源并保留原始异常；成功后由 `AgentRuntimeResources` 持有组合 Backend，执行器通过它释放资源。清理只执行一次：成功可重复关闭；失败持续报告原始异常，执行器保留 `CLOSE_FAILED`，不自动重跑已释放会话的沙箱同步。进程共享的 Checkpointer 与 Store 不随单次运行关闭。
+资源获取由运行时装配器负责，图编译直接接收完整 AgentConfig 和运行资源；Store 与 Checkpointer 由 AgentV2 内部按配置直接获取，平台只传入已授权的文件交付存储对象。构造失败时关闭已经取得的资源并保留原始异常；成功后由 `AgentRuntimeResources` 持有组合 Backend、临时投影和文件交付存储，执行器通过它释放资源。清理只执行一次：成功可重复关闭；失败持续报告原始异常，执行器保留 `CLOSE_FAILED`，不自动重跑已释放资源的关闭流程。进程共享的 Checkpointer 与 Store 不随单次运行关闭。
 
 沙箱工厂直接返回 Backend，已移除只包装一个 Backend 的 `SandboxProjection` 和无状态转发类。不同沙箱提供者的适配保留在各自文件中。
 
-Core 的 `AgentSkill` 只携带授权包内容，宿主目录归平台 Skill 服务管理。Skill 与 Memory 使用 `build_skill_context`、`build_memory_context` 直接构建结果，不再为一次调用创建无状态装配对象。Memory 关闭时不会调用 Store 工厂；Skill 路由构建失败仍由构建函数清理已创建的部分资源。
+Core 的 `AgentSkill` 只携带授权包内容，宿主目录归平台 Skill 服务管理。Skill 投影通过 `build_skill_context` 管理临时文件；Memory 在运行时装配处按开关直接创建 Backend，不再包装中间投影对象。运行资源只持有一份 Skill 投影，构图和中间件直接读取其来源字段。Memory 关闭时不会调用 Store 工厂；Skill 路由构建失败仍由构建函数清理已创建的部分资源。
 
 ## 与服务层的分工
 
@@ -62,7 +65,7 @@ Core 的 `PendingUserInput` 验证表单字段与答案。平台的 `AgentRunInt
 
 测评中间件同样属于 Core：工具白名单和 Rubric 状态适配不依赖数据库或任务队列。测评 Service 负责应用授权、冻结配置和持久化，通过 `on_progress` 回调接收每轮记录；这些中间件只挂载到独立测评图。
 
-输出审核由图中间件保护状态写入，`AgentEventDelivery` 保护事件公开，两处检查职责不同。开启审核时仍需缓存整轮原生事件；失败和取消立即丢弃缓存，不对任意工具对象增加序列化要求。
+输出审核由图中间件保护状态写入，`AgentEventDelivery` 保护事件公开，两处检查职责不同。开启审核时仍需缓存整轮原生事件；失败和取消立即丢弃缓存；通过审核的事件在 Core 出口转换为 JSON 兼容数据。
 
 长期记忆统一使用 `/memories/` 下的分类 Markdown 文件，StoreBackend 按账号与应用隔离存储。`ReloadingMemoryMiddleware` 每次模型请求刷新只读目录 `.index.md`，文件增改复用原生工具，删除使用 `delete_memory_file`。文件仓储负责存取、容量限制和内容摘要并发校验；列表查询只读，不做旧目录导入，也不维护结构化条目、修订历史或导入标记。
 
@@ -87,3 +90,21 @@ LangChain Callback 自动记录模型、工具及子 Agent，业务入口只创�
 | execution_id、executions、汇总用量 | Run 服务在事务内合并恢复片段并去重，保留已有历史字段与用量别名兼容。 |
 
 Observer 内部只保存可见 Span 的 ID 集合用于查找父节点；Span 实体仍由明细列表及活动调用表持有。锁、晚到回调处理、明细上限和重复结束不计费规则保持不变。
+
+## 文件交付模式
+
+`/workspace/` 是本轮临时工作副本。无 Sandbox 时使用官方 `FilesystemBackend`；远程 Sandbox 启动前使用本轮本地副本，启动时只迁移已经加载或生成的文件，随后文件工具与 Shell 统一使用远程副本。本机 Shell 直接共用本轮目录。
+
+持久化正文以 COS 为准，SQL 记录账号、应用、虚拟路径、版本及配额元数据。`list_saved_files` 只查目录，`load_saved_file` 按需下载一个文件；同轮重复加载不覆盖已经编辑的副本。附件仅准备到本轮副本，不自动进入持久化文件库。
+
+`deliver_file` 在用户要求保存或交付时将指定产物写入 COS，并在成功后返回保存路径。未加载的目标仅允许新增，覆盖原文件必须使用加载时的版本；冲突可以加载最新文件到另一副本重新处理，或另存新路径。文件保存失败不会删除本轮副本，模型可在当前运行内重试。
+
+资源关闭不扫描、回写或同步删除。临时修改、脚本、缓存不会自动持久化；修改和删除平台文件需要独立的业务操作。取消、失败或等待用户输入后，未交付文件不保证保留，恢复时应重新加载已保存输入并重建中间产物。平台预览与下载仍从 COS 获取已保存内容。
+
+## 事件出口与框架隔离
+
+`AgentEvent` 是业务订阅者使用的稳定数据契约：规范化通道、JSON 兼容 data、分支路径、节点及本次执行的递增序号。执行结果的 state 同样在 Core 出口转换为 JSON 兼容数据，业务层不接收 AIMessageChunk 或框架 metadata 元组。
+
+`AgentEventDelivery` 先执行输出审核，通过后交给 `AgentEventNormalizer`。后者负责框架顺序校验、摘要过滤、消息和推理分片、供应商结束标记与并行分支收尾。每个分支只保留当前文本块；已结束块不再累积存储。无 finish 分片、异常或取消退出时，只补齐已经交付的文本，不公开审核缓存中的内容。
+
+平台 `event_projector.py` 仅将 Core 事件绑定到业务 Run 和消息 ID，并生成持久化事件序号。Core 序号与数据库游标独立，工作台主动生成的状态和表单也使用平台游标。图结束事件可在 Core 出口出现，但业务终态必须等平台消息与快照原子提交后才对外发布。
