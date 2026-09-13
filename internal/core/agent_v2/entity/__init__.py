@@ -18,7 +18,6 @@ from .run_context import (
     AgentConversationIdentity,
 )
 from .token_usage import AgentTokenUsage, AgentTokenUsageSummary
-from .telemetry import AgentTelemetryEvent, TelemetryValue
 from .tool import DATASET_RETRIEVAL_TOOL_NAME
 from .workspace_path import (
     AgentWorkspacePathPolicy,
@@ -43,7 +42,6 @@ __all__ = [
     "AgentConversationIdentity",
     "AgentTokenUsage",
     "AgentTokenUsageSummary",
-    "AgentTelemetryEvent",
     "AgentWorkspaceLimits",
     "AgentWorkspacePathPolicy",
     "WorkspacePathError",
@@ -51,7 +49,6 @@ __all__ = [
     "WorkspaceQuotaKind",
     "DATASET_RETRIEVAL_TOOL_NAME",
     "DEFAULT_AGENT_MEMORY_LIMITS",
-    "TelemetryValue",
     "memory_store_key_to_virtual_path",
     "memory_virtual_path_to_store_key",
     "normalize_agent_memory_path",

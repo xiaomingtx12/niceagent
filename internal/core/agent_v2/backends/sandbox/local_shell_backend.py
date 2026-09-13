@@ -10,7 +10,6 @@ from typing import Any
 
 from deepagents.backends import LocalShellBackend
 
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
 )
@@ -63,7 +62,6 @@ def create_backend(
     workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
-    telemetry: AgentTelemetry | None = None,
 ) -> ManagedLocalShellBackend:
     """创建仅供非生产环境使用的本机 Shell Backend。"""
     del sandbox_name
@@ -87,7 +85,7 @@ def create_backend(
                 getattr(settings, "AGENT_SANDBOX_MAX_OUTPUT_BYTES", 500 * 1024)
             ),
         )
-        seed_sandbox_skills(backend, list(skill_files), telemetry=telemetry)
+        seed_sandbox_skills(backend, list(skill_files))
         return backend
     except BaseException as exc:
         # 借用的本轮目录由装配失败清理统一释放，本机执行器没有额外连接。

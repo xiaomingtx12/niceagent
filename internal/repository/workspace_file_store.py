@@ -11,11 +11,6 @@ from uuid import UUID, uuid4
 from injector import inject
 from sqlalchemy.orm import Session
 
-from internal.core.agent_v2.observability.telemetry import (
-    AgentTelemetry,
-    NOOP_AGENT_TELEMETRY,
-    build_path_digest,
-)
 from internal.extension.logging_extension import logger
 from internal.model import WorkspaceFile
 
@@ -32,7 +27,7 @@ from .workspace_file_repository import (
 @inject
 @dataclass
 class WorkspaceFileStore:
-    """封装 Workspace 元数据、对象内容、补偿和遥测细节。"""
+    """封装 Workspace 元数据、对象内容和写入失败补偿。"""
 
     object_storage: CosObjectStorageRepository
 
@@ -44,7 +39,6 @@ class WorkspaceFileStore:
         *,
         mime_type: str = "application/octet-stream",
         enforce_quota: bool = True,
-        telemetry: AgentTelemetry | None = None,
         expected_revision: int | None = None,
     ) -> WorkspaceFile:
         """先写唯一对象，再按版本提交；无显式版本时使用本次上传前读到的版本。"""
@@ -86,15 +80,6 @@ class WorkspaceFileStore:
 
         if old_object_key and old_object_key != object_key:
             self._delete_best_effort(old_object_key)
-        (telemetry or NOOP_AGENT_TELEMETRY).emit(
-            "workspace.write",
-            value=float(len(encoded)),
-            attributes={
-                "path_digest": build_path_digest(path),
-                "size_bytes": len(encoded),
-                "revision": row.revision,
-            },
-        )
         return row
 
     def write_text(
@@ -105,7 +90,6 @@ class WorkspaceFileStore:
         *,
         mime_type: str = "text/plain",
         enforce_quota: bool = True,
-        telemetry: AgentTelemetry | None = None,
         expected_revision: int | None = None,
     ) -> WorkspaceFile:
         """按 UTF-8 写入文本文件。"""
@@ -115,7 +99,6 @@ class WorkspaceFileStore:
             content.encode("utf-8"),
             mime_type=mime_type,
             enforce_quota=enforce_quota,
-            telemetry=telemetry,
             expected_revision=expected_revision,
         )
 

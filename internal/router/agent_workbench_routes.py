@@ -1,100 +1,98 @@
-"""Agent 工作台路由注册。"""
+"""按业务入口注册 Agent 工作台与 SDK 路由。"""
 
 from flask import Blueprint
 
 from internal.handler import (
-    AgentWorkbenchHandler,
+    AgentRunHandler,
+    DebugAgentHandler,
+    WebAppAgentHandler,
+    CreatorTaskAgentHandler,
     AssistantAgentProtocolHandler,
     InternalAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
 )
 
 
-def register_agent_workbench_routes(
-    blueprint: Blueprint,
-    handler: AgentWorkbenchHandler,
-) -> None:
-    """注册创建者、发布态和 Run 控制路由。"""
+def register_debug_agent_routes(blueprint: Blueprint, handler: DebugAgentHandler) -> None:
+    """注册应用调试入口，保留原 URL 和 Flask endpoint。"""
+    prefix = "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
     blueprint.add_url_rule(
-        "/agent-runs/<uuid:run_id>/events",
-        methods=["GET"], view_func=handler.run_events,
+        f"{prefix}/commands", methods=["POST"],
+        endpoint="debug_command", view_func=handler.command,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/model-settings",
-        methods=["GET"], view_func=handler.debug_model_settings,
+        f"{prefix}/stream", methods=["POST"],
+        endpoint="debug_stream", view_func=handler.stream,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/model-settings",
-        methods=["GET"], view_func=handler.web_app_model_settings,
+        f"{prefix}/state", methods=["GET"],
+        endpoint="debug_state", view_func=handler.state,
     )
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/model-settings",
-        methods=["GET"], view_func=handler.creator_task_model_settings,
+        f"{prefix}/model-settings", methods=["GET"],
+        endpoint="debug_model_settings", view_func=handler.model_settings,
     )
     blueprint.add_url_rule(
-        "/agent-runs/<uuid:run_id>/observability",
-        methods=["GET"],
-        view_func=handler.run_observability,
+        f"{prefix}/runs/<uuid:run_id>/cancel", methods=["POST"],
+        endpoint="debug_cancel_run", view_func=handler.cancel_run,
+    )
+
+
+def register_web_app_agent_routes(blueprint: Blueprint, handler: WebAppAgentHandler) -> None:
+    """注册发布态 WebApp 入口，保留原 URL 和 Flask endpoint。"""
+    prefix = "/web-apps/<string:token>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(
+        f"{prefix}/commands", methods=["POST"],
+        endpoint="web_app_command", view_func=handler.command,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/commands",
-        methods=["POST"],
-        view_func=handler.debug_command,
+        f"{prefix}/stream", methods=["POST"],
+        endpoint="web_app_stream", view_func=handler.stream,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/stream",
-        methods=["POST"],
-        view_func=handler.debug_stream,
+        f"{prefix}/state", methods=["GET"],
+        endpoint="web_app_state", view_func=handler.state,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/state",
-        methods=["GET"],
-        view_func=handler.debug_state,
+        f"{prefix}/model-settings", methods=["GET"],
+        endpoint="web_app_model_settings", view_func=handler.model_settings,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/commands",
-        methods=["POST"],
-        view_func=handler.web_app_command,
+        f"{prefix}/runs/<uuid:run_id>/cancel", methods=["POST"],
+        endpoint="web_app_cancel_run", view_func=handler.cancel_run,
+    )
+
+
+def register_creator_task_agent_routes(blueprint: Blueprint, handler: CreatorTaskAgentHandler) -> None:
+    """注册 Creator 任务中心入口，保留原 URL 和 Flask endpoint。"""
+    prefix = "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(
+        f"{prefix}/commands", methods=["POST"],
+        endpoint="creator_task_command", view_func=handler.command,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/stream",
-        methods=["POST"],
-        view_func=handler.web_app_stream,
+        f"{prefix}/stream", methods=["POST"],
+        endpoint="creator_task_stream", view_func=handler.stream,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/state",
-        methods=["GET"],
-        view_func=handler.web_app_state,
+        f"{prefix}/state", methods=["GET"],
+        endpoint="creator_task_state", view_func=handler.state,
     )
     blueprint.add_url_rule(
-        "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
-        methods=["POST"],
-        view_func=handler.debug_cancel_run,
+        f"{prefix}/model-settings", methods=["GET"],
+        endpoint="creator_task_model_settings", view_func=handler.model_settings,
     )
     blueprint.add_url_rule(
-        "/web-apps/<string:token>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
-        methods=["POST"],
-        view_func=handler.web_app_cancel_run,
+        f"{prefix}/runs/<uuid:run_id>/cancel", methods=["POST"],
+        endpoint="creator_task_cancel_run", view_func=handler.cancel_run,
     )
+
+
+def register_agent_run_routes(blueprint: Blueprint, handler: AgentRunHandler) -> None:
+    """Run 查询独立于入口类型，保留历史路由标识。"""
     blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/commands",
-        methods=["POST"],
-        view_func=handler.creator_task_command,
-    )
-    blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/stream",
-        methods=["POST"],
-        view_func=handler.creator_task_stream,
-    )
-    blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/state",
-        methods=["GET"],
-        view_func=handler.creator_task_state,
-    )
-    blueprint.add_url_rule(
-        "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>/runs/<uuid:run_id>/cancel",
-        methods=["POST"],
-        view_func=handler.creator_task_cancel_run,
+        "/agent-runs/<uuid:run_id>/events", methods=["GET"],
+        endpoint="run_events", view_func=handler.events,
     )
 
 
@@ -202,7 +200,10 @@ def register_internal_agent_protocol_routes(
 
 
 __all__ = [
-    "register_agent_workbench_routes",
+    "register_debug_agent_routes",
+    "register_web_app_agent_routes",
+    "register_creator_task_agent_routes",
+    "register_agent_run_routes",
     "register_assistant_agent_protocol_routes",
     "register_internal_agent_protocol_routes",
     "register_openapi_agent_protocol_routes",

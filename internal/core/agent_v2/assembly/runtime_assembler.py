@@ -23,7 +23,6 @@ from internal.core.agent_v2.persistence.workspace_store import WorkspaceDelivery
 from internal.core.agent_v2.execution.workspace_delivery import WorkspaceDelivery
 from internal.core.agent_v2.entity.workspace_path import AgentWorkspacePathPolicy
 from internal.core.agent_v2.assembly.graph.deep_agent_factory import build_deep_agent
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.observability.run_observer import (
     PlatformAgentRunObserver,
 )
@@ -58,23 +57,23 @@ class AgentRuntimeAssembler:
     ) -> AgentExecutor:
         """先取得运行资源，再准备附件和编译图；失败时保留原始装配错误。"""
         started_at = time.monotonic()
-        runtime = self._build_runtime(context, definition, observer)
+        runtime = self._build_runtime(context, definition)
         try:
-            self._record_stage(observer, context, "runtime", started_at)
+            self._log_stage(context, "runtime", started_at)
             started_at = time.monotonic()
             # 附件已由服务层读取并校验归属，Core 只将字节写入本轮工作副本。
             if input_files:
                 responses = runtime.backend.upload_files(list(input_files))
                 if len(responses) != len(input_files) or any(response.error for response in responses):
                     raise WorkspaceDeliveryError("附件写入 Agent Workspace 失败")
-            self._record_stage(observer, context, "attachments", started_at)
+            self._log_stage(context, "attachments", started_at)
             started_at = time.monotonic()
             graph = build_deep_agent(definition=definition, runtime=runtime)
             agent = AgentExecutor(
                 graph=graph, runtime=runtime, observer=observer,
                 review_config=definition.review_config,
             )
-            self._record_stage(observer, context, "graph", started_at)
+            self._log_stage(context, "graph", started_at)
             return agent
         except BaseException:
             try:
@@ -87,7 +86,6 @@ class AgentRuntimeAssembler:
         self,
         context: AgentRunContext,
         definition: AgentConfig,
-        observer: PlatformAgentRunObserver,
     ) -> AgentRuntimeResources:
         """逐项登记独占资源，组合成功后将所有权交给本轮运行时。"""
         owned_backends: list[BackendProtocol] = []
@@ -97,7 +95,6 @@ class AgentRuntimeAssembler:
         workspace_store = self.workspace_store
         try:
             # 1.创建空的本轮副本；持久化访问仅绑定依赖，不查询或下载文件。
-            telemetry = AgentTelemetry(observer.record, attributes=context.telemetry_attributes)
             workspace = WorkspaceProjection()
             # 2.装配 Skill 与 Memory 路由，并立即纳入失败清理范围。
             skills = build_skill_context(
@@ -127,7 +124,6 @@ class AgentRuntimeAssembler:
                     agent_id=context.agent_id,
                 ),
                 skill_files=skills.files,
-                telemetry=telemetry,
             )
             if sandbox is not None:
                 owned_backends.append(sandbox)
@@ -178,15 +174,13 @@ class AgentRuntimeAssembler:
             raise
 
     @staticmethod
-    def _record_stage(
-        observer: PlatformAgentRunObserver,
+    def _log_stage(
         context: AgentRunContext,
         stage: str,
         started_at: float,
     ) -> None:
         """在阶段完成时记录耗时，后续装配失败也保留已完成阶段。"""
         duration_ms = (time.monotonic() - started_at) * 1000
-        observer.record_stage(f"assembly.{stage}", duration_ms)
         logger.info(
             "agent_assembly_timing app_id=%s conversation_id=%s stage=%s duration_ms=%.2f",
             context.app_id, context.conversation_id, stage, duration_ms,

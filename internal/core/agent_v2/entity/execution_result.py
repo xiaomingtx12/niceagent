@@ -14,5 +14,4 @@ class AgentExecutionResult:
     answer: str = ""
     state: dict[str, Any] = field(default_factory=dict)
     usage: Mapping[str, Any] = field(default_factory=dict)
-    observability: Mapping[str, Any] = field(default_factory=dict)
     error: Exception | None = None

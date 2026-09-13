@@ -14,7 +14,6 @@ from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
 )
 from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import seed_sandbox_skills
 from internal.core.agent_v2.backends.workspace.workspace_projection import WorkspaceProjection
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.extension.logging_extension import logger
 
 def delete_sandbox(name: str) -> None:
@@ -33,7 +32,6 @@ def create_backend(
     workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
-    telemetry: AgentTelemetry | None = None,
 ) -> SandboxBackendProtocol:
     """获取或创建 LangSmith Sandbox，并完成可复用实例的重置。"""
     from langsmith.sandbox import ResourceNotFoundError, SandboxClient
@@ -58,7 +56,7 @@ def create_backend(
         backend = LangSmithSandbox(sandbox)
         _reset_sandbox_projection(backend)
         seed_sandbox_workspace(backend, workspace=workspace)
-        seed_sandbox_skills(backend, list(skill_files), protect=True, compress=True, telemetry=telemetry)
+        seed_sandbox_skills(backend, list(skill_files), protect=True, compress=True)
         return backend
     except BaseException as exc:
         # 3.仅删除本次新建但初始化失败的实例，不删除借用的已有会话。

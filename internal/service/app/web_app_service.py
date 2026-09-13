@@ -3,21 +3,17 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
-from sqlalchemy import and_, desc, or_
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, EndUser
-from internal.entity.agent_invocation import (
-    AgentInvocationContext,
-)
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
 from internal.service.agent.agent_conversation_cleanup_service import AgentConversationCleanupService
 from internal.service.common.base_service import BaseService
-from internal.service.conversation.conversation_service import ConversationService
 
 
 @inject
@@ -25,13 +21,12 @@ from internal.service.conversation.conversation_service import ConversationServi
 class WebAppService(BaseService):
     """处理 WebApp Token、终端用户和 Conversation 的业务归属。
 
-    本服务为 Agent Run 准备合法的调用上下文，不负责 Agent 装配或执行。
+    会话权限在本服务内完成，不负责 Agent 装配或执行。
     """
 
     db: SQLAlchemy
     app_config_service: AppConfigService
     agent_cleanup_service: AgentConversationCleanupService
-    conversation_service: ConversationService
 
     def create_conversation(self, token: str, account: Account) -> Conversation:
         """创建 WebApp 会话并由数据库分配会话 ID。"""
@@ -112,36 +107,28 @@ class WebAppService(BaseService):
         # 1.校验 WebApp token 并解析当前账号对应的终端用户。
         app = self.get_web_app(token)
         end_user = self.resolve_web_app_end_user(app=app, account=account)
-        # 2.账号归属和旧数据兼容统一交给会话模块。
-        conversation = self.conversation_service.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-            app_id=app.id,
-            allowed_sources=(InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK),
+        # 2.新会话只认 owner；未回填的旧 WebApp 会话可通过本应用的终端用户归属访问。
+        legacy_owner = or_(
+            Conversation.created_by == account.id,
+            and_(Conversation.invoke_from == InvokeFrom.WEB_APP, Conversation.created_by == end_user.id),
         )
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app.id,
+                Conversation.invoke_from.in_((InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK)),
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    and_(Conversation.owner_account_id.is_(None), legacy_owner),
+                ),
+            )
+            .one_or_none()
+        )
+        if conversation is None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
         return app, end_user, conversation
-
-    def get_invocation_context(
-        self,
-        *,
-        token: str,
-        conversation_id: UUID,
-        account: Account,
-    ) -> AgentInvocationContext:
-        """把 WebApp token 和账号映射为已校验的 Agent 调用上下文。"""
-        app, end_user, conversation = self.get_owned_web_conversation(
-            token=token,
-            conversation_id=conversation_id,
-            account=account,
-        )
-        return AgentInvocationContext(
-            account_id=account.id,
-            app_id=app.id,
-            conversation_id=conversation.id,
-            created_by=end_user.id,
-            end_user_id=end_user.id,
-            invoke_from=InvokeFrom.WEB_APP,
-        )
 
     def get_owned_web_conversation_by_app_id(
         self,
@@ -151,12 +138,30 @@ class WebAppService(BaseService):
         account: Account,
     ) -> Conversation:
         """使用稳定应用归属校验 WebApp 会话，不依赖可能轮换的访问 token。"""
-        return self.conversation_service.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-            app_id=app_id,
-            allowed_sources=(InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK),
+        legacy_end_users = select(EndUser.id).where(
+            EndUser.app_id == app_id, EndUser.external_user_id == account.id,
         )
+        legacy_owner = or_(
+            Conversation.created_by == account.id,
+            and_(Conversation.invoke_from == InvokeFrom.WEB_APP, Conversation.created_by.in_(legacy_end_users)),
+        )
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app_id,
+                Conversation.invoke_from.in_((InvokeFrom.WEB_APP, InvokeFrom.CREATOR_TASK)),
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    and_(Conversation.owner_account_id.is_(None), legacy_owner),
+                ),
+            )
+            .one_or_none()
+        )
+        if conversation is None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
+        return conversation
 
     def get_web_app(self, token: str) -> App:
         """根据访问令牌获取已发布的 WebApp 应用。"""

@@ -26,10 +26,6 @@ from deepagents.backends.protocol import (
 )
 from langchain_daytona import DaytonaSandbox
 
-from internal.core.agent_v2.observability.telemetry import (
-    AgentTelemetry,
-    NOOP_AGENT_TELEMETRY,
-)
 from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
     seed_sandbox_workspace,
@@ -119,12 +115,10 @@ class ManagedDaytonaSandbox(DaytonaSandbox):
         timeout: int = 1800,
         lease: SandboxLease | None = None,
         idle_ttl: int = 600,
-        telemetry: AgentTelemetry | None = None,
     ) -> None:
         """构造时固定租约归属，运行中只维护初始化和关闭状态。"""
         super().__init__(sandbox=sandbox, timeout=timeout)
         self._sandbox = sandbox
-        self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._ready = False
         self._closed = False
         self._lease = lease
@@ -321,7 +315,6 @@ def create_backend(
     workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
-    telemetry: AgentTelemetry | None = None,
 ) -> ManagedDaytonaSandbox:
     """独占取得同一会话的 Sandbox，并刷新本轮临时文件投影。"""
     sandbox: Any | None = None
@@ -360,12 +353,8 @@ def create_backend(
             timeout=execute_timeout,
             lease=lease,
             idle_ttl=ttl,
-            telemetry=telemetry,
         )
-        (telemetry or NOOP_AGENT_TELEMETRY).emit(
-            "sandbox.session_acquire", attributes={"provider": "daytona", "reused": reused},
-        )
-        _initialize_workspace(backend, workspace, skill_files, reused=reused, telemetry=telemetry)
+        _initialize_workspace(backend, workspace, skill_files, reused=reused)
         backend._ready = True
         return backend
     except BaseException as exc:
@@ -429,7 +418,6 @@ def _initialize_workspace(
     skill_files: Iterable[tuple[str, bytes]],
     *,
     reused: bool,
-    telemetry: AgentTelemetry | None,
 ) -> None:
     """复用实例先清空旧投影，初始化成功后才允许结束时归还租约。"""
     if reused:
@@ -443,7 +431,7 @@ def _initialize_workspace(
     seed_sandbox_workspace(backend, workspace=workspace)
     seed_sandbox_skills(
         backend, list(skill_files), projection_root=_DAYTONA_HOME,
-        protect=True, compress=True, telemetry=telemetry,
+        protect=True, compress=True,
     )
 
 

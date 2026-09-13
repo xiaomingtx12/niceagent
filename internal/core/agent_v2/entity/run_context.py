@@ -75,16 +75,6 @@ class AgentRunContext(BaseModel):
         """返回跨会话共享 Workspace 的稳定内部作用域 ID。"""
         return build_workspace_scope_id(self.account_id, self.app_id)
 
-    @property
-    def telemetry_attributes(self) -> dict[str, str | None]:
-        """返回不包含提示词内容的观测属性。"""
-        return {
-            "account_id": str(self.account_id),
-            "app_id": str(self.app_id),
-            "conversation_id": str(self.conversation_id),
-            "principal_id": str(self.principal_id),
-            "memory_enabled": str(self.memory_enabled).lower(),
-        }
 
 
 __all__ = [

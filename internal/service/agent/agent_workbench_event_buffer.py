@@ -5,7 +5,6 @@ from collections.abc import Mapping
 
 from internal.core.agent_v2 import (
     AgentEvent,
-    PlatformAgentRunObserver,
 )
 from internal.entity import WorkbenchRun
 from internal.extension.logging_extension import logger
@@ -23,7 +22,6 @@ class AgentWorkbenchEventBuffer:
         self,
         run: WorkbenchRun,
         projector: AgentProtocolEventProjector,
-        observer: PlatformAgentRunObserver,
         run_service: AgentWorkbenchRunService,
         queue_manager: AgentWorkbenchEventQueueManager,
         *,
@@ -33,7 +31,6 @@ class AgentWorkbenchEventBuffer:
         """缓冲只由本次执行的事件回调使用，不拥有 Agent 或数据库 Session。"""
         self._run = run
         self._projector = projector
-        self._observer = observer
         self._run_service = run_service
         self._queue_manager = queue_manager
         self._started_at = started_at
@@ -88,7 +85,6 @@ class AgentWorkbenchEventBuffer:
         if first_reasoning:
             self._first_reasoning_published = True
             duration_ms = (self._last_flush_at - self._started_at) * 1000
-            self._observer.record_stage("delivery.first_reasoning", duration_ms)
             logger.info(
                 "agent_delivery_timing run_id=%s stage=first_reasoning duration_ms=%.2f",
                 self._run.run_id, duration_ms,
@@ -97,7 +93,6 @@ class AgentWorkbenchEventBuffer:
             return
         self._first_text_published = True
         duration_ms = (self._last_flush_at - self._started_at) * 1000
-        self._observer.record_stage("delivery.first_text", duration_ms)
         logger.info(
             "agent_delivery_timing run_id=%s stage=first_text duration_ms=%.2f",
             self._run.run_id, duration_ms,

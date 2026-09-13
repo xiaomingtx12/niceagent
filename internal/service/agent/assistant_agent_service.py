@@ -3,6 +3,7 @@ from uuid import UUID
 
 from injector import inject
 from langchain_core.tools import BaseTool, tool
+from sqlalchemy import and_, or_
 
 from config import Config
 from internal.entity.conversation_entity import InvokeFrom
@@ -12,9 +13,6 @@ from internal.schema.agent.agent_tool_schema import (
     AppWithWorkflowGeneratorToolReq,
     CreateAppToolReq,
     WorkflowGeneratorToolReq,
-)
-from internal.entity.agent_invocation import (
-    AgentInvocationContext,
 )
 from internal.task.app_task import auto_create_app
 from internal.task.workflow_task import (
@@ -60,31 +58,34 @@ class AssistantAgentService:
                 app_id=app_id,
             )
 
-    def get_invocation_context(
+    def get_owned_conversation(
         self,
         *,
         conversation_id: UUID,
         account: Account,
-    ) -> AgentInvocationContext:
-        """把辅助 Agent 入口转换为已校验的 Agent 调用上下文。"""
+    ) -> Conversation:
+        """校验内置助手配置及当前账号的会话归属。"""
         try:
             app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
         except (AttributeError, TypeError, ValueError) as exc:
             raise FailException("辅助 Agent 应用配置无效") from exc
-        conversation = self.conversation_service.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-            app_id=app_id,
-            allowed_sources=(InvokeFrom.ASSISTANT_AGENT,),
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app_id,
+                Conversation.invoke_from == InvokeFrom.ASSISTANT_AGENT,
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    and_(Conversation.owner_account_id.is_(None), Conversation.created_by == account.id),
+                ),
+            )
+            .one_or_none()
         )
-        return AgentInvocationContext(
-            account_id=account.id,
-            app_id=app_id,
-            conversation_id=conversation.id,
-            created_by=account.id,
-            end_user_id=None,
-            invoke_from=InvokeFrom.ASSISTANT_AGENT,
-        )
+        if conversation is None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
+        return conversation
 
     def build_tools(self, account_id: UUID) -> list[BaseTool]:
         """工具绑定已授权账号，执行时无需保留 ORM 对象或访问请求上下文。"""

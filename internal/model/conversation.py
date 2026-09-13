@@ -18,7 +18,7 @@ from internal.extension.database_extension import db
 
 
 class Conversation(db.Model):
-    """交流会话模型"""
+    """会话归属与展示信息；Agent 执行上下文由 LangGraph checkpoint 保存。"""
 
     __tablename__ = "conversation"
     __table_args__ = (
@@ -35,7 +35,7 @@ class Conversation(db.Model):
     )  # 会话名称
     summary = Column(
         Text, nullable=False, server_default=text("''::text")
-    )  # 会话摘要/长期记忆
+    )  # 会话摘要，供任务检索使用
     is_pinned = Column(
         Boolean, nullable=False, server_default=text("false")
     )  # 是否置顶
@@ -78,7 +78,7 @@ class Conversation(db.Model):
 
 
 class Message(db.Model):
-    """交流消息模型"""
+    """一轮用户提问、Agent 回答及累计用量，供历史展示与分析查询。"""
 
     __tablename__ = "message"
     __table_args__ = (
@@ -117,35 +117,14 @@ class Message(db.Model):
     attachments = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 用户提问时提交的附件元数据
-    message = Column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )  # 产生answer的消息列表
-    message_token_count = Column(
-        Integer, nullable=False, server_default=text("0")
-    )  # 消息列表的token总数
-    message_unit_price = Column(
-        Numeric(10, 7), nullable=False, server_default=text("0.0")
-    )  # 消息的单价
-    message_price_unit = Column(
-        Numeric(10, 4), nullable=False, server_default=text("0.0")
-    )  # 消息的价格单位
 
     # 消息关联的答案信息
     answer = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # Agent生成的消息答案
-    answer_token_count = Column(
-        Integer, nullable=False, server_default=text("0")
-    )  # 消息答案的token数
-    answer_unit_price = Column(
-        Numeric(10, 7), nullable=False, server_default=text("0.0")
-    )  # token的单位价格
-    answer_price_unit = Column(
-        Numeric(10, 4), nullable=False, server_default=text("0.0")
-    )  # token的价格单位
 
-    # 消息的相关统计信息
-    latency = Column(Float, nullable=False, server_default=text("0.0"))  # 消息的总耗时
+    # 消息状态与执行耗时
+    latency = Column(Float, nullable=False, server_default=text("0.0"))  # 各执行片段累计耗时（秒），不含等待用户输入
     is_deleted = Column(
         Boolean, nullable=False, server_default=text("false")
     )  # 软删除标记
@@ -154,37 +133,39 @@ class Message(db.Model):
     )  # 消息的状态，涵盖正常、错误、停止
     error = Column(
         Text, nullable=False, server_default=text("''::text")
-    )  # 发生错误时记录的信息
+    )  # 可向用户展示的错误信息，异常堆栈写入日志
+
+    # 累计用量，包含工具循环及暂停后恢复的模型调用
     total_token_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 消耗的总token数，计算步骤的消耗
+    )  # 归一化后累计总 Token 数，缺少总量时按输入与输出求和
     input_token_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 本次运行输入Token总数
+    )  # 累计输入 Token 数
     output_token_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 本次运行输出Token总数
+    )  # 累计输出 Token 数
     cached_token_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 本次运行缓存命中的输入Token数
+    )  # 输入 Token 中缓存命中的数量
     reasoning_token_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 本次运行推理Token数
+    )  # 模型报告的推理 Token 数，不额外累加到总量
     model_call_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 本次运行真实模型调用次数
+    )  # 累计模型调用次数，包含失败或未返回用量的调用
     tool_call_count = Column(
         Integer, nullable=False, server_default=text("0")
-    )  # 本次运行真实工具调用次数
+    )  # 累计工具调用次数
     trace_id = Column(
         String(64), nullable=True
-    )  # 本次运行的Trace标识
+    )  # 关联运行的追踪标识；工作台链路对应 AgentRun.id
     token_usage = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )  # 按模型保存的Token明细
+    )  # 按模型汇总的输入、输出、总 Token 及缓存/推理明细
     total_price = Column(
         Numeric(10, 7), nullable=False, server_default=text("0.0")
-    )  # 消耗的总价格，计算步骤的总消耗
+    )  # 历史已记录费用，分析接口仍读取；当前执行链路不计算费用
 
     # 消息时间相关信息
     updated_at = Column(

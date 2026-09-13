@@ -28,6 +28,8 @@
 
 详细时序、资源所有权和人工验证步骤见 [Agent 运行基线](../../../docs/agent-runtime-baseline.md)。
 
+会话状态接口只返回消息、Run 摘要和公开状态，不加载执行事件。执行过程由历史分页和实时 SSE 提供；前端共用一个事件集合，运行摘要不再转换为合成事件。
+
 事件投影器直接返回 `WorkbenchEvent`，事件缓冲只批量保存与通知。框架消息解析、摘要过滤及消息结束分片由 Core 完成；`to_public_event` 仅用于读取历史 JSON。
 
 终态展示由 `agent_protocol.state_projector` 的 `project_execution_state` 和 `project_execution_lifecycle` 生成；执行服务保留数据库读取、业务消息状态、错误脱敏和原子提交顺序。

@@ -81,15 +81,14 @@ DeepAgents 在平台链之前提供 Todo、Skills、Filesystem、SubAgent、摘�
 
 ## 观测接口与消费者
 
-LangChain Callback 自动记录模型、工具及子 Agent，业务入口只创建 Observer、记录阶段、结束执行并取快照。结果交付从同一次 `snapshot()` 取得观测与用量；用量保留独立副本，修改结果统计不会改写快照。只需要用量的微信异常兜底仍使用 `build_run_usage()`，避免复制完整明细。
+LangChain Callback 自动累计模型和工具调用数及用量，业务入口创建 Observer、结束统计并调用 `build_run_usage()`。执行结果只交付一份片段用量，Run 服务将其累计到 Message；微信入口直接保存本次执行用量。
 
 | 数据 | 消费者与保留原因 |
 | --- | --- |
 | Token、缓存/推理明细、调用数、分模型用量 | `ConversationService` 写入消息统计；Protocol 消息 metrics、工作台用量展示和 `AnalysisService` 报表使用。 |
-| Span、阶段、事件、截断计数 | Run 的观测 JSON 和 `/agent-runs/<run_id>/observability` 查询接口用于排障；即使当前页面不展示全部明细，也不能据此删除。 |
-| execution_id、executions、汇总用量 | Run 服务在事务内合并恢复片段并去重，保留已有历史字段与用量别名兼容。 |
+| trace_id、last_settled_executor_id | trace_id 关联消息与 Run；结算标识作为 Run 的独立列，在同一事务中防止片段重复累计。 |
 
-Observer 内部只保存可见 Span 的 ID 集合用于查找父节点；Span 实体仍由明细列表及活动调用表持有。锁、晚到回调处理、明细上限和重复结束不计费规则保持不变。
+Observer 只保留活动模型的 ID/名称、活动工具 ID 及累计统计；不保存 Span、父子调用关系、阶段、诊断事件和执行片段列表。结束后拒绝迟到回调，重复结束不再次计费。装配、沙箱和首字交付保留已有日志；页面执行过程仍由 AgentRunEvent 提供。
 
 ## 文件交付模式
 

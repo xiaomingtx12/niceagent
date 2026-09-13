@@ -1,7 +1,6 @@
 """Agent V2 单次 Deep Agents 图执行与资源生命周期。"""
 
 from collections.abc import Callable, Generator, Mapping
-from copy import deepcopy
 from enum import Enum, auto
 from threading import Event, Lock
 from typing import Any, Literal
@@ -252,7 +251,7 @@ class AgentExecutor:
         error: Exception | None,
         cancelled: bool,
     ) -> AgentExecutionResult:
-        """统一完成状态、回答与观测，阻止未通过交付审核的消息进入业务历史。"""
+        """统一完成状态、回答与用量，阻止未通过交付审核的消息进入业务历史。"""
         if self._review.output_enabled and (error is not None or cancelled):
             state = {key: value for key, value in state.items() if key != "messages"}
         messages = state.get("messages")
@@ -264,15 +263,13 @@ class AgentExecutor:
             status = "cancelled"
         elif self._interrupts:
             status = "waiting_input"
-        self._observer.finish(status, error=error)
-        snapshot = self._observer.snapshot()
+        self._observer.finish()
         return AgentExecutionResult(
             status=status,
             interrupts=self._interrupts if status == "waiting_input" else (),
             answer=answer,
             state=json_value(state),
-            usage=deepcopy(snapshot["usage"]),
-            observability=snapshot,
+            usage=self._observer.build_run_usage(),
             error=error,
         )
 

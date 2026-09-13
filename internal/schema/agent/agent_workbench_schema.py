@@ -20,6 +20,7 @@ from pydantic import (
     StrictInt,
     StrictStr,
     ValidationError,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -71,6 +72,7 @@ class WorkbenchCommandInputReq(BaseModel):
 
     @field_validator("image_urls", "file_ids", "selected_skills", mode="before")
     def normalize_list(value: Any) -> list[Any]:
+        """兼容旧客户端的 null，其他非数组输入仍拒绝。"""
         if value is None:
             return []
         if not isinstance(value, list):
@@ -159,17 +161,20 @@ class WorkbenchInputReopenReq(BaseModel):
 
 
 class WorkbenchCommandReq(BaseModel):
-    """工作台当前支持的 Agent Protocol 命令。"""
+    """在请求解析时确定命令参数类型，分派阶段只消费已规范化的数据。"""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", frozen=True)
 
     type: StrictStr | None = None
     id: StrictInt | None = None
     method: Literal["run.start", "input.respond", "input.reopen"]
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq = Field(
+        default_factory=dict, validate_default=True,
+    )
 
     @classmethod
     def from_mapping(cls, command: Any) -> "WorkbenchCommandReq":
+        """HTTP 入口一次完成外壳与参数校验，失败使用统一项目异常。"""
         if not isinstance(command, Mapping):
             raise ValidateErrorException("工作台命令必须是 JSON 对象")
         try:
@@ -177,17 +182,37 @@ class WorkbenchCommandReq(BaseModel):
         except ValidationError as exc:
             raise ValidateErrorException(f"工作台命令格式错误: {exc}") from exc
 
-    def input_data(self) -> WorkbenchCommandInputReq:
-        raw = self.params.get("input", self.params)
+    @field_validator("params", mode="before")
+    @classmethod
+    def parse_params(
+        cls, value: Any, info: ValidationInfo,
+    ) -> WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq:
+        """按方法解析唯一参数类型，旧 SDK 的嵌套输入和单条回答在此收敛。"""
+        if not isinstance(value, Mapping):
+            raise ValueError("命令 params 必须是对象")
+        method = info.data.get("method")
+        if method == "input.respond":
+            try:
+                return WorkbenchInputRespondReq.model_validate(value)
+            except ValidationError as exc:
+                raise ValidateErrorException("表单提交格式错误") from exc
+        if method == "input.reopen":
+            try:
+                return WorkbenchInputReopenReq.model_validate(value)
+            except ValidationError as exc:
+                raise ValidateErrorException("表单恢复格式错误") from exc
+        if method != "run.start":
+            raise ValueError("不支持的工作台命令")
+        raw = value.get("input", value)
         if not isinstance(raw, Mapping):
             raise ValidateErrorException("run.start 的 input 必须是对象")
         try:
-            value = WorkbenchCommandInputReq.model_validate(dict(raw))
+            parsed = WorkbenchCommandInputReq.model_validate(raw)
+            if not parsed.messages and not parsed.query:
+                raise ValidateErrorException("run.start 需要 input.messages 或 query")
+            return parsed.to_run_input()
         except ValidationError as exc:
             raise ValidateErrorException(f"工作台输入格式错误: {exc}") from exc
-        if not value.messages and not value.query:
-            raise ValidateErrorException("run.start 需要 input.messages 或 query")
-        return value
 
 
 
@@ -417,6 +442,20 @@ class WorkbenchRunMetadataResp(BaseModel):
     last_event_sequence: int = Field(default=0, ge=0)
 
 
+class WorkbenchRunSummaryResp(BaseModel):
+    """会话中的运行摘要；不包含执行事件，也不占用事件序号。"""
+
+    run_id: UUID
+    message_id: UUID
+    input_message_id: str | None = None
+    status: str
+    last_event_sequence: int = Field(default=0, ge=0)
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+
+
 class WorkbenchStateResp(BaseModel):
     """兼容 LangGraph SDK 的工作台状态响应。"""
 
@@ -432,17 +471,6 @@ class WorkbenchCancelResp(BaseModel):
     cancel_requested: bool
     run_id: UUID | None = None
     status: str
-
-
-class WorkbenchRunObservabilityResp(BaseModel):
-    """一个平台 Agent Run 的可查询观测结果。"""
-
-    run_id: UUID
-    trace_id: UUID
-    status: str
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    observability: dict[str, Any] = Field(default_factory=dict)
 
 
 __all__ = [
@@ -464,7 +492,7 @@ __all__ = [
     "WorkbenchHistoryMessageResp",
     "WorkbenchMessagePageInfoResp",
     "WorkbenchRunMetadataResp",
+    "WorkbenchRunSummaryResp",
     "WorkbenchStateResp",
     "WorkbenchCancelResp",
-    "WorkbenchRunObservabilityResp",
 ]

@@ -6,13 +6,13 @@ from uuid import UUID
 from flask import Response, request
 from flask_login import current_user, login_required
 from injector import inject
-from internal.schema.agent.agent_workbench_read_schema import WorkbenchStateReq
+
+from internal.entity.conversation_entity import InvokeFrom
 
 from internal.exception import ValidateErrorException
 from internal.schema import (
     WorkbenchCancelResp,
     WorkbenchCommandReq,
-    WorkbenchStateResp,
     WorkbenchEventStreamReq,
 )
 from internal.service import AgentWorkbenchService, ConversationService
@@ -49,74 +49,68 @@ class OpenAPIAgentProtocolHandler:
 
     @login_required
     def command(self, app_id: UUID, conversation_id: UUID) -> Response:
-        """提交开放 API 的 Agent Protocol 命令。"""
-        body = request.get_json(silent=True)
-        command = WorkbenchCommandReq.from_mapping(body)
+        """鉴权后直接传递调用身份，客户端命令不能覆盖账号或来源。"""
+        command = WorkbenchCommandReq.from_mapping(request.get_json(silent=True))
+        conversation = self.conversation_service.get_service_api_conversation(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        )
         result = execute_command(
-            self.service,
-            context=self.conversation_service.get_service_api_invocation_context(
-                app_id=app_id,
-                conversation_id=conversation_id,
-                account=current_user,
-            ),
+            self.service, app_id=conversation.app_id, conversation_id=conversation.id,
+            invoke_from=InvokeFrom.SERVICE_API,
+            account_id=current_user.id, created_by=conversation.created_by, end_user_id=conversation.created_by,
             command=command,
         )
         return json_response(result.model_dump(mode="json", exclude_none=True))
 
     @login_required
     def stream(self, app_id: UUID, conversation_id: UUID) -> Response:
-        """订阅开放 API 的 Agent Protocol 事件。"""
+        """先校验会话权限，再按已解析游标订阅当前入口的 Run。"""
         stream_request = WorkbenchEventStreamReq.from_mapping(
             request.get_json(silent=True),
             last_event_id=request.headers.get("Last-Event-ID"),
         )
+        conversation = self.conversation_service.get_service_api_conversation(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        )
         events = self.query_service.subscribe(
-            context=self.conversation_service.get_service_api_invocation_context(
-                app_id=app_id,
-                conversation_id=conversation_id,
-                account=current_user,
-            ),
-            stream_request=stream_request,
+            app_id=conversation.app_id, conversation_id=conversation.id,
+            invoke_from=InvokeFrom.SERVICE_API, stream_request=stream_request,
         )
         return sse_response(events)
 
     @login_required
     def state(self, app_id: UUID, conversation_id: UUID) -> Response:
-        """读取开放 API 会话状态。"""
-        result = self.query_service.get_state(
-            view=WorkbenchStateReq.from_query(request.args).view.data,
-            context=self.conversation_service.get_service_api_invocation_context(
-                app_id=app_id,
-                conversation_id=conversation_id,
-                account=current_user,
-            ),
-        )
-        response = WorkbenchStateResp.model_validate(result)
-        return json_response(response.model_dump(mode="json"))
-
-    @login_required
-    def model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
-        """开放接口只返回已授权应用的模型配置，不提供账号模型目录。"""
-        result = self.query_service.get_model_settings(context=self.conversation_service.get_service_api_invocation_context(
+        """鉴权后只向状态查询传递会话 ID 和固定调用来源。"""
+        conversation = self.conversation_service.get_service_api_conversation(
             app_id=app_id, conversation_id=conversation_id, account=current_user,
-        ))
+        )
+        result = self.query_service.get_state(
+            conversation_id=conversation.id, invoke_from=InvokeFrom.SERVICE_API,
+        )
         return json_response(result.model_dump(mode="json"))
 
     @login_required
-    def cancel_run(
-        self,
-        app_id: UUID,
-        conversation_id: UUID,
-        run_id: UUID,
-    ) -> Response:
-        """取消开放 API 的指定 Agent Run。"""
+    def model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
+        """模型选项使用当前账号和实际创建者身份判断可见范围。"""
+        conversation = self.conversation_service.get_service_api_conversation(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        )
+        result = self.query_service.get_model_settings(
+            app_id=conversation.app_id, conversation_id=conversation.id,
+            invoke_from=InvokeFrom.SERVICE_API,
+            account_id=current_user.id, created_by=conversation.created_by,
+        )
+        return json_response(result.model_dump(mode="json"))
+
+    @login_required
+    def cancel_run(self, app_id: UUID, conversation_id: UUID, run_id: UUID) -> Response:
+        """先校验会话权限，再限制目标 Run 的应用、会话和来源。"""
+        conversation = self.conversation_service.get_service_api_conversation(
+            app_id=app_id, conversation_id=conversation_id, account=current_user,
+        )
         result = self.service.cancel_run(
-            context=self.conversation_service.get_service_api_invocation_context(
-                app_id=app_id,
-                conversation_id=conversation_id,
-                account=current_user,
-            ),
-            run_id=run_id,
+            app_id=conversation.app_id, conversation_id=conversation.id,
+            invoke_from=InvokeFrom.SERVICE_API, run_id=run_id,
         )
         response = WorkbenchCancelResp.model_validate(result, from_attributes=True)
         return json_response(response.model_dump(mode="json"))

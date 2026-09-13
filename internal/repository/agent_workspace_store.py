@@ -5,7 +5,6 @@ from hashlib import sha256
 
 from internal.core.agent_v2.entity.workspace_path import AgentWorkspacePathPolicy
 from internal.core.agent_v2.entity.workspace_quota import WorkspaceQuotaExceeded
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.persistence.workspace_store import SavedWorkspaceFile, WorkspaceDeliveryError
 from internal.repository.workspace_file_repository import (
     WorkspaceFileRepository,
@@ -20,12 +19,10 @@ class AgentWorkspaceStore:
 
     def __init__(
         self, *, repository: WorkspaceFileRepository, file_store: WorkspaceFileStore,
-        telemetry: AgentTelemetry,
     ) -> None:
         """身份和配额由装配服务绑定，存储操作不接受模型提供账号。"""
         self._repository = repository
         self._file_store = file_store
-        self._telemetry = telemetry
         self._paths = AgentWorkspacePathPolicy(scope_id=repository.scope_id)
 
     def list_files(self, prefix: str) -> list[SavedWorkspaceFile]:
@@ -58,7 +55,7 @@ class AgentWorkspaceStore:
         try:
             row = self._file_store.write_bytes(
                 self._repository, storage_path, content, mime_type=mime_type,
-                expected_revision=expected_revision, telemetry=self._telemetry,
+                expected_revision=expected_revision,
             )
         except WorkspaceFileRevisionConflict as exc:
             raise WorkspaceDeliveryError(

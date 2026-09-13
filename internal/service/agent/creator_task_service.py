@@ -14,14 +14,10 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
 from internal.model import Account, AgentRun, App, Conversation, EndUser
-from internal.entity.agent_invocation import (
-    AgentInvocationContext,
-)
 from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from internal.service.app.app_config_service import AppConfigService
-from internal.service.conversation.conversation_service import ConversationService
 
 
 @inject
@@ -32,7 +28,6 @@ class CreatorTaskService:
     db: SQLAlchemy
     app_config_service: AppConfigService
     agent_cleanup_service: AgentConversationCleanupService
-    conversation_service: ConversationService
 
     def create_conversation(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """创建任务中心会话并由数据库分配会话 ID。"""
@@ -59,39 +54,22 @@ class CreatorTaskService:
             self.db.session.flush()
         return self._serialize_conversation(conversation, app)
 
-    def get_invocation_context(
+    def get_owned_conversation(
         self,
         *,
         app_id: UUID,
         conversation_id: UUID,
         account: Account,
-    ) -> AgentInvocationContext:
-        """把 Creator 任务入口转换为已校验的 Agent 调用上下文。"""
-        app = (
-            self.db.session.query(App)
-            .filter(
-                App.id == app_id,
-                App.account_id == account.id,
-                App.status == AppStatus.PUBLISHED,
-            )
+    ) -> Conversation:
+        """校验创建者、发布状态及允许的会话来源。"""
+        row = (
+            self._visible_query(account)
+            .filter(Conversation.id == conversation_id, App.id == app_id)
             .one_or_none()
         )
-        if app is None:
-            raise NotFoundException("应用不存在、未发布或无权访问")
-        conversation = self.conversation_service.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-            app_id=app.id,
-            allowed_sources=(InvokeFrom.CREATOR_TASK, InvokeFrom.WEB_APP),
-        )
-        return AgentInvocationContext(
-            account_id=account.id,
-            app_id=app.id,
-            conversation_id=conversation.id,
-            created_by=account.id,
-            end_user_id=None,
-            invoke_from=InvokeFrom.CREATOR_TASK,
-        )
+        if row is None:
+            raise NotFoundException("会话不存在或无权访问")
+        return row[0]
 
     def get_agents(self, account: Account) -> list[dict[str, Any]]:
         """获取当前账号已发布 Agent 及其任务会话概览。"""
@@ -276,7 +254,8 @@ class CreatorTaskService:
         条件用于兼容历史 WebApp 会话，待业务侧完成数据回填后仍可保留。
         """
         legacy_end_users = select(EndUser.id).where(
-            EndUser.external_user_id == account.id
+            EndUser.external_user_id == account.id,
+            EndUser.app_id == Conversation.app_id,
         )
         # 新数据只认稳定的 owner；只有尚未回填的会话才允许按旧创建者关系判断。
         legacy_webapp_owner = and_(

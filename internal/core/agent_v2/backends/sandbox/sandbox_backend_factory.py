@@ -13,7 +13,6 @@ from typing import Any
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.backends.sandbox.lazy_sandbox_backend import LazySandboxBackend
 from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
@@ -33,7 +32,6 @@ def build_sandbox_backend(
     workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
-    telemetry: AgentTelemetry | None = None,
 ) -> SandboxBackendProtocol | None:
     """按配置选择 Provider，远程资源延迟到首次需要 Sandbox 时初始化。
 
@@ -61,7 +59,6 @@ def build_sandbox_backend(
                 workspace=workspace,
                 sandbox_name=sandbox_name,
                 skill_files=files,
-                telemetry=telemetry,
             )
         except SandboxProviderError:
             raise
@@ -73,7 +70,7 @@ def build_sandbox_backend(
     if canonical_provider in {"daytona", "langsmith"}:
         return LazySandboxBackend(
             creator=create, workspace=workspace, sandbox_name=sandbox_name,
-            provider=canonical_provider, telemetry=telemetry,
+            provider=canonical_provider,
         )
     return create()
 

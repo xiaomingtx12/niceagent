@@ -8,7 +8,6 @@ from injector import inject
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from sqlalchemy import and_, desc, or_
-from sqlalchemy.orm import defer
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import (
@@ -19,15 +18,12 @@ from internal.entity.conversation_entity import (
 )
 from internal.extension.logging_extension import logger
 from pkg.sqlalchemy import SQLAlchemy
-from internal.entity.agent_invocation import (
-    AgentInvocationContext,
-)
 from internal.service.common.base_service import BaseService
 from internal.service.agent.agent_conversation_cleanup_service import AgentConversationCleanupService
 from internal.service.language_model.provider_api_key_service import ProviderApiKeyService
 from internal.exception import ForbiddenException, NotFoundException
 from internal.model import App, Conversation, EndUser, Message, Account
-from internal.core.agent_v2.entity.token_usage import normalize_token_details
+from internal.core.agent_v2.entity.token_usage import merge_model_token_usage, normalize_token_details
 
 
 @inject
@@ -40,8 +36,10 @@ class ConversationService(BaseService):
     @staticmethod
     def build_run_usage_updates(
         run_usage: Mapping[str, Any] | None,
+        *,
+        message: Message | None = None,
     ) -> dict[str, Any]:
-        """把统一 Run 用量映射为 Message 统计字段。"""
+        """将片段用量映射为消息字段；传入消息时累计，调用方负责事务与去重。"""
         # 1.没有 Run 用量时不覆盖消息原有统计。
         if not run_usage:
             return {}
@@ -49,12 +47,15 @@ class ConversationService(BaseService):
         input_details = normalize_token_details(run_usage.get("input_details"))
         output_details = normalize_token_details(run_usage.get("output_details"))
 
-        # 3.先写入调用次数、Trace 和按模型拆分的原始统计。
+        # 3.即使本片段没有返回 Token，用量统计仍保留真实调用次数。
         updates: dict[str, Any] = {
             "trace_id": run_usage.get("trace_id"),
             "model_call_count": int(run_usage.get("model_call_count", 0) or 0),
             "tool_call_count": int(run_usage.get("tool_call_count", 0) or 0),
-            "token_usage": dict(run_usage.get("models", {}) or {}),
+            "token_usage": merge_model_token_usage(
+                (message.token_usage or {}) if message is not None else {},
+                run_usage.get("models", {}) or {},
+            ),
         }
         if run_usage.get("usage_present"):
             # 4.补充输入、输出、缓存、推理和总 Token 统计。
@@ -70,30 +71,30 @@ class ConversationService(BaseService):
                     "total_token_count": int(run_usage.get("total_tokens", 0) or 0),
                 }
             )
+        if message is not None:
+            for key in updates.keys() - {"trace_id", "token_usage"}:
+                updates[key] += getattr(message, key, 0) or 0
         return updates
 
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None
 
     def create_agent_message(
-        self,
-        *,
-        context: AgentInvocationContext,
-        query: str,
-        image_urls: tuple[str, ...],
+        self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
+        invoke_from: InvokeFrom, query: str, image_urls: tuple[str, ...],
         attachments: list[dict[str, Any]],
     ) -> Message:
         """在调用方事务中校验会话并创建一次 Agent 业务消息。"""
-        conversation = self.db.session.get(Conversation, context.conversation_id)
+        conversation = self.db.session.get(Conversation, conversation_id)
         if (
             conversation is None
-            or conversation.app_id != context.app_id
+            or conversation.app_id != app_id
             or conversation.is_deleted
         ):
             raise ForbiddenException("会话不存在或已删除")
         if conversation.owner_account_id is None:
-            conversation.owner_account_id = context.account_id
-        elif conversation.owner_account_id != context.account_id:
+            conversation.owner_account_id = account_id
+        elif conversation.owner_account_id != account_id:
             raise ForbiddenException("会话不存在或不属于当前账号")
 
         # 服务端预创建的空会话在首条消息提交时获得业务名称。
@@ -112,10 +113,10 @@ class ConversationService(BaseService):
 
         message = Message(
             id=uuid4(),
-            app_id=context.app_id,
+            app_id=app_id,
             conversation_id=conversation.id,
-            invoke_from=context.invoke_from,
-            created_by=context.created_by,
+            invoke_from=invoke_from,
+            created_by=created_by,
             query=query,
             image_urls=list(image_urls),
             attachments=attachments,
@@ -170,14 +171,14 @@ class ConversationService(BaseService):
             conversation_id = conversation.id
         return conversation_id
 
-    def get_service_api_invocation_context(
+    def get_service_api_conversation(
         self,
         *,
         app_id: UUID,
         conversation_id: UUID,
         account: Account,
-    ) -> AgentInvocationContext:
-        """返回开放 API 入口已校验的会话调用上下文。"""
+    ) -> Conversation:
+        """校验开放 API 应用、会话归属及终端用户。"""
         app = (
             self.db.session.query(App)
             .filter(
@@ -189,12 +190,20 @@ class ConversationService(BaseService):
         )
         if app is None:
             raise ForbiddenException("应用不存在、未发布或无权访问")
-        conversation = self.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-            app_id=app.id,
-            allowed_sources=(InvokeFrom.SERVICE_API,),
+        # 已确认账号拥有该发布应用；旧 Service API 会话沿用应用所有权。
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app.id,
+                Conversation.invoke_from == InvokeFrom.SERVICE_API,
+                Conversation.is_deleted.is_(False),
+                or_(Conversation.owner_account_id == account.id, Conversation.owner_account_id.is_(None)),
+            )
+            .one_or_none()
         )
+        if conversation is None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
         end_user = (
             self.db.session.query(EndUser)
             .filter(
@@ -206,14 +215,7 @@ class ConversationService(BaseService):
         )
         if end_user is None:
             raise ForbiddenException("服务 API 会话终端用户无效")
-        return AgentInvocationContext(
-            account_id=account.id,
-            app_id=app.id,
-            conversation_id=conversation.id,
-            created_by=end_user.id,
-            end_user_id=end_user.id,
-            invoke_from=InvokeFrom.SERVICE_API,
-        )
+        return conversation
 
     def get_or_create_debug_conversation(
         self,
@@ -442,30 +444,20 @@ class ConversationService(BaseService):
             # 返回空列表，避免影响主流程。
             return []
 
-    def get_conversation(self, conversation_id: UUID, account: Account) -> Conversation:
-        """按稳定账号归属获取会话，并兼容尚未回填归属的历史数据。"""
-        return self.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-        )
-
-    def get_owned_conversation(
+    def get_conversation(
         self,
-        *,
         conversation_id: UUID,
         account: Account,
+        *,
         app_id: UUID | None = None,
-        allowed_sources: tuple[InvokeFrom, ...] | None = None,
     ) -> Conversation:
-        """校验会话的账号归属、应用和来源约束。"""
+        """通用会话与 Run 详情按账号归属读取；入口专属的来源限制由各自服务执行。"""
         query = self.db.session.query(Conversation).filter(
             Conversation.id == conversation_id,
             Conversation.is_deleted.is_(False),
         )
         if app_id is not None:
             query = query.filter(Conversation.app_id == app_id)
-        if allowed_sources:
-            query = query.filter(Conversation.invoke_from.in_(allowed_sources))
         conversation = query.one_or_none()
         if conversation is None:
             raise NotFoundException("该会话不存在或被删除，请核实后重试")
@@ -511,8 +503,7 @@ class ConversationService(BaseService):
     ) -> tuple[list[Message], bool, UUID | None]:
         """按 created_at 与消息 ID 的稳定游标读取一页业务消息。"""
         limit = min(max(page_size, 1), 50)
-        # 历史列表使用 query/answer，原始模型上下文不参与响应。
-        query = self.db.session.query(Message).options(defer(Message.message)).filter(
+        query = self.db.session.query(Message).filter(
             Message.conversation_id == conversation_id,
             Message.is_deleted.is_(False),
         )

@@ -15,7 +15,6 @@ from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
     raise_for_file_errors,
 )
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry, NOOP_AGENT_TELEMETRY
 from internal.extension.logging_extension import logger
 
 
@@ -25,7 +24,6 @@ _MIN_COMPRESS_BYTES = 64 * 1024
 def seed_sandbox_skills(
     backend: SandboxBackendProtocol, files: list[tuple[str, bytes]], *,
     projection_root: str = "/", protect: bool = False, compress: bool = False,
-    telemetry: AgentTelemetry | None = None,
 ) -> None:
     """Skill 投影的传输与只读设置独立于工作文件，Windows 本机模式使用直接上传。"""
     if not files:
@@ -33,7 +31,7 @@ def seed_sandbox_skills(
     # 1.只传输已授权的包，路径验证对压缩与直接上传入口保持一致。
     _validate_skill_paths(files)
     if compress:
-        upload_sandbox_skills(backend, files, projection_root=projection_root, telemetry=telemetry)
+        upload_sandbox_skills(backend, files, projection_root=projection_root)
     else:
         responses = backend.upload_files(files)
         raise_for_file_errors(responses, operation="upload Sandbox Skills")
@@ -94,7 +92,6 @@ def upload_sandbox_skills(
     files: list[tuple[str, bytes]],
     *,
     projection_root: str = "/",
-    telemetry: AgentTelemetry | None = None,
 ) -> None:
     """大包压缩为一次上传；小包或压缩收益不足时保留原上传路径。"""
     if not files:
@@ -126,13 +123,6 @@ def upload_sandbox_skills(
         if len(responses) != len(files):
             raise SandboxProviderError("upload Sandbox Skill files: response missing")
     duration_ms = (time.monotonic() - started_at) * 1000
-    (telemetry or NOOP_AGENT_TELEMETRY).emit(
-        "sandbox.skill_upload", value=duration_ms,
-        attributes={
-            "unit": "ms", "mode": mode, "file_count": len(files),
-            "raw_bytes": raw_bytes, "upload_bytes": upload_bytes,
-        },
-    )
     logger.info(
         "agent_sandbox_skill_upload mode=%s files=%s raw_bytes=%s upload_bytes=%s duration_ms=%.2f",
         mode, len(files), raw_bytes, upload_bytes, duration_ms,

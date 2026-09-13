@@ -11,7 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableParallel
 from redis import Redis
-from sqlalchemy import func, desc
+from sqlalchemy import and_, func, desc, or_
 from werkzeug.datastructures import FileStorage
 
 from internal.core.tools.builtin_tools.providers.tongyi import qwen_image_generation
@@ -31,15 +31,13 @@ from internal.exception import (
 from internal.model import (
     App,
     Account,
+    Conversation,
 )
 from internal.model.app import AppConfigVersion, AppDatasetJoin, AppConfig
 from internal.schema.app.app_schema import (
     CreateAppReq,
     GetPublishHistoriesWithPageReq,
     GetAppsWithPageReq,
-)
-from internal.entity.agent_invocation import (
-    AgentInvocationContext,
 )
 from internal.schema.app.app_config_schema import DraftAppConfigPatchReq
 from pkg.paginator import Paginator
@@ -199,29 +197,32 @@ class AppService(BaseService):
             raise ForbiddenException("当前账号无权限访问该应用，请核实后尝试")
         return app
 
-    def get_debugger_invocation_context(
+    def get_debugger_conversation(
         self,
         *,
         app_id: UUID,
         conversation_id: UUID,
         account: Account,
-    ) -> AgentInvocationContext:
-        """把调试入口转换为已校验的 Agent 调用上下文。"""
+    ) -> Conversation:
+        """校验应用所有权和调试来源，返回已授权会话。"""
         app = self.get_app(app_id, account)
-        conversation = self.conversation_service.get_owned_conversation(
-            conversation_id=conversation_id,
-            account=account,
-            app_id=app.id,
-            allowed_sources=(InvokeFrom.DEBUGGER,),
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app.id,
+                Conversation.invoke_from == InvokeFrom.DEBUGGER,
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    and_(Conversation.owner_account_id.is_(None), Conversation.created_by == account.id),
+                ),
+            )
+            .one_or_none()
         )
-        return AgentInvocationContext(
-            account_id=account.id,
-            app_id=app.id,
-            conversation_id=conversation.id,
-            created_by=account.id,
-            end_user_id=None,
-            invoke_from=InvokeFrom.DEBUGGER,
-        )
+        if conversation is None:
+            raise NotFoundException("该会话不存在或被删除，请核实后重试")
+        return conversation
 
     def delete_app(self, app_id: UUID, account: Account) -> App:
         """根据传递的应用id+账号，删除指定的应用信息，目前仅删除应用基础信息即可"""

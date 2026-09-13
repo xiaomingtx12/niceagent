@@ -11,7 +11,7 @@ from uuid import UUID
 from injector import inject
 from sqlalchemy import func, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import defer, load_only
+from sqlalchemy.orm import load_only
 
 from internal.entity import (
     WORKBENCH_ACTIVE_STATUSES,
@@ -29,11 +29,9 @@ from internal.model import AgentRun, AgentRunEvent, Message, Conversation
 from internal.entity.agent_run_interaction import AgentRunInteraction
 from internal.entity.agent_invocation import (
     AgentInvocation,
-    AgentInvocationContext,
 )
 from internal.core.agent_v2 import (
     build_confirmed_input_context,
-    merge_run_observability,
 )
 from internal.service.conversation.conversation_service import ConversationService
 from internal.schema.agent.agent_workbench_schema import (
@@ -75,25 +73,29 @@ class AgentWorkbenchRunService:
         )
         return build_confirmed_input_context([history for (history,) in rows if isinstance(history, list)])
 
-    def get_context_run(self, context: AgentInvocationContext, run_id: UUID) -> AgentRun:
+    def get_conversation_run(
+        self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom, run_id: UUID,
+    ) -> AgentRun:
         """确认 Run 同时属于当前应用、会话和入口；此校验不能触发失联恢复写入。"""
         row = self.get_run(run_id)
         if (
             row is None
-            or row.app_id != context.app_id
-            or row.conversation_id != context.conversation_id
-            or row.invoke_from != context.invoke_from.value
+            or row.app_id != app_id
+            or row.conversation_id != conversation_id
+            or row.invoke_from != invoke_from.value
         ):
             raise NotFoundException("Agent Run 不存在或不属于当前会话")
         return row
 
-    def lock_conversation(self, context: AgentInvocationContext) -> None:
+    def lock_conversation(
+        self, *, app_id: UUID, conversation_id: UUID,
+    ) -> None:
         """锁定当前会话，保证同一会话的启动检查和创建串行执行。"""
         conversation = (
             self.db.session.query(Conversation.id)
             .filter(
-                Conversation.id == context.conversation_id,
-                Conversation.app_id == context.app_id,
+                Conversation.id == conversation_id,
+                Conversation.app_id == app_id,
                 Conversation.is_deleted.is_(False),
             )
             .with_for_update()
@@ -102,15 +104,17 @@ class AgentWorkbenchRunService:
         if conversation is None:
             raise NotFoundException("会话不存在或已删除")
 
-    def lock_latest_context_run(self, context: AgentInvocationContext) -> AgentRun | None:
+    def lock_latest_run(
+        self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom,
+    ) -> AgentRun | None:
         """调用方先锁会话；提交答案只锁定当前应用和入口的最新 Run，不提前释放事务。"""
         return (
             self.db.session.query(AgentRun)
             .populate_existing()
             .filter(
-                AgentRun.conversation_id == context.conversation_id,
-                AgentRun.app_id == context.app_id,
-                AgentRun.invoke_from == context.invoke_from.value,
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.app_id == app_id,
+                AgentRun.invoke_from == invoke_from.value,
             )
             .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
             .with_for_update()
@@ -223,7 +227,6 @@ class AgentWorkbenchRunService:
             if row.status == WorkbenchRunStatus.CANCELLING.value:
                 return
             row.status = WorkbenchRunStatus.RUNNING.value
-            row.error_message = ""
             if row.started_at is None:
                 row.started_at = datetime.now(UTC).replace(tzinfo=None)
 
@@ -232,13 +235,12 @@ class AgentWorkbenchRunService:
         run: WorkbenchRun,
         status: WorkbenchRunStatus,
         *,
-        error_message: str = "",
         message_updates: Mapping[str, Any] | None = None,
-        observability: Mapping[str, Any] | None = None,
+        usage: Mapping[str, Any] | None = None,
         events: list[WorkbenchEvent] | None = None,
         state_snapshot: Mapping[str, Any] | None = None,
     ) -> bool:
-        """在一个事务中收敛 Run、业务消息和平台观测快照。"""
+        """在 Run 锁内一次结算片段用量、消息与事件，重复或过期执行不能再次写入。"""
         # 1.锁定 Run，执行权失效或已写入终态时忽略迟到的结果。
         with self.db.auto_commit():
             row = (
@@ -252,31 +254,29 @@ class AgentWorkbenchRunService:
                 return False
             if row.status in WORKBENCH_TERMINAL_STATUSES:
                 return False
-            if (observability and observability.get("execution_id")
-                    and (row.observability or {}).get("execution_id") == observability["execution_id"]):
+            if row.last_settled_executor_id == run.executor_id:
                 return False
+            if usage and usage.get("trace_id") != str(row.id):
+                raise ValueError("不能结算其他 Run 的用量")
 
             # 2.仅第一次成功收敛的调用保存运行结果和结束时间。
             row.status = status.value
-            row.error_message = error_message
             if row.finished_at is None and status is not WorkbenchRunStatus.WAITING_INPUT:
                 row.finished_at = datetime.now(UTC).replace(tzinfo=None)
             if state_snapshot is not None:
                 row.state_snapshot = {**(row.state_snapshot or {}), **state_snapshot}
-            if observability is not None:
-                row.observability = merge_run_observability(row.observability or {}, observability)
+            row.last_settled_executor_id = run.executor_id
 
             # 3.业务消息和 Run 在同一事务内更新。
             updates = dict(message_updates or {})
-            if observability is not None:
-                updates.update(ConversationService.build_run_usage_updates(row.observability.get("usage")))
-            if updates:
-                message = self.db.session.get(Message, run.spec.message_id)
-                if message is not None:
-                    for field, value in updates.items():
-                        if run.resume is not None and field == "latency":
-                            value += getattr(message, field, 0) or 0
-                        setattr(message, field, value)
+            message = self.db.session.get(Message, row.message_id, populate_existing=True)
+            if message is None:
+                raise FailException("Agent 运行对应的消息不存在")
+            updates.update(ConversationService.build_run_usage_updates(usage, message=message))
+            for field, value in updates.items():
+                if run.resume is not None and field == "latency":
+                    value += getattr(message, field, 0) or 0
+                setattr(message, field, value)
             if events:
                 row.last_event_sequence = max(
                     int(row.last_event_sequence or 0),
@@ -394,7 +394,7 @@ class AgentWorkbenchRunService:
                     if cancelled
                     else WorkbenchRunStatus.FAILED.value
                 )
-                row.error_message = "Agent 执行进程已失联，请重新发送消息。"
+                public_error = "Agent 执行进程已失联，请重新发送消息。"
                 row.finished_at = now
                 # 撤销执行权，使迟到的事件、结果和续租无法覆盖恢复后的状态。
                 row.executor_id = None
@@ -407,7 +407,7 @@ class AgentWorkbenchRunService:
                     params={"data": {
                         "event": "interrupted" if cancelled else "failed",
                         "status": row.status,
-                        "error": row.error_message,
+                        "error": public_error,
                         "message_id": str(row.message_id),
                         "input_message_id": row.input_message_id,
                     }},
@@ -418,7 +418,7 @@ class AgentWorkbenchRunService:
                 message = self.db.session.get(Message, row.message_id)
                 if message is not None:
                     message.status = "stop" if cancelled else "error"
-                    message.error = row.error_message
+                    message.error = public_error
 
     def get_run(self, run_id: UUID) -> AgentRun | None:
         """只读取最新数据库状态；失联恢复和 Session 生命周期由调用方负责。"""
@@ -479,7 +479,6 @@ class AgentWorkbenchRunService:
         )
         return (
             self.db.session.query(AgentRun)
-            .options(defer(AgentRun.observability))
             .filter(
                 AgentRun.conversation_id == conversation_id,
                 AgentRun.invoke_from == invoke_from.value,
@@ -577,55 +576,6 @@ class AgentWorkbenchRunService:
             run_id=run_id, events=events,
             next_page=current_page + 1 if len(rows) > page_size else None,
         )
-
-    def list_events_by_run(
-        self,
-        run_ids: list[UUID],
-    ) -> dict[UUID, list[WorkbenchEvent]]:
-        """只读取历史投影需要的列，避免为每个事件构造 ORM 实体。"""
-        if not run_ids:
-            return {}
-        rows = (
-            self.db.session.query(AgentRunEvent.run_id, AgentRunEvent.payload)
-            .filter(
-                AgentRunEvent.run_id.in_(run_ids),
-                AgentRunEvent.payload["method"].astext.in_(_PERSISTED_EVENT_METHODS),
-            )
-            .order_by(
-                AgentRunEvent.run_id.asc(),
-                AgentRunEvent.sequence.asc(),
-            )
-            .all()
-        )
-        events: dict[UUID, list[WorkbenchEvent]] = {run_id: [] for run_id in run_ids}
-        for row in rows:
-            visible = AgentProtocolEventProjector.to_public_event(row.payload)
-            if visible is not None:
-                events.setdefault(row.run_id, []).append(visible)
-        return events
-
-    def list_summary_events_by_run(self, run_ids: list[UUID]) -> dict[UUID, list[WorkbenchEvent]]:
-        """首屏最多读取 64 条上下文与生命周期事件，保留真实公开错误和终态。"""
-        if not run_ids:
-            return {}
-        ranked = self.db.session.query(
-            AgentRunEvent.run_id, AgentRunEvent.payload, AgentRunEvent.sequence,
-            func.row_number().over(
-                partition_by=AgentRunEvent.run_id, order_by=AgentRunEvent.sequence.desc(),
-            ).label("position"),
-        ).filter(
-            AgentRunEvent.run_id.in_(run_ids),
-            AgentRunEvent.payload["method"].astext.in_(("custom", "lifecycle")),
-        ).subquery()
-        rows = self.db.session.query(ranked.c.run_id, ranked.c.payload).filter(
-            ranked.c.position <= 64,
-        ).order_by(ranked.c.run_id, ranked.c.sequence).all()
-        events: dict[UUID, list[WorkbenchEvent]] = {}
-        for row in rows:
-            event = AgentProtocolEventProjector.to_public_event(row.payload)
-            if event is not None:
-                events.setdefault(row.run_id, []).append(event)
-        return events
 
     def get_reconnect_events(
         self,

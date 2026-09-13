@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar
 
@@ -79,23 +78,14 @@ class AgentWorkbenchRunExecutionService:
     def execute(self, run: WorkbenchRun) -> None:
         """编排执行、尾批交付和终态保存，本地登记始终由最外层清理。"""
         started_at = time.monotonic()
-        observer = PlatformAgentRunObserver(
-            run.run_id,
-            execution_id=run.executor_id,
-            attributes={
-                "account_id": str(run.spec.account_id),
-                "app_id": str(run.spec.app_id),
-                "conversation_id": str(run.spec.conversation_id),
-                "invoke_from": run.spec.invoke_from.value,
-            },
-        )
+        observer = PlatformAgentRunObserver(run.run_id)
         projector = AgentProtocolEventProjector(
             run.run_id,
             start_sequence=run.initial_event_sequence,
             root_message_id=f"{run.spec.message_id}:assistant",
         )
         events = AgentWorkbenchEventBuffer(
-            run, projector, observer, self.run_service, self.queue_manager,
+            run, projector, self.run_service, self.queue_manager,
             started_at=started_at, batch_size=self._persistence_batch_size,
         )
         try:
@@ -103,13 +93,11 @@ class AgentWorkbenchRunExecutionService:
             try:
                 result = self._execute_agent(run, observer, projector, events)
             except Exception as exc:
-                observer.finish("failed", error=exc)
-                snapshot = observer.snapshot()
+                observer.finish()
                 result = AgentExecutionResult(
                     status="failed",
                     error=exc,
-                    usage=deepcopy(snapshot["usage"]),
-                    observability=snapshot,
+                    usage=observer.build_run_usage(),
                 )
 
             # 2.Core 已补齐消息结束分片；刷新尾批时保留原始执行错误。
@@ -123,12 +111,6 @@ class AgentWorkbenchRunExecutionService:
                         result,
                         status="failed",
                         error=exc,
-                        observability={
-                            **result.observability,
-                            "agent_status": result.status,
-                            "status": "failed",
-                            "error_type": type(exc).__name__,
-                        },
                     )
 
             # 3.一次提交消息、运行状态和结束事件，成功后再通知订阅者。
@@ -154,12 +136,10 @@ class AgentWorkbenchRunExecutionService:
         if not run.cancel_requested.is_set():
             self.run_service.mark_running(run)
         if run.cancel_requested.is_set():
-            observer.finish("cancelled")
-            snapshot = observer.snapshot()
+            observer.finish()
             return AgentExecutionResult(
                 status="cancelled",
-                usage=deepcopy(snapshot["usage"]),
-                observability=snapshot,
+                usage=observer.build_run_usage(),
             )
 
         # 2.先公开运行状态；恢复执行时清空待填表单，保留已提交回答。
@@ -253,9 +233,8 @@ class AgentWorkbenchRunExecutionService:
         committed = self.run_service.finalize_run(
             run,
             status,
-            error_message=str(result.error) if result.error is not None else "",
             message_updates=message_updates,
-            observability=result.observability,
+            usage=result.usage,
             events=events,
             state_snapshot=state,
         )
@@ -413,7 +392,6 @@ class AgentWorkbenchRunExecutionService:
             committed = self.run_service.finalize_run(
                 run,
                 WorkbenchRunStatus.FAILED,
-                error_message=str(exc),
                 message_updates={"status": "error", "error": "Agent 运行失败"},
                 events=[event],
             )

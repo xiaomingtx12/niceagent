@@ -24,7 +24,6 @@ from deepagents.backends.protocol import (
 
 from internal.core.agent_v2.backends.sandbox.sandbox_initialization import SandboxProviderError
 from internal.core.agent_v2.backends.workspace.workspace_projection import WorkspaceProjection
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry, NOOP_AGENT_TELEMETRY
 from internal.extension.logging_extension import logger
 
 
@@ -42,7 +41,6 @@ class LazySandboxBackend(SandboxBackendProtocol):
         workspace: WorkspaceProjection,
         sandbox_name: str,
         provider: str,
-        telemetry: AgentTelemetry | None = None,
     ) -> None:
         """只保存资源工厂，不建立连接、不导出文件或上传 Skill。"""
         self._creator = creator
@@ -52,7 +50,6 @@ class LazySandboxBackend(SandboxBackendProtocol):
         self._sandbox_name = sandbox_name
         self._provider = provider
         self.execution_uses_virtual_paths = provider == "daytona"
-        self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._backend: SandboxBackendProtocol | None = None
         self._error: BaseException | None = None
         self._closed = False
@@ -127,8 +124,6 @@ class LazySandboxBackend(SandboxBackendProtocol):
                 close = getattr(self._backend, "close", None)
                 if callable(close):
                     close()
-            elif self._error is None:
-                self._telemetry.emit("sandbox.initialization_skipped", attributes={"provider": self._provider})
             # 初始化失败由 creator 清理远程资源，不能再次尝试创建。
 
     def _file_call(self, method: str, paths: Sequence[str], *args: Any) -> Any:
@@ -159,10 +154,6 @@ class LazySandboxBackend(SandboxBackendProtocol):
                 raise
             finally:
                 duration_ms = (time.monotonic() - started_at) * 1000
-                self._telemetry.emit(
-                    "sandbox.initialize", value=duration_ms,
-                    attributes={"provider": self._provider, "status": status, "unit": "ms"},
-                )
                 logger.info(
                     "agent_sandbox_timing sandbox=%s provider=%s stage=initialize status=%s duration_ms=%.2f",
                     self._sandbox_name, self._provider, status, duration_ms,

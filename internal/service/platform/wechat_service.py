@@ -254,13 +254,6 @@ class WechatService(BaseService):
             trace_id = uuid4()
             observer = PlatformAgentRunObserver(
                 trace_id,
-                attributes={
-                    "account_id": str(app.account_id),
-                    "app_id": str(app.id),
-                    "conversation_id": str(conversation.id),
-                    "invoke_from": InvokeFrom.SERVICE_API.value,
-                    "channel": "wechat",
-                },
             )
             try:
                 agent, input_message = self.agent_assembly_service.build_agent(
@@ -291,7 +284,7 @@ class WechatService(BaseService):
                         for field, value in updates.items():
                             setattr(persisted_message, field, value)
             except Exception as exc:
-                observer.finish("failed", error=exc)
+                observer.finish()
                 with self.db.auto_commit():
                     persisted_message = self.db.session.get(Message, message_id)
                     if persisted_message is not None:

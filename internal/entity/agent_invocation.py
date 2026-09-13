@@ -1,4 +1,4 @@
-"""服务端可信调用上下文与可恢复的运行输入，JSON 格式保持与历史快照兼容。"""
+"""一次执行的可信输入；JSON 字段保持与历史恢复快照兼容。"""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from internal.entity.agent_workbench_entity import WorkbenchModelSelection
 from internal.entity.conversation_entity import InvokeFrom
 
 
-class AgentInvocationContext(BaseModel):
-    """入口完成鉴权后交给运行模块的可信调用上下文。"""
+class AgentInvocation(BaseModel):
+    """创建 Run 时保存的完整执行输入，后台装配和恢复不依赖 HTTP 请求。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -21,11 +21,6 @@ class AgentInvocationContext(BaseModel):
     created_by: UUID
     end_user_id: UUID | None
     invoke_from: InvokeFrom
-
-
-
-class AgentInvocation(AgentInvocationContext):
-    """Service 交给 Agent 装配层的一次可信调用参数。"""
 
     message_id: UUID
     query: str

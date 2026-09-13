@@ -164,15 +164,15 @@ Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产�
 
 ### 7. Agent 可观测性
 
-平台通过 LangChain Callback 自动采集主 Agent 和同步 SubAgent 的模型、工具调用，
-并将调用次数、Token、重试、耗时、错误类型和平台阶段耗时写入
-`agent_run.observability`。Workbench `run_id` 同时作为 `trace_id`，可通过
-`GET /agent-runs/<run_id>/observability` 查询有权限访问的完整链路。
+平台通过 LangChain Callback 自动累计主 Agent 和同步 SubAgent 的模型、工具调用数及
+Token 用量。每个执行片段的用量在 Run 锁内直接累计到 Message 统计字段，
+并在同一事务更新 `agent_run.last_settled_executor_id`，防止重复结算。
+按模型的 Token 明细保存在 `Message.token_usage`，由 `/analysis/<app_id>` 聚合展示。
+AgentRun 不再重复保存用量 JSON，也不提供独立的观测查询接口。
 
-远程沙箱首次启动的耗时另记为 `sandbox.initialize` 遥测事件（单位毫秒），并输出
-`agent_sandbox_timing` 日志；整轮未使用沙箱时记录 `sandbox.initialization_skipped`。
-`sandbox.skill_upload` 事件和 `agent_sandbox_skill_upload` 日志记录 Skill 文件数量、
-原始字节数、实际上传字节数、上传方式和耗时，便于对比压缩传输效果。
+远程沙箱首次启动的耗时输出到 `agent_sandbox_timing` 日志；
+`agent_sandbox_skill_upload` 日志记录 Skill 文件数量、原始字节数、实际上传字节数、
+上传方式和耗时。装配与首字交付的耗时也保留日志，不再同步到 Run JSON。
 
 该链路不依赖 LangSmith，默认 `LANGSMITH_TRACING=false`。需要额外使用 LangSmith
 外部追踪时可自行开启；这不会改变平台观测数据的采集和持久化。

@@ -49,7 +49,6 @@ from internal.extension.logging_extension import logger
 from internal.model import Account, App
 from internal.repository import WorkspaceFileRepository, WorkspaceFileStore
 from internal.repository.agent_workspace_store import AgentWorkspaceStore
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.persistence.workspace_store import WorkspaceDeliveryError
 from internal.entity.agent_invocation import (
     AgentInvocation,
@@ -95,7 +94,7 @@ class AgentAssemblyService:
         """准备平台能力并委托 Core 装配，返回仅属于当前 Run 的执行器和输入。"""
         # 1.读取平台配置并转换为 Agent 输入消息。
         build_started_at = time.monotonic()
-        agent_config, context = self._resolve_agent_config(req, observer)
+        agent_config, context = self._resolve_agent_config(req)
         input_message = cast(BaseLanguageModel, agent_config.model).convert_to_human_message(
             req.query,
             req.image_urls,
@@ -114,7 +113,7 @@ class AgentAssemblyService:
         try:
             input_files = self.agent_attachment_service.load_files(req.attachments)
             workspace_store = self._build_workspace_store(
-                context, AgentTelemetry(observer.record, attributes=context.telemetry_attributes),
+                context,
             )
             # build 从入口接管本轮存储；不再把资源工厂和附件写入回调传入 Core。
             agent = AgentRuntimeAssembler(
@@ -130,14 +129,13 @@ class AgentAssemblyService:
             raise FailException(str(exc)) from exc
         except ValueError as exc:
             raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
-        self._log_build_timing(req, "total", build_started_at, observer)
+        self._log_build_timing(req, "total", build_started_at)
         return agent, input_message
 
 
     def _build_workspace_store(
         self,
         context: AgentRunContext,
-        telemetry: AgentTelemetry,
     ) -> AgentWorkspaceStore:
         """绑定本轮文件交付存储；仅配置仓储，不查询文件或读取 COS。"""
         # 1.独立于 HTTP 请求会话，避免后台执行受请求结束影响。
@@ -160,7 +158,6 @@ class AgentAssemblyService:
             return AgentWorkspaceStore(
                 repository=repository,
                 file_store=self.workspace_file_store,
-                telemetry=telemetry,
             )
         except BaseException:
             try:
@@ -172,12 +169,13 @@ class AgentAssemblyService:
     def _resolve_agent_config(
         self,
         req: AgentInvocation,
-        observer: PlatformAgentRunObserver,
     ) -> tuple[AgentConfig, AgentRunContext]:
         """一次配置读取直接生成 Core 所需定义与可信上下文，不再构造中间能力快照。"""
         # 1.读取草稿或发布配置，并校验本次请求选择的 Skill。
         phase_started_at = time.monotonic()
-        definition = self.definition_service.load(req)
+        definition = self.definition_service.load(
+            account_id=req.account_id, app_id=req.app_id, invoke_from=req.invoke_from,
+        )
         app_config = definition.config
         account_id = definition.account_id
         if req.definition_fingerprint is not None:
@@ -188,7 +186,7 @@ class AgentAssemblyService:
             app_config,
             req.selected_skills,
         )
-        self._log_build_timing(req, "config", phase_started_at, observer)
+        self._log_build_timing(req, "config", phase_started_at)
 
         # 2.按调用来源解析主模型；Assistant Agent 使用内置能力集合。
         phase_started_at = time.monotonic()
@@ -205,11 +203,13 @@ class AgentAssemblyService:
             model_config = app_config.model_config_data
         if req.model_selection:
             model_config, _ = self.model_service.resolve(
-                req, model_config, req.model_selection, account_id=account_id,
+                account_id=req.account_id, created_by=req.created_by,
+                invoke_from=req.invoke_from, default_config=model_config,
+                selection=req.model_selection, owner_account_id=account_id,
             )
         model_config = self.model_service.with_reasoning_override(model_config, req.reasoning_effort)
         model = self.language_model_service.load_language_model(model_config, account_id=account_id)
-        self._log_build_timing(req, "model", phase_started_at, observer)
+        self._log_build_timing(req, "model", phase_started_at)
 
         # 3.把应用配置中的普通工具、知识库和工作流转换为运行时工具。
         phase_started_at = time.monotonic()
@@ -221,7 +221,7 @@ class AgentAssemblyService:
                 account_id=account_id,
                 app_id=req.app_id,
             )
-        self._log_build_timing(req, "tools", phase_started_at, observer)
+        self._log_build_timing(req, "tools", phase_started_at)
 
         # 4.解析同步和异步 SubAgent 的运行时绑定。
         phase_started_at = time.monotonic()
@@ -232,7 +232,7 @@ class AgentAssemblyService:
             parent_model=cast(BaseChatModel, model),
             parent_tools=tools,
         )
-        self._log_build_timing(req, "subagents", phase_started_at, observer)
+        self._log_build_timing(req, "subagents", phase_started_at)
 
         # 5.授权 Skill 和运行上下文在同一份应用配置上解析，直接生成最终 Core 输入。
         context = AgentRunContext(
@@ -511,16 +511,12 @@ class AgentAssemblyService:
         req: AgentInvocation,
         stage: str,
         started_at: float,
-        observer: PlatformAgentRunObserver,
     ) -> None:
         """记录 Agent 装配子阶段耗时。"""
         # 1.计算当前装配阶段耗时。
         duration_ms = (time.monotonic() - started_at) * 1000
 
-        # 2.写入平台观测数据。
-        observer.record_stage(f"assembly.{stage}", duration_ms)
-
-        # 3.输出可按应用和会话检索的结构化日志。
+        # 2.输出可按应用和会话检索的结构化日志。
         logger.info(
             "agent_assembly_timing app_id=%s conversation_id=%s "
             "stage=%s duration_ms=%.2f",

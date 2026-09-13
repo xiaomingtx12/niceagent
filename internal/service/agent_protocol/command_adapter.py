@@ -1,14 +1,10 @@
 """SDK 命令分派和响应适配；业务服务只接收可信输入并返回业务结果。"""
 
 from typing import TYPE_CHECKING
-
-from pydantic import ValidationError
+from uuid import UUID
+from internal.entity.conversation_entity import InvokeFrom
 
 from internal.entity.agent_run_interaction import RunAccepted, RunRejected
-from internal.exception import ValidateErrorException
-from internal.entity.agent_invocation import (
-    AgentInvocationContext,
-)
 from internal.schema.agent.agent_workbench_schema import (
     WorkbenchCommandReq, WorkbenchCommandSuccessResp, WorkbenchCommandErrorResp,
     WorkbenchInputRespondReq, WorkbenchInputReopenReq,
@@ -19,34 +15,31 @@ if TYPE_CHECKING:
 
 
 def execute_command(
-    service: "AgentWorkbenchService",
-    *,
-    context: AgentInvocationContext,
-    command: WorkbenchCommandReq,
-    user_input_enabled: bool = True,
+    service: "AgentWorkbenchService", *, account_id: UUID, app_id: UUID, conversation_id: UUID,
+    created_by: UUID, end_user_id: UUID | None = None, invoke_from: InvokeFrom,
+    command: WorkbenchCommandReq, user_input_enabled: bool = True,
 ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
-    """按 SDK 方法选择业务入口，命令 ID 只参与响应，不进入运行状态。"""
-    if command.method == "input.respond":
-        try:
-            response = WorkbenchInputRespondReq.model_validate(command.params)
-        except ValidationError as exc:
-            raise ValidateErrorException("表单提交格式错误") from exc
+    """按已解析参数分派业务操作，命令 ID 只用于响应，不进入运行状态。"""
+    params = command.params
+    if isinstance(params, WorkbenchInputRespondReq):
         result = service.respond_input(
-            context=context,
-            answers={item.interrupt_id: item.response for item in response.responses},
+            account_id=account_id, app_id=app_id,
+            conversation_id=conversation_id, created_by=created_by,
+            end_user_id=end_user_id, invoke_from=invoke_from,
+            answers={item.interrupt_id: item.response for item in params.responses},
         )
-    elif command.method == "input.reopen":
-        try:
-            request = WorkbenchInputReopenReq.model_validate(command.params)
-        except ValidationError as exc:
-            raise ValidateErrorException("表单恢复格式错误") from exc
+    elif isinstance(params, WorkbenchInputReopenReq):
         result = service.reopen_input(
-            context=context, run_id=request.run_id,
-            cancellation_sequence=request.cancellation_sequence,
+            account_id=account_id, app_id=app_id,
+            conversation_id=conversation_id, created_by=created_by,
+            end_user_id=end_user_id, invoke_from=invoke_from, run_id=params.run_id,
+            cancellation_sequence=params.cancellation_sequence,
         )
     else:
         result = service.start_run(
-            context=context, run_input=command.input_data().to_run_input(),
+            account_id=account_id, app_id=app_id,
+            conversation_id=conversation_id, created_by=created_by,
+            end_user_id=end_user_id, invoke_from=invoke_from, run_input=params,
             user_input_enabled=user_input_enabled,
         )
     return command_response(result, command.id)

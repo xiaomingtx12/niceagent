@@ -31,7 +31,10 @@ from internal.handler import (
     SkillHandler,
     WorkspaceFileHandler,
     MemoryFileHandler,
-    AgentWorkbenchHandler,
+    DebugAgentHandler,
+    WebAppAgentHandler,
+    CreatorTaskAgentHandler,
+    AgentRunHandler,
     AssistantAgentProtocolHandler,
     InternalAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
@@ -39,7 +42,10 @@ from internal.handler import (
     AgentEvaluationHandler,
 )
 from .agent_workbench_routes import (
-    register_agent_workbench_routes,
+    register_debug_agent_routes,
+    register_web_app_agent_routes,
+    register_creator_task_agent_routes,
+    register_agent_run_routes,
     register_assistant_agent_protocol_routes,
     register_internal_agent_protocol_routes,
     register_openapi_agent_protocol_routes,
@@ -81,7 +87,10 @@ class Router:
     skill_handler: SkillHandler
     workspace_file_handler: WorkspaceFileHandler
     memory_file_handler: MemoryFileHandler
-    agent_workbench_handler: AgentWorkbenchHandler
+    debug_agent_handler: DebugAgentHandler
+    web_app_agent_handler: WebAppAgentHandler
+    creator_task_agent_handler: CreatorTaskAgentHandler
+    agent_run_handler: AgentRunHandler
     assistant_agent_protocol_handler: AssistantAgentProtocolHandler
     internal_agent_protocol_handler: InternalAgentProtocolHandler
     openapi_agent_protocol_handler: OpenAPIAgentProtocolHandler
@@ -561,7 +570,10 @@ class Router:
         # endregion
 
         # region Agent 工作台
-        register_agent_workbench_routes(bp, self.agent_workbench_handler)
+        register_debug_agent_routes(bp, self.debug_agent_handler)
+        register_web_app_agent_routes(bp, self.web_app_agent_handler)
+        register_creator_task_agent_routes(bp, self.creator_task_agent_handler)
+        register_agent_run_routes(bp, self.agent_run_handler)
         register_assistant_agent_protocol_routes(
             bp,
             self.assistant_agent_protocol_handler,

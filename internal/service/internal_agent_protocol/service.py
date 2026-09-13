@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from injector import inject
+from sqlalchemy import and_, or_, select
 
 from config import Config
 from internal.entity.subagent_config import build_published_graph_id
@@ -24,7 +25,7 @@ from internal.exception import (
     NotFoundException,
     ValidateErrorException,
 )
-from internal.model import Account, AgentRun, App, Conversation
+from internal.model import Account, AgentRun, App, Conversation, EndUser
 from internal.schema.agent.agent_workbench_schema import WorkbenchCommandInputReq
 from internal.schema.agent_protocol.internal_agent_protocol_schema import (
     InternalRunCreateReq,
@@ -36,7 +37,6 @@ from pkg.sqlalchemy import SQLAlchemy
 from internal.service.agent.agent_workbench_run_service import AgentWorkbenchRunService
 from internal.service.agent.agent_workbench_service import AgentWorkbenchService
 from internal.service.conversation.conversation_service import ConversationService
-from internal.service.agent.creator_task_service import CreatorTaskService
 
 
 @inject
@@ -49,7 +49,6 @@ class InternalAgentProtocolService:
     workbench_service: AgentWorkbenchService
     run_service: AgentWorkbenchRunService
     conversation_service: ConversationService
-    creator_task_service: CreatorTaskService
 
     def authenticate(self, token: str | None) -> InternalAgentProtocolClaims:
         """验证签名与有效期；每个业务入口随后只校验一次当前应用授权。"""
@@ -91,7 +90,7 @@ class InternalAgentProtocolService:
         """校验 graph、可选中断前序 Run，并经 Workbench 入队后台任务。"""
         # 1.验证签名声明、目标应用和 graph_id，再解析 SDK 输入。
         account = self._get_authorized_account(claims)
-        context = self.creator_task_service.get_invocation_context(
+        conversation = self._get_owned_conversation(
             app_id=claims.target_app_id,
             conversation_id=conversation_id,
             account=account,
@@ -111,10 +110,15 @@ class InternalAgentProtocolService:
             raise ValidateErrorException(f"后台 Run 输入格式错误: {exc}") from exc
         if request.multitask_strategy == "interrupt":
             # 2.update 语义由 Workbench 处理停止、等待和新 Run 创建。
-            started = self.workbench_service.replace_run(context=context, run_input=command_input)
+            started = self.workbench_service.replace_run(
+                account_id=account.id, app_id=conversation.app_id, conversation_id=conversation.id,
+                created_by=account.id, invoke_from=InvokeFrom.CREATOR_TASK, run_input=command_input,
+            )
         else:
             started = self.workbench_service.start_run(
-                context=context, run_input=command_input, user_input_enabled=False,
+                account_id=account.id, app_id=conversation.app_id, conversation_id=conversation.id,
+                created_by=account.id, invoke_from=InvokeFrom.CREATOR_TASK,
+                run_input=command_input, user_input_enabled=False,
             )
         if isinstance(started, RunRejected):
             return started
@@ -135,9 +139,9 @@ class InternalAgentProtocolService:
     ) -> InternalThreadResp:
         """读取 SDK 所需的当前 State，用于异步任务获取最终结果。"""
         account = self._get_authorized_account(claims)
-        conversation = self.conversation_service.get_owned_conversation(
+        conversation = self._get_owned_conversation(
             conversation_id=conversation_id, app_id=claims.target_app_id,
-            account=account, allowed_sources=(InvokeFrom.CREATOR_TASK, InvokeFrom.WEB_APP),
+            account=account,
         )
         metadata = self.run_service.get_run_metadata(
             conversation_id=conversation_id, invoke_from=InvokeFrom.CREATOR_TASK,
@@ -165,15 +169,14 @@ class InternalAgentProtocolService:
         run_id: UUID,
     ) -> InternalRunResp:
         """读取指定内部 Run，禁止跨应用或跨会话访问。"""
-        self._get_authorized_account(claims)
-        row = self.run_service.get_run(run_id)
-        if (
-            row is None
-            or row.conversation_id != conversation_id
-            or row.app_id != claims.target_app_id
-            or row.invoke_from != InvokeFrom.CREATOR_TASK.value
-        ):
-            raise NotFoundException("内部 Agent Protocol Run 不存在")
+        account = self._get_authorized_account(claims)
+        self._get_owned_conversation(
+            app_id=claims.target_app_id, conversation_id=conversation_id, account=account,
+        )
+        self.run_service.get_conversation_run(
+            app_id=claims.target_app_id, conversation_id=conversation_id,
+            invoke_from=InvokeFrom.CREATOR_TASK, run_id=run_id,
+        )
         # 失联恢复会提交状态和事件，必须在目标 Run 的授权范围确认后执行。
         self.run_service.recover_stale_runs(run_id=run_id)
         row = self.run_service.get_run(run_id)
@@ -190,13 +193,12 @@ class InternalAgentProtocolService:
     ) -> None:
         """将 SDK cancel 映射为 Workbench 指定 Run 取消。"""
         account = self._get_authorized_account(claims)
+        conversation = self._get_owned_conversation(
+            app_id=claims.target_app_id, conversation_id=conversation_id, account=account,
+        )
         self.workbench_service.cancel_run(
-            context=self.creator_task_service.get_invocation_context(
-                app_id=claims.target_app_id,
-                conversation_id=conversation_id,
-                account=account,
-            ),
-            run_id=run_id,
+            app_id=conversation.app_id, conversation_id=conversation.id,
+            invoke_from=InvokeFrom.CREATOR_TASK, run_id=run_id,
         )
 
     def _get_authorized_account(
@@ -225,6 +227,40 @@ class InternalAgentProtocolService:
         if account is None or parent is None or target is None:
             raise ForbiddenException("内部 Agent Protocol 调用不在有效应用范围内")
         return account
+
+    def _get_owned_conversation(
+        self,
+        *,
+        app_id: UUID,
+        conversation_id: UUID,
+        account: Account,
+    ) -> Conversation:
+        """应用授权通过后校验内部 SDK 会话；兼容旧 WebApp 记录，但不借用任务中心规则。"""
+        legacy_end_users = select(EndUser.id).where(
+            EndUser.app_id == app_id,
+            EndUser.external_user_id == account.id,
+        )
+        legacy_owner = or_(
+            Conversation.created_by == account.id,
+            and_(Conversation.invoke_from == InvokeFrom.WEB_APP, Conversation.created_by.in_(legacy_end_users)),
+        )
+        conversation = (
+            self.db.session.query(Conversation)
+            .filter(
+                Conversation.id == conversation_id,
+                Conversation.app_id == app_id,
+                Conversation.invoke_from.in_((InvokeFrom.CREATOR_TASK, InvokeFrom.WEB_APP)),
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.owner_account_id == account.id,
+                    and_(Conversation.owner_account_id.is_(None), legacy_owner),
+                ),
+            )
+            .one_or_none()
+        )
+        if conversation is None:
+            raise NotFoundException("内部 Agent Protocol 会话不存在或无权访问")
+        return conversation
 
     @staticmethod
     def _to_run_response(

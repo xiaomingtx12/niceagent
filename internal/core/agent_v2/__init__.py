@@ -8,7 +8,6 @@ from .execution.agent_executor import AgentExecutor
 from .assembly.runtime_assembler import AgentRuntimeAssembler
 
 from .observability.run_observer import PlatformAgentRunObserver
-from .observability.run_snapshot import merge_run_observability
 from .entity.user_input import PendingUserInput, build_confirmed_input_context
 from .entity.workspace_quota import AgentWorkspaceLimits
 from .middleware.tool_call_validation_middleware import AgentMessageError
@@ -28,7 +27,6 @@ __all__ = [
     "AgentExecutor",
     "AgentRuntimeAssembler",
     "PlatformAgentRunObserver",
-    "merge_run_observability",
     "PendingUserInput",
     "build_confirmed_input_context",
     "AgentWorkspaceLimits",

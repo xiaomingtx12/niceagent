@@ -26,7 +26,6 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
     seed_sandbox_workspace,
@@ -289,7 +288,6 @@ def create_backend(
     workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
-    telemetry: AgentTelemetry | None = None,
 ) -> BubblewrapSandbox:
     """创建 Bubblewrap Sandbox，并播种 Workspace 与 Skill 文件。
 
@@ -322,7 +320,7 @@ def create_backend(
             backend,
             workspace=workspace,
         )
-        seed_sandbox_skills(backend, list(skill_files), telemetry=telemetry)
+        seed_sandbox_skills(backend, list(skill_files))
         return backend
     except BaseException as exc:
         # 初始化中断同样清理 Provider，随后原样传播取消或退出信号。

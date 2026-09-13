@@ -26,7 +26,6 @@ from .agent.agent_workbench_schema import (
     WorkbenchHistoryMessageResp,
     WorkbenchMessagePageInfoResp,
     WorkbenchRunMetadataResp,
-    WorkbenchRunObservabilityResp,
     WorkbenchStateResp,
 )
 from .file.workspace_file_schema import (
@@ -83,7 +82,6 @@ __all__ = [
     "WorkbenchHistoryMessageResp",
     "WorkbenchMessagePageInfoResp",
     "WorkbenchRunMetadataResp",
-    "WorkbenchRunObservabilityResp",
     "WorkbenchStateResp",
     "ConversationWorkspaceFileReq",
     "DeleteWorkspaceFileReq",

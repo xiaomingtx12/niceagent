@@ -7,7 +7,6 @@ from uuid import UUID
 
 from injector import inject
 from pydantic import ValidationError
-from internal.entity.agent_invocation import AgentInvocationContext
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.model import App
@@ -43,26 +42,25 @@ class AgentDefinitionService:
     app_config_service: AppConfigService
 
     def load(
-        self,
-        req: AgentInvocationContext,
+        self, *, account_id: UUID, app_id: UUID, invoke_from: InvokeFrom,
     ) -> ApplicationAgentDefinition:
         """读取可信入口对应的应用版本；内置助手返回代码定义，不访问 App 表。"""
         # 1.Assistant Agent 不依赖 App 配置，直接返回内置定义。
-        if req.invoke_from is InvokeFrom.ASSISTANT_AGENT:
+        if invoke_from is InvokeFrom.ASSISTANT_AGENT:
             return ApplicationAgentDefinition(
                 "应用构建助手",
                 "帮助 Creator 创建应用和工作流。",
-                req.account_id,
+                account_id,
                 AgentAppConfigReq(),
             )
 
         # 2.读取并校验当前租户可访问的 App。
-        app = self.db.session.get(App, req.app_id)
+        app = self.db.session.get(App, app_id)
         if app is None:
             raise NotFoundException("应用不存在")
         try:
             # 3.Debugger 使用草稿，其余入口使用可执行的发布配置。
-            if req.invoke_from is InvokeFrom.DEBUGGER:
+            if invoke_from is InvokeFrom.DEBUGGER:
                 app_config = self.app_config_service.get_draft_agent_runtime_config(app)
             else:
                 app_config = self.app_config_service.get_agent_runtime_config(app)
@@ -71,6 +69,8 @@ class AgentDefinitionService:
         return ApplicationAgentDefinition(app.name, app.description, app.account_id, app_config)
 
 
-    def get_definition_fingerprint(self, context: AgentInvocationContext) -> str:
+    def get_definition_fingerprint(
+        self, *, account_id: UUID, app_id: UUID, invoke_from: InvokeFrom,
+    ) -> str:
         """恢复前重新读取有效定义，阻止旧图在新配置上继续运行。"""
-        return self.load(context).fingerprint()
+        return self.load(account_id=account_id, app_id=app_id, invoke_from=invoke_from).fingerprint()
