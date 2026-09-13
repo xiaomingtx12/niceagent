@@ -11,9 +11,8 @@ from internal.entity.agent_invocation import AgentInvocationContext
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.model import App
-from internal.schema.app.app_config_schema import AgentAppConfigReq, AppModelConfigReq
+from internal.schema.app.app_config_schema import AgentAppConfigReq
 from internal.service.app.app_config_service import AppConfigService
-from internal.service.language_model.language_model_service import LanguageModelService
 from pkg.sqlalchemy import SQLAlchemy
 
 
@@ -42,7 +41,6 @@ class AgentDefinitionService:
 
     db: SQLAlchemy
     app_config_service: AppConfigService
-    language_model_service: LanguageModelService
 
     def load(
         self,
@@ -71,15 +69,6 @@ class AgentDefinitionService:
         except (ValidationError, ValidateErrorException) as exc:
             raise ValidateErrorException(f"应用运行配置无效: {exc}") from exc
         return ApplicationAgentDefinition(app.name, app.description, app.account_id, app_config)
-
-
-    def load_model_configuration(self, context: AgentInvocationContext) -> tuple[AppModelConfigReq | None, UUID]:
-        """内置助手使用账号默认模型，其他入口沿用草稿或发布配置的来源规则。"""
-        if context.invoke_from is InvokeFrom.ASSISTANT_AGENT:
-            config = self.language_model_service.get_default_model_config(context.account_id)
-            return AppModelConfigReq.model_validate(config), context.account_id
-        definition = self.load(context)
-        return definition.config.model_config_data, definition.account_id
 
 
     def get_definition_fingerprint(self, context: AgentInvocationContext) -> str:

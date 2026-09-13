@@ -21,7 +21,12 @@ BASE_AGENT_PROMPT = """你是 {app_name}。
 </任务进度沟通>
 <文件路径约束>
 文件工具使用平台虚拟路径，不要使用宿主机路径或其他未授权路径：
-- 所有工作文件和最终交付文件统一写入 /workspace/，例如 /workspace/周报.md。
+- /workspace/ 是本轮临时工作副本，所有文件工具和命令操作的都是副本；写入、修改或删除不会自动改变已保存文件。
+- 历史文件先用 list_saved_files 查看目录，再用 load_saved_file 按需加载；不要假设上一轮的临时文件仍然存在。
+- 用户要求创建、导出或保存文件时，先在 /workspace/ 完成编辑，再调用 deliver_file 保存选定结果；只有工具返回 saved 后才能声称已保存，并使用返回的 path 提供文件链接。
+- 修改并保存原文件时必须先 load_saved_file，覆盖按加载版本校验；发生冲突应加载最新版本到另一副本重新处理，或另存新路径，不强行覆盖。
+- 不需要保存脚本、缓存等中间文件。副本中的删除只清理本轮文件，不能据此声称已删除平台文件。
+- 需要用户补充信息时尽量先询问再生成文件；恢复后重新加载已保存输入并重建未交付的中间文件。
 {memory_instruction}
 - 不要写入 /home/user/、/root/、/tmp/ 或文件系统根目录。
 如果用户要求在工作区创建、导出或交付文件，统一使用 /workspace/。
@@ -64,18 +69,11 @@ def build_app_system_prompt(
     return prompt
 
 
-def build_dynamic_context(*, invoked_at: str, planning_enabled: bool = False) -> str:
-    """本轮规划偏好随运行上下文注入，避免写入历史消息影响后续轮次。"""
-    context = "\n".join(
-        [
-            "<运行时上下文>",
-            f"当前时间: {invoked_at}",
-            "</运行时上下文>",
-        ]
-    )
+def build_dynamic_context(*, planning_enabled: bool = False) -> str:
+    """仅在启用时注入本轮规划偏好，避免无关内容进入每次模型调用。"""
     if planning_enabled:
-        context += (
-            "\n<本轮任务规划>\n"
+        return (
+            "<本轮任务规划>\n"
             "用户已启用任务规划。开始执行本轮任务前，先调用 write_todos 创建适合本轮任务的计划，"
             "不要沿用上一轮无关的待办事项。即使任务简单，也创建与实际工作相符的简短计划。"
             "执行过程中及时用 write_todos 更新 pending、in_progress、completed 状态，"
@@ -83,7 +81,7 @@ def build_dynamic_context(*, invoked_at: str, planning_enabled: bool = False) ->
             "计划创建后直接继续执行，无需额外等待用户确认；缺少必要信息时按现有规则提问。"
             "\n</本轮任务规划>"
         )
-    return context
+    return ""
 
 
 __all__ = [

@@ -22,24 +22,24 @@ from deepagents.backends.protocol import (
     execute_accepts_timeout,
 )
 
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import SandboxProviderError
-from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import SandboxProviderError
+from internal.core.agent_v2.backends.workspace.workspace_projection import WorkspaceProjection
 from internal.core.agent_v2.observability.telemetry import AgentTelemetry, NOOP_AGENT_TELEMETRY
 from internal.extension.logging_extension import logger
 
 
 class LazySandboxBackend(SandboxBackendProtocol):
-    """启动前使用权威 Workspace，启动后统一使用 Sandbox 文件系统。
+    """启动前使用本轮本地副本，启动后文件工具与命令统一访问远程副本。
 
-    锁只保护本地 Session 操作、首次初始化和关闭，远程工具仍可并行。
-    creator 接管 Workspace 后必须沿用 Provider 的失败清理契约。
+    锁保护本地操作、首次初始化和关闭，远程工具仍可并行。
+    Workspace 始终由运行资源持有，包装器与 Provider 均只借用。
     """
 
     def __init__(
         self,
         *,
         creator: Callable[[], SandboxBackendProtocol],
-        workspace: WorkspaceBackend,
+        workspace: WorkspaceProjection,
         sandbox_name: str,
         provider: str,
         telemetry: AgentTelemetry | None = None,
@@ -48,12 +48,13 @@ class LazySandboxBackend(SandboxBackendProtocol):
         self._creator = creator
         self._workspace = workspace
         # 仅对已确认的 /workspace 路径使用此路由，复用官方路径重映射。
-        self._local = CompositeBackend(default=workspace, routes={"/workspace/": workspace})
+        self._local = CompositeBackend(default=workspace.backend, routes={"/workspace/": workspace.backend})
         self._sandbox_name = sandbox_name
         self._provider = provider
+        self.execution_uses_virtual_paths = provider == "daytona"
         self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
         self._backend: SandboxBackendProtocol | None = None
-        self._error: Exception | None = None
+        self._error: BaseException | None = None
         self._closed = False
         self._lock = RLock()
 
@@ -86,7 +87,7 @@ class LazySandboxBackend(SandboxBackendProtocol):
         return self._file_call("read", [file_path], file_path, offset, limit)
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        """启动前的写入会被首次播种读取，启动后沿用沙箱回写流程。"""
+        """启动前的写入会随首次初始化迁移，启动后只写入 Sandbox。"""
         return self._file_call("write", [file_path], file_path, content)
 
     def edit(
@@ -104,7 +105,7 @@ class LazySandboxBackend(SandboxBackendProtocol):
         return self._file_call("grep", [path or "/"], pattern, path, glob)
 
     def upload_files(self, files: list[tuple[str, bytes]]) -> list[FileUploadResponse]:
-        """附件先进入权威 Workspace，不因装配附件提前启动远程沙箱。"""
+        """附件先进入本轮工作副本，不因附件准备提前启动远程沙箱。"""
         if not files:
             return []
         return self._file_call("upload_files", [path for path, _ in files], files)
@@ -116,17 +117,19 @@ class LazySandboxBackend(SandboxBackendProtocol):
         return self._file_call("download_files", paths, paths)
 
     def close(self) -> None:
-        """未启动时只关闭 Workspace；已启动则由 Provider 完成同步和清理。"""
+        """只关闭已创建的 Provider，借用的 Workspace 由运行资源最后释放。"""
         with self._lock:
             if self._closed:
                 return
             self._closed = True
             if self._backend is not None:
-                self._backend.close()
+                # 原生 LangSmith Backend 没有 close；只有持有运行级资源的 Provider 需要释放。
+                close = getattr(self._backend, "close", None)
+                if callable(close):
+                    close()
             elif self._error is None:
-                self._workspace.close()
                 self._telemetry.emit("sandbox.initialization_skipped", attributes={"provider": self._provider})
-            # 初始化失败时 creator 已清理 Workspace，不能重试或再次访问它。
+            # 初始化失败由 creator 清理远程资源，不能再次尝试创建。
 
     def _file_call(self, method: str, paths: Sequence[str], *args: Any) -> Any:
         """锁住本地操作直到完成，防止首次播种与附件写入交错。"""
@@ -150,7 +153,7 @@ class LazySandboxBackend(SandboxBackendProtocol):
             try:
                 self._backend = self._creator()
                 return self._backend
-            except Exception as exc:
+            except BaseException as exc:
                 status = "failed"
                 self._error = exc
                 raise
@@ -166,7 +169,7 @@ class LazySandboxBackend(SandboxBackendProtocol):
                 )
 
     def _check_available(self) -> None:
-        """拒绝在已关闭或失败的资源上继续使用底层数据库 Session。"""
+        """拒绝继续使用已关闭或初始化失败的本轮副本。"""
         if self._closed:
             raise SandboxProviderError("Sandbox backend is closed")
         if self._error is not None:

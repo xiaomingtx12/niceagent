@@ -3,102 +3,46 @@
 from __future__ import annotations
 
 import os
-import re
-import shutil
 import sys
-import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from deepagents.backends import LocalShellBackend
-from deepagents.backends.protocol import ExecuteResponse
 
-from internal.core.agent_v2.observability.telemetry import (
-    AgentTelemetry,
-    NOOP_AGENT_TELEMETRY,
-)
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
-    close_workspace_safely,
-    seed_sandbox_workspace,
 )
-from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
-    close_managed_sandbox,
-)
-from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
-from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
-
-
-_VIRTUAL_PATH_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_:/])/(?:workspace|skills|subagent_skills|tmp)(?=/|\s|['\"`]|$)"
-)
+from internal.core.agent_v2.backends.workspace.workspace_projection import WorkspaceProjection
+from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import seed_sandbox_skills
 
 
 class ManagedLocalShellBackend(LocalShellBackend):
-    """开发环境本机 Backend；结束时把 Workspace 变更同步回权威存储。"""
+    """本机 Shell 与文件工具共享本轮目录，持久化由显式交付负责。"""
+
+    execution_uses_virtual_paths = True
 
     def __init__(
         self,
         *,
-        workspace: WorkspaceBackend,
-        telemetry: AgentTelemetry | None = None,
+        workspace: WorkspaceProjection,
         timeout: int = 1800,
         max_output_bytes: int = 500 * 1024,
     ) -> None:
         """创建隔离于项目目录的临时本机工作目录。"""
-        self._workspace = workspace
-        self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
-        self._root = Path(tempfile.mkdtemp(prefix="my-dify-local-shell-"))
-        self._baseline_manifest: WorkspaceManifest | None = None
-        self._managed_closed = False
-        try:
-            super().__init__(
-                root_dir=self._root,
-                virtual_mode=True,
-                timeout=timeout,
-                max_output_bytes=max_output_bytes,
-                # 本机开发需要沿用当前 Python、Node 等工具的 PATH。
-                inherit_env=True,
-            )
-            for name in ("workspace", "skills", "subagent_skills", "tmp"):
-                (self._root / name).mkdir(parents=True, exist_ok=True)
-            self._install_windows_python_alias()
-        except Exception:
-            shutil.rmtree(self._root, ignore_errors=True)
-            raise
-
-    def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
-        """记录本次运行开始时的权威 Workspace 摘要。"""
-        self._baseline_manifest = dict(manifest)
-
-    def execute(
-        self,
-        command: str,
-        *,
-        timeout: int | None = None,
-    ) -> ExecuteResponse:
-        """在本机 Shell 执行命令，并映射 Agent 虚拟路径到临时目录。"""
-        translated = _translate_virtual_paths(command, self._root)
-        return super().execute(translated, timeout=timeout)
-
-    def close(self) -> None:
-        """先同步 Workspace 增量，再删除临时目录和业务 Workspace 会话。"""
-        if self._managed_closed:
-            return
-        try:
-            close_managed_sandbox(
-                backend=self,
-                workspace=self._workspace,
-                baseline_manifest=self._baseline_manifest,
-                close_provider=lambda: LocalShellBackend.close(self),
-                telemetry=self._telemetry,
-                sandbox_id=self.id,
-                provider_name="local shell",
-            )
-        finally:
-            shutil.rmtree(self._root, ignore_errors=True)
-            self._managed_closed = True
+        self._root = workspace.root
+        super().__init__(
+            root_dir=self._root,
+            virtual_mode=True,
+            timeout=timeout,
+            max_output_bytes=max_output_bytes,
+            # 本机开发需要沿用当前 Python、Node 等工具的 PATH。
+            inherit_env=True,
+        )
+        for name in ("workspace", "skills", "subagent_skills", "tmp"):
+            (self._root / name).mkdir(parents=True, exist_ok=True)
+        self._install_windows_python_alias()
 
     def _install_windows_python_alias(self) -> None:
         """让 Windows 下常见的 ``python3`` 命令指向当前服务解释器。"""
@@ -116,7 +60,7 @@ class ManagedLocalShellBackend(LocalShellBackend):
 def create_backend(
     *,
     settings: Any,
-    workspace: WorkspaceBackend,
+    workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
@@ -136,7 +80,6 @@ def create_backend(
     try:
         backend = ManagedLocalShellBackend(
             workspace=workspace,
-            telemetry=telemetry,
             timeout=int(
                 getattr(settings, "AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS", 1800)
             ),
@@ -144,35 +87,12 @@ def create_backend(
                 getattr(settings, "AGENT_SANDBOX_MAX_OUTPUT_BYTES", 500 * 1024)
             ),
         )
-        seed_sandbox_workspace(
-            backend,
-            workspace=workspace,
-            skill_files=skill_files,
-        )
+        seed_sandbox_skills(backend, list(skill_files), telemetry=telemetry)
         return backend
-    except Exception as exc:  # noqa: BLE001
-        if backend is not None:
-            try:
-                backend.close()
-            except Exception:
-                pass
-        else:
-            close_workspace_safely(workspace, telemetry=telemetry)
+    except BaseException as exc:
+        # 借用的本轮目录由装配失败清理统一释放，本机执行器没有额外连接。
+        if not isinstance(exc, Exception):
+            raise
         if isinstance(exc, SandboxProviderError):
             raise
         raise SandboxProviderError("failed to create local Shell Backend") from exc
-
-
-def _translate_virtual_paths(command: str, root_dir: Path) -> str:
-    """把常用 Agent 虚拟目录映射到本机临时目录。"""
-    physical_roots = {
-        name: (root_dir / name).as_posix()
-        for name in ("workspace", "skills", "subagent_skills", "tmp")
-    }
-
-    def replace(match: re.Match[str]) -> str:
-        virtual = match.group(0)
-        name = virtual[1:].split("/", 1)[0]
-        return physical_roots[name] + virtual[len(name) + 1 :]
-
-    return _VIRTUAL_PATH_PATTERN.sub(replace, command)

@@ -11,7 +11,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
     raise_for_file_errors,
 )
@@ -20,6 +20,36 @@ from internal.extension.logging_extension import logger
 
 
 _MIN_COMPRESS_BYTES = 64 * 1024
+
+
+def seed_sandbox_skills(
+    backend: SandboxBackendProtocol, files: list[tuple[str, bytes]], *,
+    projection_root: str = "/", protect: bool = False, compress: bool = False,
+    telemetry: AgentTelemetry | None = None,
+) -> None:
+    """Skill 投影的传输与只读设置独立于工作文件，Windows 本机模式使用直接上传。"""
+    if not files:
+        return
+    # 1.只传输已授权的包，路径验证对压缩与直接上传入口保持一致。
+    _validate_skill_paths(files)
+    if compress:
+        upload_sandbox_skills(backend, files, projection_root=projection_root, telemetry=telemetry)
+    else:
+        responses = backend.upload_files(files)
+        raise_for_file_errors(responses, operation="upload Sandbox Skills")
+        if len(responses) != len(files):
+            raise SandboxProviderError("upload Sandbox Skills: response missing")
+    # 2.远程副本只读设置只作用于 Skill，临时 Workspace 始终保持可写。
+    if protect:
+        paths = " ".join(
+            shlex.quote(str(PurePosixPath(projection_root, name)))
+            for name in ("skills", "subagent_skills")
+        )
+        result = backend.execute(
+            f'for path in {paths}; do if [ -e "$path" ]; then chmod -R a-w -- "$path"; fi; done'
+        )
+        if result.exit_code != 0:
+            raise SandboxProviderError("failed to protect Sandbox Skill files")
 
 # 仅使用 Python 标准库；归档内只允许普通 Skill 文件，先校验所有目标再写入。
 # 文件名只通过 ZIP 传递，不拼入 Shell；finally 清理当前上传的唯一临时包。

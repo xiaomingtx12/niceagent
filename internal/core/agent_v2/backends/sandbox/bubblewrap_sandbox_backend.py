@@ -26,22 +26,15 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from internal.core.agent_v2.observability.telemetry import (
-    AgentTelemetry,
-    NOOP_AGENT_TELEMETRY,
-)
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
-    close_workspace_safely,
     seed_sandbox_workspace,
 )
-from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
-    close_managed_sandbox,
+from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import seed_sandbox_skills
+from internal.core.agent_v2.backends.workspace.workspace_projection import (
+    WorkspaceProjection,
 )
-from internal.core.agent_v2.backends.workspace.workspace_backend import (
-    WorkspaceBackend,
-)
-from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
 
 
 class BubblewrapSandboxError(RuntimeError):
@@ -289,59 +282,15 @@ class BubblewrapSandbox(BaseSandbox):
         return target
 
 
-class ManagedBubblewrapSandbox(BubblewrapSandbox):
-    """一次性本机 Sandbox，结束时将 Workspace 增量写回 COS。"""
-
-    def __init__(
-        self,
-        *,
-        workspace: WorkspaceBackend,
-        telemetry: AgentTelemetry | None = None,
-        allow_network: bool = False,
-        timeout: int = 1800,
-        max_output_bytes: int = 500 * 1024,
-    ) -> None:
-        """创建绑定 Workspace 同步的 Bubblewrap Sandbox。"""
-        super().__init__(
-            allow_network=allow_network,
-            timeout=timeout,
-            max_output_bytes=max_output_bytes,
-        )
-        self._workspace = workspace
-        self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
-        self._baseline_manifest: WorkspaceManifest | None = None
-        self._managed_closed = False
-
-    def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
-        """记录运行开始时的权威 Workspace 摘要。"""
-        self._baseline_manifest = dict(manifest)
-
-    def close(self) -> None:
-        """先同步增量产物，再关闭本机目录和 Workspace 会话。"""
-        if self._managed_closed:
-            return
-        try:
-            close_managed_sandbox(
-                backend=self,
-                workspace=self._workspace,
-                baseline_manifest=self._baseline_manifest,
-                close_provider=lambda: BubblewrapSandbox.close(self),
-                telemetry=self._telemetry,
-                sandbox_id=self.id,
-                provider_name="Bubblewrap",
-            )
-        finally:
-            self._managed_closed = True
-
 
 def create_backend(
     *,
     settings: Any,
-    workspace: WorkspaceBackend,
+    workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
-) -> ManagedBubblewrapSandbox:
+) -> BubblewrapSandbox:
     """创建 Bubblewrap Sandbox，并播种 Workspace 与 Skill 文件。
 
     ``sandbox_name`` 只属于可复用的远程 Provider；这里接收它是为了让
@@ -352,7 +301,7 @@ def create_backend(
         raise SandboxProviderError(
             "AGENT_SANDBOX_SNAPSHOT_ID 仅适用于 langsmith Sandbox"
         )
-    backend: ManagedBubblewrapSandbox | None = None
+    backend: BubblewrapSandbox | None = None
     try:
         network_setting = getattr(settings, "AGENT_SANDBOX_ALLOW_NETWORK", False)
         allow_network = (
@@ -360,9 +309,7 @@ def create_backend(
             if isinstance(network_setting, str)
             else bool(network_setting)
         )
-        backend = ManagedBubblewrapSandbox(
-            workspace=workspace,
-            telemetry=telemetry,
+        backend = BubblewrapSandbox(
             allow_network=allow_network,
             timeout=int(
                 getattr(settings, "AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS", 1800)
@@ -374,16 +321,18 @@ def create_backend(
         seed_sandbox_workspace(
             backend,
             workspace=workspace,
-            skill_files=list(skill_files),
         )
+        seed_sandbox_skills(backend, list(skill_files), telemetry=telemetry)
         return backend
-    except Exception as exc:  # noqa: BLE001
+    except BaseException as exc:
+        # 初始化中断同样清理 Provider，随后原样传播取消或退出信号。
         if backend is not None:
             try:
                 backend.close()
             except Exception:
                 pass
-        close_workspace_safely(workspace, telemetry=telemetry)
+        if not isinstance(exc, Exception):
+            raise
         if isinstance(exc, SandboxProviderError):
             raise
         if isinstance(exc, BubblewrapSandboxError):

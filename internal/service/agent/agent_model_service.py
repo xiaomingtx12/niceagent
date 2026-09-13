@@ -40,75 +40,69 @@ class AgentModelService:
         context: AgentInvocationContext,
         saved: Mapping[str, Any],
     ) -> WorkbenchModelSettingsResp:
-        """仅恢复明确的历史模型选择；失效覆盖回退到当前默认模型，不沿用旧思考强度。"""
-        # 1.旧客户端回传的默认展示值不能把会话永久绑定到旧模型。
+        """一次读取默认配置，恢复有效历史覆盖；覆盖失效时就地回退，不重复查询应用。"""
+        # 1.默认来源只读取一次；旧客户端的默认展示值不能变成永久模型绑定。
         if saved.get("model_selection") and saved.get("model_selection_explicit") is not True:
             saved = {}
         try:
+            default_config, account_id = self._load_default_configuration(context)
+        except (NotFoundException, ValidateErrorException, ValueError):
+            return WorkbenchModelSettingsResp()
+        try:
             raw_selection = saved.get("model_selection")
             selection = WorkbenchModelSelection.model_validate(raw_selection) if raw_selection else None
-            settings = self.get_workbench_model_settings(context, selection)
-        except (NotFoundException, ValidateErrorException, ValueError):
-            # 2.历史连接停用或配置失效时重新解析默认值；默认也失效则返回空设置。
+        except ValueError:
+            selection, saved = None, {}
+
+        # 2.先尝试历史覆盖，失效后只用已读取的默认配置回退一次。
+        selections = (selection, None) if selection is not None else (None,)
+        for selection in selections:
             try:
-                return self.get_workbench_model_settings(context)
+                config, model = self.resolve(context, default_config, selection, account_id=account_id)
+                if config is not None and model is None:
+                    model = self._get_model_entity(config, account_id)
+                if config is None or model is None:
+                    return WorkbenchModelSettingsResp()
+
+                # 3.思考强度优先采用应用配置，未设置时才采用模型声明的默认值。
+                parameter = self._reasoning_parameter(model)
+                parameters = canonicalize_parameters(config.parameters)
+                default = parameters.get("reasoning_effort")
+                reasoning_levels = []
+                if parameter is not None:
+                    reasoning_levels = [option.value for option in parameter.options]
+                    if default is None:
+                        default = parameter.default
+
+                # 4.没有显式选择时，仅为允许切换模型的创建者补全当前连接。
+                selected_model = selection
+                can_select_model = context.invoke_from in _MODEL_SELECTABLE_SOURCES and context.created_by == account_id
+                connection_id = config.provider_connection_id or model.attributes.get("provider_api_key_id")
+                needs_default_selection = selected_model is None and can_select_model
+                if needs_default_selection and connection_id:
+                    selected_model = WorkbenchModelSelection(
+                        provider=config.provider,
+                        model=config.model,
+                        provider_connection_id=connection_id,
+                    )
+
+                # 5.构造响应时只引用已算好的字段，不在响应内部混入权限和回退分支。
+                return WorkbenchModelSettingsResp(
+                    model=config.model,
+                    provider=config.provider,
+                    selected_model=selected_model,
+                    model_override=selection,
+                    available_models=self._workbench_model_choices(context),
+                    reasoning_levels=reasoning_levels,
+                    default_reasoning_effort=default,
+                    selected_reasoning_effort=(
+                        saved.get("reasoning_effort") if saved.get("reasoning_effort") in reasoning_levels else None
+                    ),
+                )
             except (NotFoundException, ValidateErrorException, ValueError):
-                return WorkbenchModelSettingsResp()
-
-        # 3.只有模型恢复成功，且当前模型仍声明该等级，才恢复历史思考强度。
-        effort = saved.get("reasoning_effort")
-        if effort in settings.reasoning_levels:
-            return settings.model_copy(update={"selected_reasoning_effort": effort})
-        return settings
-
-    def get_workbench_model_settings(
-        self,
-        context: AgentInvocationContext,
-        selection: WorkbenchModelSelection | None = None,
-    ) -> WorkbenchModelSettingsResp:
-        """按已授权入口读取模型设置，公开入口不暴露账号的可选连接目录。"""
-        # 1.复用覆盖校验已经取得的模型；没有模型时返回空设置。
-        default_config, account_id = self.definition_service.load_model_configuration(context)
-        config, model = self.resolve(context, default_config, selection, account_id=account_id)
-        if config is None:
-            return WorkbenchModelSettingsResp()
-        if model is None:
-            model = self._get_model_entity(config, account_id)
-        if model is None:
-            return WorkbenchModelSettingsResp()
-
-        # 2.思考强度优先采用应用配置，未设置时才采用模型声明的默认值。
-        parameter = self._reasoning_parameter(model)
-        parameters = canonicalize_parameters(config.parameters)
-        default = parameters.get("reasoning_effort")
-        reasoning_levels = []
-        if parameter is not None:
-            reasoning_levels = [option.value for option in parameter.options]
-            if default is None:
-                default = parameter.default
-
-        # 3.没有显式选择时，仅为允许切换模型的创建者补全当前连接。
-        selected_model = selection
-        can_select_model = context.invoke_from in _MODEL_SELECTABLE_SOURCES and context.created_by == account_id
-        connection_id = config.provider_connection_id or model.attributes.get("provider_api_key_id")
-        needs_default_selection = selected_model is None and can_select_model
-        if needs_default_selection and connection_id:
-            selected_model = WorkbenchModelSelection(
-                provider=config.provider,
-                model=config.model,
-                provider_connection_id=connection_id,
-            )
-
-        # 4.构造响应时只引用已算好的字段，不在响应内部混入权限和回退分支。
-        return WorkbenchModelSettingsResp(
-            model=config.model,
-            provider=config.provider,
-            selected_model=selected_model,
-            model_override=selection,
-            available_models=self._workbench_model_choices(context),
-            reasoning_levels=reasoning_levels,
-            default_reasoning_effort=default,
-        )
+                # 无效覆盖的思考强度不能被带到回退模型。
+                saved = {}
+        return WorkbenchModelSettingsResp()
 
     def validate_workbench_reasoning(
         self,
@@ -120,7 +114,7 @@ class AgentModelService:
         # 1.完全没有覆盖时不查模型；只切换模型时仍需校验连接权限。
         if selection is None and effort is None:
             return
-        default_config, account_id = self.definition_service.load_model_configuration(context)
+        default_config, account_id = self._load_default_configuration(context)
         config, model = self.resolve(context, default_config, selection, account_id=account_id)
         if effort is None:
             return
@@ -171,7 +165,7 @@ class AgentModelService:
             or config.provider_connection_id == selection.provider_connection_id
         )
         if same_model and same_connection:
-            return config, model
+            return config.model_copy(update={"provider_connection_id": selection.provider_connection_id}), model
         parameters = {
             parameter.name: parameter.default for parameter in model.parameters
             if parameter.required and parameter.default is not None
@@ -179,13 +173,15 @@ class AgentModelService:
         selected_config = AppModelConfigReq(**selection.model_dump(), parameters=parameters)
         return selected_config, model
 
-    def resolve_for_context(
-        self, context: AgentInvocationContext, selection: WorkbenchModelSelection | None,
-    ) -> AppModelConfigReq | None:
-        """未取得应用定义的入口在此解析默认来源，已加载的装配流程直接使用 resolve。"""
-        default_config, account_id = self.definition_service.load_model_configuration(context)
-        config, _ = self.resolve(context, default_config, selection, account_id=account_id)
-        return config
+    def _load_default_configuration(
+        self, context: AgentInvocationContext,
+    ) -> tuple[AppModelConfigReq | None, UUID]:
+        """模型服务决定默认模型来源；应用定义服务只负责草稿与发布配置读取。"""
+        if context.invoke_from is InvokeFrom.ASSISTANT_AGENT:
+            config = self.language_model_service.get_default_model_config(context.account_id)
+            return AppModelConfigReq.model_validate(config), context.account_id
+        definition = self.definition_service.load(context)
+        return definition.config.model_config_data, definition.account_id
 
     def _workbench_model_choices(self, context: AgentInvocationContext) -> list[WorkbenchModelChoiceResp]:
         """目录按可信账号和创建者身份过滤，不向 WebApp 或开放 API 暴露。"""

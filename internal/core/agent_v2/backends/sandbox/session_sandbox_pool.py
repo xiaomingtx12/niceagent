@@ -9,7 +9,7 @@ from threading import RLock, Timer
 from time import monotonic
 from typing import Any
 
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import SandboxProviderError
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import SandboxProviderError
 from internal.extension.logging_extension import logger
 
 
@@ -106,7 +106,7 @@ class SessionSandboxPool:
         return replacement
 
     def release(self, entry: SandboxLease, *, reusable: bool, ttl: int) -> None:
-        """只有同步成功的资源可以回池；淘汰和远程删除在锁外执行。"""
+        """调用方标记可复用的资源才回池；淘汰和远程删除在锁外执行。"""
         discarded = []
         with self._lock:
             if self._entries.get(entry.key) is not entry or not entry.busy:

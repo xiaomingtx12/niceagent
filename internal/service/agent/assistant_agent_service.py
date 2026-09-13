@@ -5,7 +5,6 @@ from injector import inject
 from langchain_core.tools import BaseTool, tool
 
 from config import Config
-from internal.core.language_model.entities.model_entity import BaseLanguageModel
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import FailException, NotFoundException
 from internal.model import Account, Conversation
@@ -22,26 +21,19 @@ from internal.task.workflow_task import (
     auto_generate_workflow,
     auto_generate_app_with_workflow,
 )
-from internal.service.common.base_service import BaseService
 from internal.service.dataset.embeddings_service import EmbeddingsService
 from internal.service.dataset.faiss_service import FaissService
-from internal.service.language_model.language_model_service import LanguageModelService
 from internal.service.conversation.conversation_service import ConversationService
 from pkg.sqlalchemy import SQLAlchemy
 
 
 @inject
 @dataclass
-class AssistantAgentService(BaseService):
-    """装配 Creator 辅助 Agent 的专属模型和平台工具。
-
-    创建 App、生成 Workflow 等能力属于 Creator 业务；本服务只提供模型
-    和工具，实际 Run 生命周期及 Agent 执行仍复用工作台和 Agent Core。
-    """
+class AssistantAgentService:
+    """管理内置助手会话与 Creator 专属工具；模型及执行由统一装配入口负责。"""
 
     faiss_service: FaissService
     embeddings_service: EmbeddingsService
-    language_model_service: LanguageModelService
     conversation_service: ConversationService
     db: SQLAlchemy
     config: Config
@@ -94,42 +86,21 @@ class AssistantAgentService(BaseService):
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
         )
 
-    def build_capabilities(
-        self,
-        account: Account,
-        *,
-        reasoning_effort: str | None = None,
-        model_config_override: dict | None = None,
-    ) -> tuple[BaseLanguageModel, list[BaseTool]]:
-        """构造辅助 Agent 专属模型与工具，执行仍交给统一装配入口。"""
+    def build_tools(self, account_id: UUID) -> list[BaseTool]:
+        """工具绑定已授权账号，执行时无需保留 ORM 对象或访问请求上下文。"""
         # 1.检索工具绑定本次账号的向量模型，后续工具执行不再读取 Flask 上下文。
-        self.embeddings_service.initialize_embeddings(account.id)
+        self.embeddings_service.initialize_embeddings(account_id)
         retrieval_tool = self.faiss_service.convert_faiss_to_tool(
             self.embeddings_service.embeddings,
         )
 
-        # 2.选择当前账号已激活的对话模型，只覆盖本次请求的思考强度。
-        model_config = model_config_override or self.language_model_service.get_default_model_config(account.id)
-        if reasoning_effort is not None:
-            parameters = dict(model_config.get("parameters", {}))
-            for alias in ("reasoning_effort", "thinking_level", "thinking"):
-                parameters.pop(alias, None)
-            parameters["reasoning_effort"] = reasoning_effort
-            model_config = {**model_config, "parameters": parameters}
-        llm = self.language_model_service.load_language_model(
-            model_config,
-            account.id,
-        )
-
-        # 3.集中挂载平台工具；工具闭包只捕获账号 ID，不持有 ORM 对象。
-        tools = [
+        # 2.集中挂载平台工具；工具闭包只捕获账号 ID，不持有 ORM 对象。
+        return [
             retrieval_tool,
-            self.convert_create_app_to_tool(account.id),
-            self.convert_workflow_generator_to_tool(account),
-            self.convert_app_with_workflow_generator_to_tool(account),
+            self.convert_create_app_to_tool(account_id),
+            self.convert_workflow_generator_to_tool(account_id),
+            self.convert_app_with_workflow_generator_to_tool(account_id),
         ]
-
-        return llm, tools
 
     @classmethod
     def convert_create_app_to_tool(cls, account_id: UUID) -> BaseTool:
@@ -147,11 +118,10 @@ class AssistantAgentService(BaseService):
         return create_app
 
     @classmethod
-    def convert_workflow_generator_to_tool(cls, account: Account) -> BaseTool:
+    def convert_workflow_generator_to_tool(cls, account_id: UUID) -> BaseTool:
         """将工作流生成功能转换为LangChain工具"""
 
-        # 提前获取account_id字符串，避免在闭包中访问account对象
-        account_id_str = str(account.id)
+        account_id_str = str(account_id)
 
         @tool("workflow_generator", args_schema=WorkflowGeneratorToolReq)
         def workflow_generator(
@@ -182,11 +152,10 @@ class AssistantAgentService(BaseService):
         return workflow_generator
 
     @classmethod
-    def convert_app_with_workflow_generator_to_tool(cls, account: Account) -> BaseTool:
+    def convert_app_with_workflow_generator_to_tool(cls, account_id: UUID) -> BaseTool:
         """将Agent应用+工作流生成功能转换为LangChain工具"""
 
-        # 提前获取account_id字符串，避免在闭包中访问account对象
-        account_id_str = str(account.id)
+        account_id_str = str(account_id)
 
         @tool(
             "app_with_workflow_generator",

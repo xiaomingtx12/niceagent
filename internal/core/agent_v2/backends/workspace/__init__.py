@@ -1,1 +1,1 @@
-"""Workspace Backend；实现位于 ``workspace_backend``。"""
+"""本轮工作副本：普通文件操作使用官方 Backend，持久化由交付入口负责。"""

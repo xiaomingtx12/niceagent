@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
-
 from deepagents import create_deep_agent
-from langchain_core.language_models import BaseChatModel
-from langchain_core.tools import BaseTool
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
 from langgraph.graph.state import CompiledStateGraph
 
 from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
@@ -21,51 +17,57 @@ from internal.core.agent_v2.assembly.graph.subagent_spec_adapter import (
     validate_agent_tools,
 )
 from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.entity.agent_config import SubAgentDefinition
+from internal.core.agent_v2.entity.agent_config import AgentConfig
 from internal.core.agent_v2.assembly.graph.platform_middleware import build_platform_middleware
+from internal.core.agent_v2.middleware.shell_execution_middleware import ShellExecutionMiddleware
 
 
 def build_deep_agent(
     *,
-    llm: BaseChatModel,
-    app_name: str,
-    app_description: str,
-    preset_prompt: str,
-    review_config: Mapping[str, Any],
-    tools: Sequence[BaseTool],
-    subagents: Sequence[SubAgentDefinition],
+    definition: AgentConfig,
     runtime: AgentRuntimeResources,
 ) -> CompiledStateGraph:
     """把已校验的应用配置和已解析依赖编译成 Deep Agents 图。"""
-    # 1.在 Core 内统一生成提示词和已授权工具，避免调用方了解图装配细节。
-    agent_tools = validate_agent_tools(tools)
+    # 1.在 Core 内生成提示词和已授权工具，隔离调用方与图装配细节。
+    agent_tools = validate_agent_tools(definition.tools)
+    # 显式交付与普通文件操作分离，工具成功回执意味着文件已经保存到持久化来源。
+    agent_tools.extend(runtime.file_delivery.tools())
     system_prompt = build_app_system_prompt(
-        app_name=app_name,
-        app_description=app_description,
-        preset_prompt=preset_prompt,
+        app_name=definition.name,
+        app_description=definition.description,
+        preset_prompt=definition.preset_prompt,
         memory_enabled=runtime.runtime_context.memory_enabled,
         user_input_enabled=bool(runtime.runtime_context.user_input_enabled and runtime.checkpointer),
     )
     middleware = build_platform_middleware(
-        review_config=review_config,
+        review_config=definition.review_config,
         runtime=runtime,
     )
 
     # 2.将已授权的同步、异步 SubAgent 配置转换为原生规格。
     # 持久化记录仅作业务适配，其余运行时能力由 DeepAgents 负责。
     subagent_specs = build_subagent_specs(
-        subagents,
-        skill_sources_by_agent=runtime.subagent_skill_sources,
+        definition.subagents,
+        skill_sources_by_agent=runtime.skill_projection.subagent_sources,
     )
+
+    # 框架默认通用子 Agent 不继承主 Agent 中间件；虚拟 Shell 模式显式补齐路径说明。
+    if runtime.execution_uses_virtual_paths:
+        if not any(spec["name"] == GENERAL_PURPOSE_SUBAGENT["name"] for spec in subagent_specs):
+            subagent_specs.insert(0, {
+                **GENERAL_PURPOSE_SUBAGENT,
+                "skills": list(runtime.skill_projection.sources),
+                "middleware": [ShellExecutionMiddleware(virtual_paths=True)],
+            })
 
     # 3.把模型、工具、权限、持久化和上下文边界编译成运行图。
     return create_deep_agent(
-        model=llm,
+        model=definition.model,
         tools=agent_tools,
         system_prompt=system_prompt,
         middleware=middleware,
         subagents=subagent_specs,
-        skills=list(runtime.skill_sources) or None,
+        skills=list(runtime.skill_projection.sources) or None,
         # 记忆由刷新中间件装配，不能同时启用官方默认中间件，
         # 否则会在同一请求链中重复注入记忆提示词。
         memory=None,

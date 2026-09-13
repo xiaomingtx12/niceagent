@@ -17,6 +17,7 @@ from internal.core.agent_v2.entity.agent_config import (
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
+from internal.core.agent_v2.middleware.shell_execution_middleware import ShellExecutionMiddleware
 
 _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
     {
@@ -31,6 +32,9 @@ _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
         "execute",
         "delete_memory_file",
         "ask_user",
+        "list_saved_files",
+        "load_saved_file",
+        "deliver_file",
     }
 )
 
@@ -67,9 +71,11 @@ def build_subagent_specs(
     skill_sources_by_agent: Mapping[str, Sequence[str]] | None = None,
 ) -> list[SubAgent | AsyncSubAgent]:
     """保留定义顺序，仅组装框架所需的技能权限和中间件。"""
+    # 1.先校验名称与运行时资源的一一对应关系，避免产生不可用规格。
     scoped_skills = skill_sources_by_agent or {}
     _validate_runtime_names(subagents, scoped_skills)
 
+    # 2.按配置顺序转换规格，保证模型选择和调度顺序稳定。
     specs: list[SubAgent | AsyncSubAgent] = []
     for config in subagents:
         if isinstance(config, AsyncSubAgentDefinition):
@@ -90,21 +96,27 @@ def _build_sync_spec(
     skill_sources: Sequence[str],
 ) -> SubAgent:
     """同步定义已包含授权能力，显式隔离父图的工具和文件权限。"""
+    # 1.校验工具名称；子 Agent 不继承父 Agent 的工具集合。
     tools = validate_agent_tools(config.tools, context=f"subagent {config.name!r}")
     sources = list(skill_sources)
     if config.skills and not sources:
         raise ValueError(f"subagent {config.name!r} 的 Skills 尚未完成运行时授权")
 
+    # 2.显式替换父权限，只暴露共享 Workspace 与已授权 Skill。
     spec: SubAgent = {
         "name": config.name,
         "description": config.description,
-        "system_prompt": config.system_prompt,
+        "system_prompt": config.system_prompt + (
+            "\n/workspace 是本轮临时工作副本，写入不会自动持久化。"
+            "完成文件任务后向主 Agent 返回产物路径，由主 Agent 调用 deliver_file 保存交付。"
+        ),
         "model": config.model,
         # 显式空列表避免 DeepAgents 继承父 Agent 的全部工具。
         "tools": tools,
         # 子 Agent 权限替换父规则，避免继承主 Agent 的 Memory 和 Skill 范围。
         "permissions": _build_subagent_permissions(sources),
-        "middleware": [ToolCallValidationMiddleware()],
+        # 文件权限不会约束 execute，共享 Sandbox 的子 Agent 必须在执行入口关闭 Shell。
+        "middleware": [ToolCallValidationMiddleware(), ShellExecutionMiddleware(allow_execution=False)],
     }
     if sources:
         spec["skills"] = sources
@@ -113,6 +125,7 @@ def _build_sync_spec(
 
 def _build_async_spec(config: AsyncSubAgentDefinition) -> AsyncSubAgent:
     """构造一个远程 Agent Protocol SubAgent 原生规格。"""
+    # 1.远程规格只保留协议必需字段，认证头按副本传递避免外部修改。
     graph_id = config.graph_id
     if not graph_id:
         raise ValueError(f"subagent {config.name!r} 缺少 graph_id")

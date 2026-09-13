@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Callable
 
 from deepagents.middleware._utils import append_to_system_message
@@ -16,7 +15,7 @@ from internal.core.agent_v2.entity.run_context import AgentRunContext
 
 
 class RuntimeContextMiddleware(AgentMiddleware):
-    """为模型调用追加当前运行时间和本轮规划偏好。"""
+    """为模型调用追加本轮规划偏好和已确认的用户输入。"""
 
     def _prepare_request(self, request: ModelRequest) -> ModelRequest:
         """答案作为用户级历史数据注入本次调用，不进入系统指令、图状态或公开消息。"""
@@ -30,9 +29,16 @@ class RuntimeContextMiddleware(AgentMiddleware):
                 "delegate 仅授权对应问题的选择，不代表任何操作审批。"
                 "如有省略，不要推测省略内容。\n" + context.confirmed_user_inputs
             )), *messages]
+        dynamic_context = self._dynamic_context(request)
+        # 1.无规划且无历史答案时保持原始请求，避免追加空系统消息。
+        if not dynamic_context and messages is request.messages:
+            return request
         return request.override(
             messages=messages,
-            system_message=append_to_system_message(request.system_message, self._dynamic_context(request)),
+            system_message=(
+                append_to_system_message(request.system_message, dynamic_context)
+                if dynamic_context else request.system_message
+            ),
         )
 
     @staticmethod
@@ -40,7 +46,6 @@ class RuntimeContextMiddleware(AgentMiddleware):
         """只读取可信的本轮上下文，未开启时保留原生自动规划行为。"""
         context = request.runtime.context if request.runtime else None
         return build_dynamic_context(
-            invoked_at=datetime.now(timezone.utc).isoformat(),
             planning_enabled=isinstance(context, AgentRunContext) and context.planning_enabled,
         )
 
@@ -49,7 +54,7 @@ class RuntimeContextMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable,
     ):
-        """为同步模型调用追加运行时间。"""
+        """为同步模型调用追加运行时信息。"""
         return handler(self._prepare_request(request))
 
     async def awrap_model_call(
@@ -57,7 +62,7 @@ class RuntimeContextMiddleware(AgentMiddleware):
         request: ModelRequest,
         handler: Callable,
     ):
-        """为异步模型调用追加运行时间。"""
+        """为异步模型调用追加运行时信息。"""
         return await handler(self._prepare_request(request))
 
 

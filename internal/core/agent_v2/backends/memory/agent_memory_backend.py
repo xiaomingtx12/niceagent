@@ -20,6 +20,8 @@ from deepagents.backends.utils import (
 )
 from langgraph.store.base import BaseStore
 
+from internal.core.agent_v2.entity.run_context import AgentRunContext
+
 from internal.core.agent_v2.entity.agent_memory import (
     AgentMemoryIdentity,
     AgentMemoryLimits,
@@ -37,6 +39,14 @@ from internal.core.agent_v2.persistence.memory_file_transaction import (
     memory_file_transaction,
 )
 from .memory_index import render_memory_index
+
+
+def memory_namespace_from_runtime(runtime: Any) -> tuple[str, ...]:
+    """每次存储访问从可信运行上下文获取身份，不能由模型参数或历史状态决定。"""
+    context = getattr(runtime, "context", None)
+    if not isinstance(context, AgentRunContext):
+        raise RuntimeError("AgentRunContext is required for memory Store access")
+    return context.memory_namespace
 
 
 class AgentMemoryBackend(StoreBackend):

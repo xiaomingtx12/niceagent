@@ -15,10 +15,16 @@ from langchain.agents.middleware.types import AgentMiddleware
 from openai import APIConnectionError
 
 from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources
-from internal.core.agent_v2.middleware.reloading_memory_middleware import ReloadingMemoryMiddleware
-from internal.core.agent_v2.middleware.context_window_middleware import ContextWindowMiddleware
+from internal.core.agent_v2.middleware.context_window_middleware import (
+    ContextWindowMiddleware,
+)
+from internal.core.agent_v2.middleware.reloading_memory_middleware import (
+    ReloadingMemoryMiddleware,
+)
+from internal.core.agent_v2.middleware.reloading_skills_middleware import (
+    ReloadingSkillsMiddleware,
+)
 from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
-from internal.core.agent_v2.middleware.reloading_skills_middleware import ReloadingSkillsMiddleware
 from internal.core.agent_v2.middleware.runtime_context_middleware import (
     RuntimeContextMiddleware,
 )
@@ -26,11 +32,12 @@ from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
 from internal.core.agent_v2.middleware.user_input_middleware import UserInputMiddleware
+from internal.core.agent_v2.middleware.shell_execution_middleware import ShellExecutionMiddleware
 
 _RETRYABLE_MODEL_STATUS_CODES = frozenset({408, 409, 429})
 _RETRYABLE_READ_ONLY_TOOLS = ("ls", "read_file", "glob", "grep")
-_MODEL_CALL_LIMIT = 10
-_TOOL_CALL_LIMIT = 40
+_MODEL_CALL_LIMIT = 50
+_TOOL_CALL_LIMIT = 200
 
 
 def build_platform_middleware(
@@ -39,19 +46,19 @@ def build_platform_middleware(
     runtime: AgentRuntimeResources,
 ) -> list[AgentMiddleware]:
     """按稳定顺序构造 MyDify 扩展的 DeepAgents 中间件。"""
-    # 顺序影响 wrap 嵌套与 before/after 钩子，按职责注释但不重排。
+    # 1.基础设施层：先刷新授权 Skill，再校验工具并注入运行时上下文。
     middleware: list[AgentMiddleware] = [
-        # 基础设施：刷新授权 Skill，再校验消息并注入本轮上下文。
         ReloadingSkillsMiddleware(
             backend=runtime.backend,
-            sources=list(runtime.skill_sources),
+            sources=list(runtime.skill_projection.sources),
             system_prompt=None,
         ),
         ToolCallValidationMiddleware(),
+        ShellExecutionMiddleware(virtual_paths=runtime.execution_uses_virtual_paths),
         RuntimeContextMiddleware(),
-        # 业务约束：保护图状态；公开事件审核由执行阶段单独负责。
+        # 2.业务约束层：保护图状态，公开事件审核由执行阶段单独负责。
         ReviewMiddleware(review_config=dict(review_config)),
-        # 运行策略：保留模型重试、只读工具重试与调用限制的原有顺序。
+        # 3.运行策略层：模型重试、只读工具重试和调用限制保持固定顺序。
         ModelRetryMiddleware(
             max_retries=2,
             retry_on=_is_retryable_model_error,
@@ -74,10 +81,15 @@ def build_platform_middleware(
             exit_behavior="continue",
         ),
     ]
-    # 记忆先刷新，窗口观测才能看到实际注入的提示词。
+    # 4.上下文增强层：记忆必须先刷新，窗口观测才能看到实际注入内容。
     if runtime.memory_sources:
-        middleware.append(ReloadingMemoryMiddleware(backend=runtime.backend, sources=list(runtime.memory_sources)))
+        middleware.append(
+            ReloadingMemoryMiddleware(
+                backend=runtime.backend, sources=list(runtime.memory_sources)
+            )
+        )
     middleware.append(ContextWindowMiddleware())
+    # 5.交互能力层：只有启用持久化时才允许恢复用户输入状态。
     if runtime.runtime_context.user_input_enabled and runtime.checkpointer:
         middleware.append(UserInputMiddleware())
     return middleware

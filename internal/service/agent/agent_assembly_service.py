@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import cast
 from uuid import UUID
 
@@ -13,6 +12,7 @@ from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
+from sqlalchemy.orm import Session
 
 from config.config import Config
 from internal.core.agent_v2 import (
@@ -41,13 +41,16 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.dataset_entity import RetrievalSource
 from internal.exception import (
+    FailException,
     NotFoundException,
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
 from internal.model import Account, App
-from internal.repository import WorkspaceFileStore
-from internal.repository.agent_workspace_backend import AgentWorkspaceBackend
+from internal.repository import WorkspaceFileRepository, WorkspaceFileStore
+from internal.repository.agent_workspace_store import AgentWorkspaceStore
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
+from internal.core.agent_v2.persistence.workspace_store import WorkspaceDeliveryError
 from internal.entity.agent_invocation import (
     AgentInvocation,
 )
@@ -63,19 +66,6 @@ from .assistant_agent_service import AssistantAgentService
 from internal.service.language_model.language_model_service import LanguageModelService
 from internal.service.dataset.retrieval_service import RetrievalService
 from internal.service.skill.skill_service import SkillService
-
-
-@dataclass(frozen=True, slots=True)
-class _ResolvedAgentDefinition:
-    """一次装配所需的不可变应用定义和已解析能力。"""
-
-    name: str
-    description: str
-    config: AgentAppConfigReq
-    model: BaseLanguageModel
-    tools: tuple[BaseTool, ...]
-    selected_skills: tuple[str, ...]
-    subagents: tuple[SubAgentDefinition, ...]
 
 
 @inject
@@ -105,8 +95,8 @@ class AgentAssemblyService:
         """准备平台能力并委托 Core 装配，返回仅属于当前 Run 的执行器和输入。"""
         # 1.读取平台配置并转换为 Agent 输入消息。
         build_started_at = time.monotonic()
-        definition = self._resolve_definition(req, observer)
-        input_message = definition.model.convert_to_human_message(
+        agent_config, context = self._resolve_agent_config(req, observer)
+        input_message = cast(BaseLanguageModel, agent_config.model).convert_to_human_message(
             req.query,
             req.image_urls,
             dump_agent_attachments(req.attachments),
@@ -120,72 +110,71 @@ class AgentAssemblyService:
             }
         )
 
-        # 2.平台只负责解析已授权 Skill，Agent Core 接管资源和图生命周期。
-        context = AgentRunContext(
-            account_id=req.account_id,
-            app_id=req.app_id,
-            conversation_id=req.conversation_id,
-            created_by=req.created_by,
-            principal_id=(req.end_user_id or req.created_by),
-            memory_enabled=definition.config.long_term_memory.enable,
-            planning_enabled=req.planning_enabled,
-            user_input_enabled=req.user_input_enabled and definition.config.user_input.enable,
-            confirmed_user_inputs=self.run_service.get_confirmed_input_context(req),
-        )
-        skills = self.skill_service.resolve_enabled_skills(definition.config.skills)
-        agent_config = AgentConfig(
-            name=definition.name,
-            description=definition.description,
-            model=cast(BaseChatModel, definition.model),
-            preset_prompt=definition.config.preset_prompt,
-            review_config=definition.config.review_config.model_dump(mode="json"),
-            tools=definition.tools,
-            skills=tuple(
-                AgentSkill(
-                    name=skill.name,
-                    skill_md=skill.skill_md,
-                    package_files=dict(skill.package_files),
-                )
-                for skill in skills
-            ),
-            selected_skills=definition.selected_skills,
-            subagents=definition.subagents,
-        )
-
-        # 3.Core 装配运行时并编译图，平台只提供附件写入操作和异常转换。
+        # 2.平台准备附件数据和授权存储对象，框架 Store、Checkpoint 和 Backend 由 Core 装配。
         try:
+            input_files = self.agent_attachment_service.load_files(req.attachments)
+            workspace_store = self._build_workspace_store(
+                context, AgentTelemetry(observer.record, attributes=context.telemetry_attributes),
+            )
+            # build 从入口接管本轮存储；不再把资源工厂和附件写入回调传入 Core。
             agent = AgentRuntimeAssembler(
-                workspace_factory=partial(
-                    AgentWorkspaceBackend.create,
-                    engine=self.db.engine,
-                    file_store=self.workspace_file_store,
-                    limits=AgentWorkspaceLimits(
-                        max_bytes=self.config.WORKSPACE_MAX_BYTES,
-                        max_files=self.config.WORKSPACE_MAX_FILES,
-                    ),
-                ),
                 config=self.config,
+                workspace_store=workspace_store,
             ).build(
                 context=context,
                 definition=agent_config,
                 observer=observer,
-                prepare_backend=partial(
-                    self.agent_attachment_service.materialize,
-                    req.attachments,
-                ),
+                input_files=input_files,
             )
+        except WorkspaceDeliveryError as exc:
+            raise FailException(str(exc)) from exc
         except ValueError as exc:
             raise ValidateErrorException(f"Agent 运行配置无效: {exc}") from exc
         self._log_build_timing(req, "total", build_started_at, observer)
         return agent, input_message
 
 
-    def _resolve_definition(
+    def _build_workspace_store(
+        self,
+        context: AgentRunContext,
+        telemetry: AgentTelemetry,
+    ) -> AgentWorkspaceStore:
+        """绑定本轮文件交付存储；仅配置仓储，不查询文件或读取 COS。"""
+        # 1.独立于 HTTP 请求会话，避免后台执行受请求结束影响。
+        session = Session(bind=self.db.engine, expire_on_commit=False)
+        try:
+            # 2.在平台边界绑定授权作用域和配额，事务交由仓储管理。
+            repository = WorkspaceFileRepository(
+                session=session,
+                account_id=context.account_id,
+                app_id=context.app_id,
+                scope_id=context.workspace_scope_id,
+                created_by=context.created_by,
+                limits=AgentWorkspaceLimits(
+                    max_bytes=self.config.WORKSPACE_MAX_BYTES,
+                    max_files=self.config.WORKSPACE_MAX_FILES,
+                ),
+                owns_session=True,
+            )
+            # 3.存储适配器只服务按需加载和显式交付，运行资源负责释放会话。
+            return AgentWorkspaceStore(
+                repository=repository,
+                file_store=self.workspace_file_store,
+                telemetry=telemetry,
+            )
+        except BaseException:
+            try:
+                session.close()
+            except Exception:
+                logger.exception("Workspace Store 装配失败后的 Session 清理失败")
+            raise
+
+    def _resolve_agent_config(
         self,
         req: AgentInvocation,
         observer: PlatformAgentRunObserver,
-    ) -> _ResolvedAgentDefinition:
-        """读取一次应用定义并解析模型、工具和 SubAgent 能力。"""
+    ) -> tuple[AgentConfig, AgentRunContext]:
+        """一次配置读取直接生成 Core 所需定义与可信上下文，不再构造中间能力快照。"""
         # 1.读取草稿或发布配置，并校验本次请求选择的 Skill。
         phase_started_at = time.monotonic()
         definition = self.definition_service.load(req)
@@ -207,33 +196,26 @@ class AgentAssemblyService:
             account = self.db.session.get(Account, req.account_id)
             if account is None:
                 raise NotFoundException("账号不存在")
-            model_override = None
-            if req.model_selection:
-                override = self.model_service.resolve_for_context(req, req.model_selection)
-                if override is not None:
-                    model_override = override.model_dump(mode="json")
-            model, tools = self.assistant_agent_service.build_capabilities(
-                account, reasoning_effort=req.reasoning_effort,
-                model_config_override=model_override,
+            model_config = AppModelConfigReq.model_validate(
+                self.language_model_service.get_default_model_config(account_id)
             )
         else:
             if app_config.model_config_data is None:
                 raise ValidateErrorException("Agent 运行配置缺少模型")
             model_config = app_config.model_config_data
-            if req.model_selection:
-                model_config, _ = self.model_service.resolve(
-                    req, model_config, req.model_selection, account_id=account_id,
-                )
-            model_config = self.model_service.with_reasoning_override(model_config, req.reasoning_effort)
-            model = self.language_model_service.load_language_model(
-                model_config, account_id=account_id,
+        if req.model_selection:
+            model_config, _ = self.model_service.resolve(
+                req, model_config, req.model_selection, account_id=account_id,
             )
-            tools = []
+        model_config = self.model_service.with_reasoning_override(model_config, req.reasoning_effort)
+        model = self.language_model_service.load_language_model(model_config, account_id=account_id)
         self._log_build_timing(req, "model", phase_started_at, observer)
 
         # 3.把应用配置中的普通工具、知识库和工作流转换为运行时工具。
         phase_started_at = time.monotonic()
-        if req.invoke_from is not InvokeFrom.ASSISTANT_AGENT:
+        if req.invoke_from is InvokeFrom.ASSISTANT_AGENT:
+            tools = self.assistant_agent_service.build_tools(account_id)
+        else:
             tools = self._build_configured_tools(
                 app_config,
                 account_id=account_id,
@@ -252,16 +234,38 @@ class AgentAssemblyService:
         )
         self._log_build_timing(req, "subagents", phase_started_at, observer)
 
-        # 5.返回不可变的装配快照，供运行时工厂和图工厂继续使用。
-        return _ResolvedAgentDefinition(
+        # 5.授权 Skill 和运行上下文在同一份应用配置上解析，直接生成最终 Core 输入。
+        context = AgentRunContext(
+            account_id=req.account_id,
+            app_id=req.app_id,
+            conversation_id=req.conversation_id,
+            created_by=req.created_by,
+            principal_id=(req.end_user_id or req.created_by),
+            memory_enabled=app_config.long_term_memory.enable,
+            planning_enabled=req.planning_enabled,
+            user_input_enabled=req.user_input_enabled and app_config.user_input.enable,
+            confirmed_user_inputs=self.run_service.get_confirmed_input_context(req),
+        )
+        skills = self.skill_service.resolve_enabled_skills(app_config.skills)
+        agent_config = AgentConfig(
             name=definition.name,
             description=definition.description,
-            config=app_config,
-            model=model,
+            model=cast(BaseChatModel, model),
+            preset_prompt=app_config.preset_prompt,
+            review_config=app_config.review_config.model_dump(mode="json"),
             tools=tuple(tools),
+            skills=tuple(
+                AgentSkill(
+                    name=skill.name,
+                    skill_md=skill.skill_md,
+                    package_files=dict(skill.package_files),
+                )
+                for skill in skills
+            ),
             selected_skills=selected_skills,
             subagents=tuple(subagents),
         )
+        return agent_config, context
 
 
     def _build_configured_tools(
@@ -403,16 +407,12 @@ class AgentAssemblyService:
         graph_id, url, headers = config.graph_id, config.url, dict(config.headers)
         if config.source == "published":
             target_id = config.published_app_id
-            if target_id is None:
-                raise ValidateErrorException(f"子 Agent {config.name!r} 缺少发布应用标识")
             url, headers = build_internal_agent_transport(
                 settings=self.config,
                 account_id=account_id, parent_app_id=parent_app_id,
                 target_app_id=target_id, headers=headers,
             )
             graph_id = build_published_graph_id(target_id)
-        if not graph_id:
-            raise ValidateErrorException(f"子 Agent {config.name!r} 缺少 graph_id")
         return AsyncSubAgentDefinition(
             name=config.name, description=config.description,
             graph_id=graph_id, url=url, headers=headers,

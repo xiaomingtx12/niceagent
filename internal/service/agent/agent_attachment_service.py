@@ -7,11 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
-from deepagents.backends.protocol import BackendProtocol
 from injector import inject
 
 from internal.entity.agent_attachment_entity import AgentAttachment
-from internal.exception import FailException, ForbiddenException
+from internal.exception import ForbiddenException
 from internal.model import UploadFile
 from pkg.sqlalchemy import SQLAlchemy
 from internal.service.file.cos_service import CosService
@@ -20,11 +19,7 @@ from internal.service.file.cos_service import CosService
 @inject
 @dataclass
 class AgentAttachmentService:
-    """解析用户附件并将其投影到当前 Agent Workspace。
-
-    文件归属和 COS 读取属于 Service；Backend 只作为 Agent Core 提供的
-    文件写入协议传入，不由本服务管理 Agent 生命周期。
-    """
+    """解析已授权附件并从 COS 读取内容，本轮工作副本的写入由 Core 装配器负责。"""
 
     db: SQLAlchemy
     cos_service: CosService
@@ -71,27 +66,19 @@ class AgentAttachmentService:
             attachments.append(attachment)
         return tuple(attachments)
 
-    def materialize(
+    def load_files(
         self,
         attachments: Sequence[AgentAttachment],
-        backend: BackendProtocol,
-    ) -> None:
-        """下载附件内容并写入当前 Run 的 Workspace 路由。"""
+    ) -> list[tuple[str, bytes]]:
+        """返回已授权附件的虚拟路径和内容，失败发生在本轮资源创建之前。"""
         if not attachments:
-            return
+            return []
         # 1.从对象存储下载附件内容，并映射为 Workspace 虚拟路径。
         files: list[tuple[str, bytes]] = []
         for attachment in attachments:
             content = self.cos_service.download_file_bytes(attachment.key)
             files.append((attachment.path, content))
-        # 2.批量上传到本次运行的 Backend。
-        responses = list(backend.upload_files(files))
-        # Backend 契约要求结果与输入一一对应，缺失结果也必须按失败处理。
-        if len(responses) != len(files):
-            raise FailException("附件写入 Agent Workspace 失败")
-        for response in responses:
-            if response.error:
-                raise FailException("附件写入 Agent Workspace 失败")
+        return files
 
 
 __all__ = ["AgentAttachmentService"]

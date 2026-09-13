@@ -3,88 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from functools import partial
 from typing import Any
 
 from deepagents.backends import LangSmithSandbox
 from deepagents.backends.protocol import SandboxBackendProtocol
 
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
-    close_workspace_safely,
     seed_sandbox_workspace,
 )
-from internal.core.agent_v2.backends.sandbox.managed_sandbox import (
-    close_managed_sandbox,
-)
-from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import upload_sandbox_skills
-from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
-from internal.core.agent_v2.entity.workspace_snapshot import WorkspaceManifest
-from internal.core.agent_v2.observability.telemetry import (
-    AgentTelemetry,
-    NOOP_AGENT_TELEMETRY,
-)
-
-
-class ManagedLangSmithSandbox(LangSmithSandbox):
-    """带 MyDify Workspace 同步和生命周期管理的官方 Sandbox Backend。"""
-
-    def __init__(
-        self,
-        *,
-        sandbox: Any,
-        client: Any,
-        workspace: WorkspaceBackend,
-        telemetry: AgentTelemetry | None = None,
-    ) -> None:
-        super().__init__(sandbox)
-        self._client = client
-        self._workspace = workspace
-        self._telemetry = telemetry or NOOP_AGENT_TELEMETRY
-        self._closed = False
-        self._remote_deleted = False
-        self._baseline_manifest: WorkspaceManifest | None = None
-
-    def set_workspace_baseline(self, manifest: WorkspaceManifest) -> None:
-        """记录本次运行开始时的权威 Workspace 清单。"""
-        self._baseline_manifest = dict(manifest)
-
-    def close(self) -> None:
-        """先回收工作文件，再删除远程 Sandbox。"""
-        if self._closed:
-            return
-        try:
-            close_managed_sandbox(
-                backend=self,
-                workspace=self._workspace,
-                baseline_manifest=self._baseline_manifest,
-                close_provider=lambda: None,
-                telemetry=self._telemetry,
-                sandbox_id=self.id,
-                provider_name="LangSmith",
-            )
-        finally:
-            self._closed = True
-
-    def delete_remote(self) -> None:
-        """在会话或应用删除时显式清理远程 Sandbox。"""
-        if self._remote_deleted:
-            return
-        from langsmith.sandbox import ResourceNotFoundError
-
-        try:
-            self._client.delete_sandbox(self.id)
-        except ResourceNotFoundError:
-            self._remote_deleted = True
-            return
-        except Exception as exc:  # noqa: BLE001
-            self._telemetry.emit(
-                "sandbox.delete_failed",
-                attributes={"sandbox_id": self.id},
-            )
-            raise SandboxProviderError(f"failed to delete Sandbox {self.id}") from exc
-        self._remote_deleted = True
-
+from internal.core.agent_v2.backends.sandbox.sandbox_skill_upload import seed_sandbox_skills
+from internal.core.agent_v2.backends.workspace.workspace_projection import WorkspaceProjection
+from internal.core.agent_v2.observability.telemetry import AgentTelemetry
+from internal.extension.logging_extension import logger
 
 def delete_sandbox(name: str) -> None:
     """删除已知名称的会话 Sandbox；不存在视为清理完成。"""
@@ -99,7 +30,7 @@ def delete_sandbox(name: str) -> None:
 def create_backend(
     *,
     settings: Any,
-    workspace: WorkspaceBackend,
+    workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
@@ -107,11 +38,12 @@ def create_backend(
     """获取或创建 LangSmith Sandbox，并完成可复用实例的重置。"""
     from langsmith.sandbox import ResourceNotFoundError, SandboxClient
 
-    client = SandboxClient()
+    client = None
     sandbox = None
-    backend: ManagedLangSmithSandbox | None = None
     created = False
     try:
+        # 1.客户端配置失败也进入统一异常边界，Workspace 始终由调用方持有。
+        client = SandboxClient()
         try:
             sandbox = client.get_sandbox(sandbox_name)
         except ResourceNotFoundError:
@@ -122,30 +54,23 @@ def create_backend(
 
         if str(getattr(sandbox, "status", "")).lower() == "stopped":
             sandbox.start()
-        backend = ManagedLangSmithSandbox(
-            sandbox=sandbox,
-            client=client,
-            workspace=workspace,
-            telemetry=telemetry,
-        )
+        # 2.原生 Backend 不需要运行级关闭，会话实例由 TTL 或显式删除管理。
+        backend = LangSmithSandbox(sandbox)
         _reset_sandbox_projection(backend)
-        seed_sandbox_workspace(
-            backend,
-            workspace=workspace,
-            skill_files=list(skill_files),
-            protect_skills=True,
-            skill_uploader=partial(upload_sandbox_skills, backend, telemetry=telemetry),
-        )
+        seed_sandbox_workspace(backend, workspace=workspace)
+        seed_sandbox_skills(backend, list(skill_files), protect=True, compress=True, telemetry=telemetry)
         return backend
-    except Exception as exc:  # noqa: BLE001
-        _cleanup_initialization(
-            backend=backend,
-            client=client,
-            sandbox=sandbox,
-            created=created,
-            workspace=workspace,
-            telemetry=telemetry,
-        )
+    except BaseException as exc:
+        # 3.仅删除本次新建但初始化失败的实例，不删除借用的已有会话。
+        if created and sandbox is not None:
+            try:
+                client.delete_sandbox(sandbox.name)
+            except ResourceNotFoundError:
+                pass
+            except Exception:
+                logger.exception("LangSmith Sandbox 初始化失败后的远程资源清理失败")
+        if not isinstance(exc, Exception):
+            raise
         if isinstance(exc, SandboxProviderError):
             raise
         raise SandboxProviderError("failed to create LangSmith Sandbox") from exc
@@ -172,7 +97,7 @@ def _langsmith_create_kwargs(settings: Any, sandbox_name: str) -> dict[str, Any]
     return kwargs
 
 
-def _reset_sandbox_projection(backend: ManagedLangSmithSandbox) -> None:
+def _reset_sandbox_projection(backend: LangSmithSandbox) -> None:
     """清空可复用 Sandbox 中上次运行留下的业务投影。"""
     command = (
         "mkdir -p /workspace && "
@@ -182,43 +107,3 @@ def _reset_sandbox_projection(backend: ManagedLangSmithSandbox) -> None:
     result = backend.execute(command)
     if result.exit_code not in (0, None):
         raise SandboxProviderError("failed to reset Sandbox projections")
-
-
-def _cleanup_initialization(
-    *,
-    backend: ManagedLangSmithSandbox | None,
-    client: Any,
-    sandbox: Any | None,
-    created: bool,
-    workspace: WorkspaceBackend,
-    telemetry: AgentTelemetry | None,
-) -> None:
-    """清理 LangSmith 初始化中已创建的远程和本地资源。"""
-    if backend is not None:
-        _close_backend_quietly(backend)
-        if created:
-            try:
-                backend.delete_remote()
-            except Exception:  # noqa: BLE001
-                pass
-        return
-
-    sandbox_id = getattr(sandbox, "id", None)
-    if sandbox is not None and created:
-        try:
-            client.delete_sandbox(sandbox.name)
-        except Exception:  # noqa: BLE001
-            pass
-    close_workspace_safely(
-        workspace,
-        telemetry=telemetry,
-        sandbox_id=sandbox_id,
-    )
-
-
-def _close_backend_quietly(backend: Any) -> None:
-    """初始化失败时尽力关闭已创建 Backend，不覆盖原始异常。"""
-    try:
-        backend.close()
-    except Exception:  # noqa: BLE001
-        pass

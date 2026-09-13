@@ -15,11 +15,10 @@ from deepagents.backends.protocol import SandboxBackendProtocol
 
 from internal.core.agent_v2.observability.telemetry import AgentTelemetry
 from internal.core.agent_v2.backends.sandbox.lazy_sandbox_backend import LazySandboxBackend
-from internal.core.agent_v2.backends.sandbox.sandbox_workspace_sync import (
+from internal.core.agent_v2.backends.sandbox.sandbox_initialization import (
     SandboxProviderError,
-    close_workspace_safely,
 )
-from internal.core.agent_v2.backends.workspace.workspace_backend import WorkspaceBackend
+from internal.core.agent_v2.backends.workspace.workspace_projection import WorkspaceProjection
 from internal.extension.logging_extension import logger
 
 
@@ -31,7 +30,7 @@ _ProviderCreator = Callable[..., SandboxBackendProtocol]
 def build_sandbox_backend(
     *,
     settings: Any,
-    workspace: WorkspaceBackend,
+    workspace: WorkspaceProjection,
     sandbox_name: str,
     skill_files: Iterable[tuple[str, bytes]],
     telemetry: AgentTelemetry | None = None,
@@ -48,20 +47,15 @@ def build_sandbox_backend(
     canonical_provider = _PROVIDER_ALIASES.get(provider, provider)
     module_path = _PROVIDER_MODULES.get(canonical_provider)
     if module_path is None:
-        close_workspace_safely(workspace, telemetry=telemetry)
         raise SandboxProviderError(
             f"unsupported AGENT_SANDBOX_PROVIDER: {provider}"
         )
     files = list(skill_files)
 
     def create() -> SandboxBackendProtocol:
-        """SDK 加载前由工厂持有 Workspace，交给 Provider 后沿用其失败清理。"""
+        """Provider 只清理自身资源，借用的 Workspace 始终由运行资源持有。"""
         try:
             creator = _load_provider_creator(canonical_provider, module_path)
-        except Exception:
-            close_workspace_safely(workspace, telemetry=telemetry)
-            raise
-        try:
             return creator(
                 settings=settings,
                 workspace=workspace,
