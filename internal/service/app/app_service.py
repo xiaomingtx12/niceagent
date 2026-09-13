@@ -38,9 +38,6 @@ from internal.schema.app.app_schema import (
     GetPublishHistoriesWithPageReq,
     GetAppsWithPageReq,
 )
-from internal.schema.agent.agent_cleanup_schema import (
-    AgentAppCleanupReq,
-)
 from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
@@ -230,7 +227,7 @@ class AppService(BaseService):
         """根据传递的应用id+账号，删除指定的应用信息，目前仅删除应用基础信息即可"""
         app = self.get_app(app_id, account)
         self.agent_cleanup_service.cleanup_app(
-            AgentAppCleanupReq(account_id=account.id, app_id=app.id)
+            account_id=account.id, app_id=app.id,
         )
         self.delete(app)
         return app

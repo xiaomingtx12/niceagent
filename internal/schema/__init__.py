@@ -6,11 +6,6 @@ from .agent.agent_tool_schema import (
     DatasetRetrievalToolReq,
     WorkflowGeneratorToolReq,
 )
-from internal.schema.agent.agent_cleanup_schema import (
-    AgentAppCleanupReq,
-    AgentConversationCleanupReq,
-    AgentMessageCleanupReq,
-)
 from .app.app_config_schema import AgentAppConfigReq, DraftAppConfigPatchReq
 from .agent.agent_workbench_schema import (
     WorkbenchCancelResp,
@@ -69,9 +64,6 @@ __all__ = [
     "CreateAppToolReq",
     "DatasetRetrievalToolReq",
     "WorkflowGeneratorToolReq",
-    "AgentAppCleanupReq",
-    "AgentConversationCleanupReq",
-    "AgentMessageCleanupReq",
     "DraftAppConfigPatchReq",
     "AgentAppConfigReq",
     "WorkbenchCancelResp",

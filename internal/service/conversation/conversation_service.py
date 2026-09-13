@@ -19,10 +19,6 @@ from internal.entity.conversation_entity import (
 )
 from internal.extension.logging_extension import logger
 from pkg.sqlalchemy import SQLAlchemy
-from internal.schema.agent.agent_cleanup_schema import (
-    AgentConversationCleanupReq,
-    AgentMessageCleanupReq,
-)
 from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
@@ -581,11 +577,9 @@ class ConversationService(BaseService):
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_conversation(
-            AgentConversationCleanupReq(
-                account_id=account.id,
-                app_id=conversation.app_id,
-                conversation_id=conversation.id,
-            )
+            account_id=account.id,
+            app_id=conversation.app_id,
+            conversation_id=conversation.id,
         )
         self.update(conversation, is_deleted=True)
 
@@ -615,12 +609,8 @@ class ConversationService(BaseService):
         if self.agent_cleanup_service is None:
             raise RuntimeError("会话清理服务未配置")
         self.agent_cleanup_service.cleanup_message(
-            AgentMessageCleanupReq(
-                account_id=account.id,
-                app_id=conversation.app_id,
-                conversation_id=conversation.id,
-                message_id=message.id,
-            )
+            conversation_id=conversation.id,
+            message_id=message.id,
         )
         self.update(message, is_deleted=True)
 

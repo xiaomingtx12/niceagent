@@ -10,9 +10,6 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ForbiddenException
 from internal.model import App, Account, Conversation, EndUser
-from internal.schema.agent.agent_cleanup_schema import (
-    AgentConversationCleanupReq,
-)
 from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
@@ -267,11 +264,9 @@ class WebAppService(BaseService):
             account=account,
         )
         self.agent_cleanup_service.cleanup_conversation(
-            AgentConversationCleanupReq(
-                account_id=account.id,
-                app_id=app.id,
-                conversation_id=conversation.id,
-            )
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
         )
         return self.update(conversation, is_deleted=True)
 

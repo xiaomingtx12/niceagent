@@ -14,9 +14,6 @@ from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
 from internal.model import Account, AgentRun, App, Conversation, EndUser
-from internal.schema.agent.agent_cleanup_schema import (
-    AgentConversationCleanupReq,
-)
 from internal.entity.agent_invocation import (
     AgentInvocationContext,
 )
@@ -24,13 +21,12 @@ from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
 from internal.service.app.app_config_service import AppConfigService
-from internal.service.common.base_service import BaseService
 from internal.service.conversation.conversation_service import ConversationService
 
 
 @inject
 @dataclass
-class CreatorTaskService(BaseService):
+class CreatorTaskService:
     """查询 Creator 可见的已发布 Agent 和跨入口会话历史。"""
 
     db: SQLAlchemy
@@ -51,14 +47,16 @@ class CreatorTaskService(BaseService):
         )
         if app is None:
             raise NotFoundException("应用不存在、未发布或无权访问")
-        conversation = self.create(
-            Conversation,
-            app_id=app.id,
-            name="新的会话",
-            invoke_from=InvokeFrom.CREATOR_TASK,
-            created_by=account.id,
-            owner_account_id=account.id,
-        )
+        with self.db.auto_commit():
+            conversation = Conversation(
+                app_id=app.id,
+                name="新的会话",
+                invoke_from=InvokeFrom.CREATOR_TASK,
+                created_by=account.id,
+                owner_account_id=account.id,
+            )
+            self.db.session.add(conversation)
+            self.db.session.flush()
         return self._serialize_conversation(conversation, app)
 
     def get_invocation_context(
@@ -250,11 +248,9 @@ class CreatorTaskService(BaseService):
         # 1.先校验归属，再执行可能涉及外部资源的清理。
         conversation, app = self._get_visible_conversation(conversation_id, account)
         self.agent_cleanup_service.cleanup_conversation(
-            AgentConversationCleanupReq(
-                account_id=account.id,
-                app_id=app.id,
-                conversation_id=conversation.id,
-            )
+            account_id=account.id,
+            app_id=app.id,
+            conversation_id=conversation.id,
         )
         # 2.清理成功后保存删除标记，后续列表和入口都不再返回该会话。
         conversation.is_deleted = True
