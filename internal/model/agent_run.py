@@ -50,6 +50,14 @@ class AgentRun(db.Model):
             name="ck_agent_run_finished_at",
         ),
         CheckConstraint(
+            "(input_message_id IS NULL OR input_message_id <> '')",
+            name="ck_agent_run_input_message_nonempty",
+        ),
+        CheckConstraint(
+            "(finished_at IS NULL OR started_at <= finished_at)",
+            name="ck_agent_run_started_before_finished",
+        ),
+        CheckConstraint(
             "jsonb_typeof(invocation_snapshot) = 'object'",
             name="ck_agent_run_invocation_snapshot_object",
         ),
@@ -85,12 +93,12 @@ class AgentRun(db.Model):
     )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
-    app_id = Column(UUID, nullable=False)  # 所属应用标识；内置助手不要求存在 App 记录
-    conversation_id = Column(UUID, nullable=False)  # 所属会话，权限由入口服务校验
+    app_id = Column(UUID, nullable=False)  # 所属应用标识；内置助手不要求存在 App 记录；必须与 message.app_id 一致
+    conversation_id = Column(UUID, nullable=False)  # 所属会话，权限由入口服务校验；必须与 message.conversation_id 一致
     invoke_from = Column(String(32), nullable=False)  # 入口来源，用于隔离运行查询
     message_id = Column(
         UUID, ForeignKey("message.id", ondelete="CASCADE"), nullable=False
-    )  # 承载本轮问答与用量投影的 Message.id
+    )  # 承载本轮问答与用量投影的 Message.id；归属三元组一致性由创建服务保证
     input_message_id = Column(String(255), nullable=True)  # 对齐客户端消息、历史和时间线；相同标识重复启动时复用 Run
     status = Column(
         String(32), nullable=False, server_default=text("'running'")
@@ -108,16 +116,18 @@ class AgentRun(db.Model):
     cancel_requested_at = Column(
         DateTime, nullable=True
     )  # 收到取消请求的时间；执行线程与状态查询都读它，终态保留原值供追溯
-    started_at = Column(DateTime, nullable=True)  # 首次开始执行的时间
+    started_at = Column(
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
+    )  # 首次开始执行的时间；建行即赋值，暂停恢复不改
     finished_at = Column(DateTime, nullable=True)  # 进入终态的时间，等待用户输入时不设置
     created_at = Column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'")
+        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
     updated_at = Column(
         DateTime,
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'"),
-        onupdate=text("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'"),
+        server_default=text("CURRENT_TIMESTAMP(0)"),
+        server_onupdate=text("CURRENT_TIMESTAMP(0)"),
     )
 
     @property
