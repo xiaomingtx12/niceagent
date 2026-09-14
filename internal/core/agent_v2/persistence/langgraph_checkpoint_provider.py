@@ -149,8 +149,9 @@ def create_postgres_saver(
         **pool_config,
         open=True,
     )
-    saver = saver_factory(pool)
     try:
+        # 工厂拒绝该 pool 时同样要归还连接池与 worker 线程。
+        saver = saver_factory(pool)
         saver.setup()
     except Exception:
         close_connection_pool(pool)
