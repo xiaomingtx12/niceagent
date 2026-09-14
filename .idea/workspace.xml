@@ -6,25 +6,10 @@
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="refactor(test): 删除test文件">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CONTEXT.md" beforeDir="false" afterPath="$PROJECT_DIR$/CONTEXT.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/app/http/app.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/app.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/config/config.py" beforeDir="false" afterPath="$PROJECT_DIR$/config/config.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/02.LLMOps数据库ER图.drawio" beforeDir="false" afterPath="$PROJECT_DIR$/docs/02.LLMOps数据库ER图.drawio" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/observability/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/observability/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/agent_run_interaction.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/agent_run_interaction.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/agent_workbench_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/agent_workbench_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/agent_run.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/agent_run.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_workbench_event_queue.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_workbench_event_queue.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_workbench_execution_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_workbench_execution_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_workbench_query_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_workbench_query_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_workbench_run_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_workbench_run_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_workbench_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_workbench_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/internal_agent_protocol/service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/internal_agent_protocol/service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/task/agent_workbench_task.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/Agent-API文档.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-API文档.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/deep_agent_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/deep_agent_factory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/persistence/agent_memory_repository.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/persistence/agent_memory_repository.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/persistence/langgraph_checkpoint_provider.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/persistence/langgraph_checkpoint_provider.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
