@@ -22,12 +22,14 @@ def normalize_message(message: Any) -> AgentTokenUsage:
     if not isinstance(message, (AIMessage, AIMessageChunk)):
         return AgentTokenUsage()
 
+    # 1.标准来源：LangChain usage_metadata 优先。
     usage_metadata = getattr(message, "usage_metadata", None)
     if isinstance(usage_metadata, Mapping):
         usage = normalize_usage(usage_metadata, source="usage_metadata")
         if usage.present:
             return usage
 
+    # 2.响应元数据：OpenAI 等把 token_usage 放在 response_metadata。
     response_metadata = getattr(message, "response_metadata", None)
     if isinstance(response_metadata, Mapping):
         for key in ("token_usage", "usage", "usage_metadata"):
@@ -38,6 +40,7 @@ def normalize_message(message: Any) -> AgentTokenUsage:
             if usage.present:
                 return usage
 
+    # 3.扩展字段兜底：部分 Provider 写在 additional_kwargs。
     additional_kwargs = getattr(message, "additional_kwargs", None)
     if isinstance(additional_kwargs, Mapping):
         for key in ("token_usage", "usage", "usage_metadata"):
@@ -56,11 +59,13 @@ def normalize_usage(raw: Any, *, source: str = "unknown") -> AgentTokenUsage:
     if not isinstance(raw, Mapping):
         return AgentTokenUsage()
 
+    # 1.按别名表读取三向总量；明细同时提取缓存、推理等扩展数据。
     input_tokens = _first_int(raw, _INPUT_KEYS)
     output_tokens = _first_int(raw, _OUTPUT_KEYS)
     total_tokens = _first_int(raw, _TOTAL_KEYS)
     input_details = _details(raw, "input")
     output_details = _details(raw, "output")
+    # 2.存在任何有效字段即视为实测用量，缺失与零值不混淆。
     present = bool(
         input_tokens
         or output_tokens
@@ -91,6 +96,7 @@ def normalize_llm_result(response: LLMResult) -> AgentTokenUsage:
         current = normalize_message(getattr(generations[0], "message", None))
         if current.present:
             usage.add(current)
+    # 消息级来源全部缺失时回退到响应级 llm_output。
     if usage.present:
         return usage
 
@@ -126,6 +132,7 @@ def _is_token_count(value: Any) -> bool:
 def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
     """提取指定方向的缓存、推理等 Token 明细。"""
     details: dict[str, int | float] = {}
+    # 1.嵌套明细容器：兼容标准命名与 Provider 变体键名。
     detail_keys = (
         f"{direction}_token_details",
         f"{direction}_tokens_details",
@@ -138,6 +145,7 @@ def _details(raw: Mapping[str, Any], direction: str) -> dict[str, int]:
                 if isinstance(value, (int, float)) and not isinstance(value, bool):
                     details[str(key)] = value
 
+    # 2.顶层平铺别名：Anthropic 等直接在用量字典平铺缓存/推理字段。
     aliases = (
         ("cached_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
         if direction == "input" else ("reasoning_tokens",)

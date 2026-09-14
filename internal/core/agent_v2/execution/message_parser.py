@@ -4,8 +4,37 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
+from uuid import UUID
 
 from langchain_core.messages import BaseMessage
+
+
+def json_value(value: Any) -> Any:
+    """把框架对象转换为独立于供应商对象的 JSON 值。"""
+    if isinstance(value, BaseMessage):
+        try:
+            return value.model_dump(mode="json")
+        except (TypeError, ValueError):
+            return {
+                "type": value.type,
+                "content": json_value(value.content),
+                "id": value.id,
+            }
+    if isinstance(value, Mapping):
+        return {str(key): json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_value(item) for item in value]
+    if isinstance(value, UUID):
+        return str(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return json_value(model_dump(mode="json"))
+        except (TypeError, ValueError):
+            return str(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def response_messages(response: Any) -> list[BaseMessage]:
@@ -60,4 +89,10 @@ def final_answer(messages: Sequence[Any]) -> str:
     return ""
 
 
-__all__ = ["current_turn_ai_contents", "final_answer", "message_content_to_text", "response_messages"]
+__all__ = [
+    "current_turn_ai_contents",
+    "final_answer",
+    "json_value",
+    "message_content_to_text",
+    "response_messages",
+]

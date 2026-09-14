@@ -22,8 +22,8 @@ class AgentEventDelivery:
 
     def accept(self, raw: Mapping[str, Any]) -> None:
         """values 包括子图状态；消息增量也必须等整轮审核结束才能交付。"""
+        # 1.未启用输出审核时直接进入 Core 规范化出口。
         if not self._review.output_enabled:
-            # 1.未启用输出审核时直接进入 Core 规范化出口。
             self._publish(raw)
             return
         data = raw.get("params", {}).get("data")
@@ -31,14 +31,14 @@ class AgentEventDelivery:
         if raw.get("method") == "values" and isinstance(data, Mapping):
             for content in current_turn_ai_contents(data.get("messages", []) or []):
                 self._review.check_output(content)
+        # 3.启用审核时暂存原始事件，审核通过后按原顺序回放。
         if self._on_event is not None:
-            # 3.启用审核时暂存原始事件，审核通过后按原顺序回放。
             self._pending.append(raw)
 
     def flush(self, cancel_requested: Event) -> None:
         """只在图成功结束后回放，取消或回调异常时释放尚未交付的事件。"""
         try:
-            # 1.执行成功且未取消时才回放整轮事件。
+            # 1.执行成功且未取消时才回放整轮事件；期间到达取消立即停止。
             if self._on_event is None:
                 return
             for raw in self._pending:
@@ -54,8 +54,8 @@ class AgentEventDelivery:
 
     def finish(self) -> None:
         """只收尾已经交付的文本；未通过审核的缓存从未进入规范化器。"""
+        # Core 负责补齐尚未收到结束分片的消息。
         if self._on_event is not None:
-            # 1.Core 负责补齐尚未收到结束分片的消息。
             for event in self._normalizer.finish():
                 self._on_event(event)
 

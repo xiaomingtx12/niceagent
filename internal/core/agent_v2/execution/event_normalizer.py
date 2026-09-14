@@ -5,13 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
-from uuid import UUID, uuid4
 
 from langchain_core.language_models._compat_bridge import message_to_events
-from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
+from langchain_core.messages import BaseMessage, ToolMessage
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from ..entity.agent_event import AgentEvent
+from .message_parser import json_value
 
 _CHANNELS = frozenset({"messages", "values", "tools", "lifecycle", "custom"})
 _TERMINAL_EVENTS = frozenset({"completed", "failed", "interrupted", "drained", "cancelled"})
@@ -70,17 +70,17 @@ class AgentEventNormalizer:
         if event.channel == "lifecycle" and not namespace:
             namespace = parse_namespace(data.get("namespace"))
         events: list[AgentEvent] = []
+        # 2.工具开始只结束当前分支的模型阶段，不影响并行子图。
         if event.channel == "tools" and data.get("event") == "tool-started":
-            # 工具只结束当前分支的模型阶段，不影响并行子图。
             for key in list(self._text_streams):
                 if key[0] == namespace:
                     events.extend(self._finish_message(key, timestamp=timestamp))
+        # 3.先封存文本，再发送生命周期边界，避免客户端看到半截消息。
         if event.channel == "lifecycle" and (data.get("event") or data.get("status")) in _TERMINAL_EVENTS:
-            # 3.先封存文本，再发送生命周期边界，避免客户端看到半截消息。
             events.extend(self._finish_messages(timestamp=timestamp, namespace=namespace))
         events.append(self._emit(
             channel=event.channel, data=data, namespace=namespace,
-            timestamp=timestamp, node=event.params.get("node"),
+            timestamp=timestamp,
         ))
         return events
 
@@ -114,24 +114,16 @@ class AgentEventNormalizer:
         if metadata.get("lc_source") == "summarization":
             return []
         node_value = metadata.get("langgraph_node")
-        node = node_value if isinstance(node_value, str) and node_value else event.params.get("node")
+        node = node_value if isinstance(node_value, str) and node_value else None
+        # 2.协议分片直接放行，整条消息回放为等价分片序列，其余形态静默丢弃。
         if isinstance(payload, Mapping) and payload.get("event"):
             message_events = [payload]
-        elif isinstance(payload, AIMessageChunk):
-            return self._normalize_chunk(
-                payload,
-                namespace=namespace,
-                timestamp=timestamp,
-                node=node,
-            )
-        elif isinstance(payload, BaseMessage) and not isinstance(
-            payload, (AIMessageChunk, ToolMessage)
-        ):
+        elif isinstance(payload, BaseMessage) and not isinstance(payload, ToolMessage):
             message_events = list(message_to_events(payload, message_id=payload.id))
         else:
             return []
+        # 3.跟踪分片进度，取消或异常时也能补齐结束事件。
         for message_event in message_events:
-            # 2.跟踪直接分片，取消或异常时也能补齐结束事件。
             self._track_message(message_event, namespace=namespace, node=node)
         return [
             self._emit(
@@ -169,84 +161,6 @@ class AgentEventNormalizer:
                 state.text += delta.get(state.kind, "")
             elif event == "content-block-finish":
                 state.kind, state.text = "", ""
-
-    def _normalize_chunk(
-        self,
-        chunk: AIMessageChunk,
-        *,
-        namespace: tuple[str, ...],
-        timestamp: Any,
-        node: str | None,
-    ) -> list[AgentEvent]:
-        """只投影标准化的公开正文和推理文本，签名、工具参数不进入展示内容。"""
-        # 1.按 namespace 和节点确定独立文本流。
-        stream_hint = node or (str(chunk.id or "") if not namespace else "")
-        key = (namespace, stream_hint)
-        state = self._text_streams.get(key)
-        events: list[AgentEvent] = []
-        for block in chunk.content_blocks:
-            kind = block.get("type")
-            if kind not in {"text", "reasoning"}:
-                continue
-            value = block.get(kind)
-            if not isinstance(value, str) or not value:
-                continue
-            if state is None:
-                # 2.首次收到内容时创建消息和首个内容块。
-                state = _TextStream(node=node)
-                self._text_streams[key] = state
-                events.append(
-                    self._emit(
-                        channel="messages", namespace=namespace, timestamp=timestamp,
-                        node=node,
-                        data={"event": "message-start", "role": "ai", "id": str(chunk.id or uuid4())},
-                    )
-                )
-            if state.kind != kind:
-                # 3.内容类型切换时先关闭旧块，再开始新块。
-                if state.index >= 0:
-                    events.append(self._emit(
-                        channel="messages", namespace=namespace, timestamp=timestamp,
-                        node=node,
-                        data={"event": "content-block-finish", "index": state.index,
-                              "content": {"type": state.kind, state.kind: state.text}},
-                    ))
-                state.index += 1
-                state.kind, state.text = kind, ""
-                events.append(self._emit(
-                    channel="messages", namespace=namespace, timestamp=timestamp,
-                    node=node,
-                    data={"event": "content-block-start", "index": state.index,
-                          "content": {"type": kind, kind: ""}},
-                ))
-            state.text += value
-            events.append(
-                self._emit(
-                    channel="messages",
-                    namespace=namespace,
-                    timestamp=timestamp,
-                    node=node,
-                    data={
-                        "event": "content-block-delta",
-                        "index": state.index,
-                        "delta": {"type": f"{kind}-delta", kind: value},
-                    },
-                )
-            )
-        terminal = (
-            chunk.chunk_position == "last"
-            or bool((chunk.response_metadata or {}).get("finish_reason"))
-            or bool((chunk.response_metadata or {}).get("stop_reason"))
-        )
-        if terminal and key in self._text_streams:
-            # 4.供应商显式结束时立即释放流状态。
-            events.extend(
-                self._finish_message(
-                    key,
-                    timestamp=timestamp,
-                )
-            )
-        return events
 
     def _finish_message(
         self,
@@ -302,34 +216,6 @@ class AgentEventNormalizer:
                 )
             )
         return events
-
-
-def json_value(value: Any) -> Any:
-    """把框架对象转换为独立于供应商对象的 JSON 值。"""
-    if isinstance(value, BaseMessage):
-        try:
-            return value.model_dump(mode="json")
-        except (TypeError, ValueError):
-            return {
-                "type": value.type,
-                "content": json_value(value.content),
-                "id": value.id,
-            }
-    if isinstance(value, Mapping):
-        return {str(key): json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [json_value(item) for item in value]
-    if isinstance(value, UUID):
-        return str(value)
-    model_dump = getattr(value, "model_dump", None)
-    if callable(model_dump):
-        try:
-            return json_value(model_dump(mode="json"))
-        except (TypeError, ValueError):
-            return str(value)
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
 
 
 def parse_namespace(value: Any) -> tuple[str, ...]:
