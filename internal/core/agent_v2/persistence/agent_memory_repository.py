@@ -181,7 +181,7 @@ class AgentMemoryRepository:
 
     @classmethod
     def _check_expected(cls, item: Any, expected: str | None) -> None:
-        """空摘要表示只允许新建，非空摘要防止自动保存覆盖已变更文件。"""
+        """可选乐观锁：未传摘要按普通覆盖处理，传入摘要则拒绝覆盖已变更或已删除的文件。"""
         if expected is None:
             return
         actual = cls._item_to_entity(item).content_sha256 if item else ""
