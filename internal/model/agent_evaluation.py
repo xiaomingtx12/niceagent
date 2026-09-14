@@ -15,9 +15,9 @@ class AgentEvaluation(db.Model):
     )
 
     id = Column(UUID, primary_key=True, server_default=text("uuid_generate_v4()"))
-    account_id = Column(UUID, nullable=False)
-    app_id = Column(UUID, nullable=False)
-    run_id = Column(UUID, nullable=False)
+    account_id = Column(UUID, nullable=False)  # 发起并拥有此次测评的 Account.id
+    app_id = Column(UUID, nullable=False)  # 被测应用的 App.id
+    run_id = Column(UUID, nullable=False)  # 来源 AgentRun.id；测评自身身份是本表 id
     source_snapshot = Column(JSONB, nullable=False)
     criteria = Column(JSONB, nullable=False)
     judge_config = Column(JSONB, nullable=False)

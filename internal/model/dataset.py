@@ -41,7 +41,7 @@ class Dataset(db.Model):
     )
     embedding_provider_connection_id = Column(
         UUID, nullable=True
-    )  # 具体的模型连接配置
+    )  # ProviderApiKey.id；指定向量模型连接，不是提供商名称或模型 ID
     embedding_model = Column(
         String(255), nullable=False, server_default=text("''::character varying")
     )
@@ -216,7 +216,7 @@ class Segment(db.Model):
     account_id = Column(UUID, nullable=False)
     dataset_id = Column(UUID, nullable=False)
     document_id = Column(UUID, nullable=False)
-    node_id = Column(UUID, nullable=False)
+    node_id = Column(UUID, nullable=False)  # 向量存储中的对象 ID；关系库片段主键是本表 id
     position = Column(Integer, nullable=False, server_default=text("1"))
     content = Column(Text, nullable=False, server_default=text("''::text"))
     character_count = Column(Integer, nullable=False, server_default=text("0"))
@@ -293,8 +293,8 @@ class DatasetQuery(db.Model):
         nullable=False,
         server_default=text("'HitTesting'::character varying"),
     )
-    source_app_id = Column(UUID, nullable=True)
-    created_by = Column(UUID, nullable=True)
+    source_app_id = Column(UUID, nullable=True)  # 发起检索的应用标识，非应用调用时可为空
+    created_by = Column(UUID, nullable=True)  # 当前检索服务传入的 Account.id，不是 EndUser.id
     updated_at = Column(
         DateTime,
         nullable=False,

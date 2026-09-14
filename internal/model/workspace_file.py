@@ -37,9 +37,9 @@ class WorkspaceFile(db.Model):
     )
 
     id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
-    account_id = Column(UUID, nullable=False)
-    app_id = Column(UUID, nullable=False)
-    conversation_id = Column(UUID, nullable=False)
+    account_id = Column(UUID, nullable=False)  # 文件共享作用域的 Account.id，来自运行/文件入口的可信账号
+    app_id = Column(UUID, nullable=False)  # 文件共享作用域的应用标识，允许内置助手
+    conversation_id = Column(UUID, nullable=False)  # 历史列名：当前存账号+应用派生的 Workspace scope_id，不是 Conversation.id
     path = Column(String(512), nullable=False)
     object_key = Column(String(1024), nullable=False)
     mime_type = Column(
@@ -48,7 +48,7 @@ class WorkspaceFile(db.Model):
     size_bytes = Column(BigInteger, nullable=False, server_default=text("0"))
     content_sha256 = Column(String(64), nullable=False)
     revision = Column(Integer, nullable=False, server_default=text("1"))
-    created_by = Column(UUID, nullable=True)
+    created_by = Column(UUID, nullable=True)  # 最近一次有来源身份的写入者，可为 Account.id 或 EndUser.id；不用于鉴权
     is_deleted = Column(Boolean, nullable=False, server_default=text("false"))
     created_at = Column(DateTime, default=datetime.now, nullable=False)
     updated_at = Column(

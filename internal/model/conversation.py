@@ -33,7 +33,7 @@ class Conversation(db.Model):
     )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
-    app_id = Column(UUID, nullable=False)  # 关联应用id
+    app_id = Column(UUID, nullable=False)  # 所属应用标识；内置助手使用固定标识，不要求存在 App 行
     name = Column(
         String(255), nullable=False, server_default=text("''::character varying")
     )  # 会话名称
@@ -52,11 +52,11 @@ class Conversation(db.Model):
     created_by = Column(
         UUID,
         nullable=True,
-    )  # 会话来源主体；按入口记录 Account.id 或 EndUser.id，不作为平台账号鉴权依据
+    )  # 首次创建来源：调试/任务/助手存 Account.id，WebApp/Service API 存 EndUser.id
     owner_account_id = Column(
         UUID,
         nullable=True,
-    )  # 平台账号维度的稳定会话归属；外部渠道没有登录账号时允许为空
+    )  # 可管理会话的 Account.id；与应用所有者分开，外部渠道及未回填旧记录可为空
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -109,7 +109,7 @@ class Message(db.Model):
     )  # 调用来源，涵盖service_api、web_app、debugger等
     created_by = Column(
         UUID, nullable=False
-    )  # 消息来源主体，可能是 Account.id 或 EndUser.id，权限继承所属会话
+    )  # 本轮发送者：按本轮入口存 Account.id 或 EndUser.id，可能与会话 created_by 不同
 
     # 消息关联的原始问题
     query = Column(

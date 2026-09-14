@@ -31,7 +31,7 @@ class App(db.Model):
     )
 
     id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
-    account_id = Column(UUID, nullable=False)
+    account_id = Column(UUID, nullable=False)  # 应用所有者的 Account.id；不代表应用使用者
     app_config_id = Column(UUID, nullable=True)  # 发布配置id，当值为空时代表没有发布
     draft_app_config_id = Column(UUID, nullable=True)  # 关联的草稿配置id
     name = Column(String(255), default="", nullable=False)
