@@ -36,15 +36,6 @@ class RunRejected:
     field_errors: dict[str, dict[str, str]] | None = None
 
 
-@dataclass(frozen=True)
-class RunCancellation:
-    """取消操作的业务结果，由外部入口选择响应格式。"""
-
-    cancel_requested: bool
-    run_id: UUID
-    status: str
-
-
 class AgentRunInteraction:
     """只处理待填表单及取消恢复规则；提交记录和调用参数由持久化层管理。"""
 

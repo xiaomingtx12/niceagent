@@ -1,7 +1,7 @@
 """工作台模型选项的公开响应，不包含运行输入或身份上下文。"""
 
 from pydantic import BaseModel, ConfigDict, Field
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
+from internal.entity.agent_run_entity import AgentModelSelection
 
 
 class WorkbenchModelChoiceResp(BaseModel):
@@ -23,8 +23,8 @@ class WorkbenchModelSettingsResp(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     model: str = ""
     provider: str = ""
-    selected_model: WorkbenchModelSelection | None = None
-    model_override: WorkbenchModelSelection | None = None
+    selected_model: AgentModelSelection | None = None
+    model_override: AgentModelSelection | None = None
     available_models: list[WorkbenchModelChoiceResp] = Field(default_factory=list)
     reasoning_levels: list[str] = Field(default_factory=list)
     default_reasoning_effort: str | None = None

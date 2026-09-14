@@ -50,7 +50,7 @@
 | `AgentConfig` | `core/agent_v2/entity/agent_config.py:48` | 已解析的 Agent 定义（模型/工具/Skills/SubAgents），由业务层完成授权 |
 | `AgentRunContext` | `core/agent_v2/entity/run_context.py:42` | 单次运行的信任上下文：身份、记忆开关、规划开关、提问开关、已确认答案 |
 | `AgentInvocation` | `entity/agent_invocation.py:13` | 创建 Run 时冻结的完整执行输入（含指纹），后台装配不依赖 HTTP 请求 |
-| `WorkbenchRun` | `entity/agent_workbench_entity.py:67` | 当前进程持有的执行片段（`run_id` 稳定，每次恢复分配新 `executor_id`） |
+| `AgentRunExecution` | `entity/agent_run_entity.py:67` | 当前进程持有的执行片段（`run_id` 稳定，每次恢复分配新 `executor_id`） |
 | `AgentExecutionResult` | `core/agent_v2/entity/execution_result.py:8` | 内核交付结果：status / interrupts / answer / state / usage / error |
 | `AgentEvent` | `core/agent_v2/entity/agent_event.py:7` | 内核规范化事件（channel + data + sequence + namespace） |
 | `WorkbenchEvent` | `schema/agent/agent_workbench_schema.py:294` | 对外协议事件（`type/event_id/seq/method/params`） |
@@ -97,7 +97,7 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 ## 3. 调用入口与鉴权
 
-所有入口共用同一套工作台能力（`AgentWorkbenchService` + `AgentWorkbenchQueryService`），只在**身份解析**和**固定 invoke_from** 上不同。
+所有入口共用同一套工作台能力（`AgentRunService` + `AgentRunQuery`），只在**身份解析**和**固定 invoke_from** 上不同。
 
 | 入口 | 身份来源 | 会话归属校验 |
 | --- | --- | --- |
@@ -141,7 +141,7 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 ### 4.1 状态机
 
-`WorkbenchRunStatus`（`entity/agent_workbench_entity.py:16-39`）：
+`AgentRunStatus`（`entity/agent_run_entity.py:16-39`）：
 
 ```
                  start_run
@@ -156,9 +156,9 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
                            cancelled ──reopen_input──► waiting_input
 ```
 
-- `WORKBENCH_ACTIVE_STATUSES = (running,)` —— 唯一持有执行权（`executor_id`）的状态。
-- `WORKBENCH_OCCUPYING_STATUSES = (running, waiting_input)` —— 仍占用会话、不允许同会话启动新任务。
-- `WORKBENCH_TERMINAL_STATUSES = {completed, failed, cancelled}`。
+- `AGENT_RUN_ACTIVE_STATUSES = (running,)` —— 唯一持有执行权（`executor_id`）的状态。
+- `AGENT_RUN_OCCUPYING_STATUSES = (running, waiting_input)` —— 仍占用会话、不允许同会话启动新任务。
+- `AGENT_RUN_TERMINAL_STATUSES = {completed, failed, cancelled}`。
 - **取消不是一个状态位**，而是 `agent_run.cancel_requested_at` 时间戳；取消请求发出后 Run 仍显示 `running`，直到执行线程收敛。
 
 数据库 CHECK 约束与状态机一致（`internal/model/agent_run.py:35-63`）：
@@ -169,20 +169,20 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 ### 4.2 一个 Run 的完整生命周期
 
-1. **创建（`start_run`）**（`service/agent/agent_workbench_service.py:65-104`）
-   - 先 `settle_orphan_runs(conversation_id=...)` 收敛本进程不再持有的运行中记录；
+1. **创建（`start_run`）**（`agent_run_service.py:95-134`）
+   - 先 `_settle_orphan_runs(conversation_id=...)` 收敛本进程不再持有的运行中记录；
    - 事务内 `SELECT ... FOR UPDATE` 锁定 `conversation` 行（锁顺序固定：会话 → Run）；
-   - 幂等去重 → 冲突检查 → 创建 `Message` + `AgentInvocation` + `WorkbenchRun` + `agent_run` 行；
-   - **提交前**先 `queue_manager.register(run)`（否则同时刻的其他请求会把这条新运行中记录判为孤儿），提交成功后才 `execution_service.launch(run)`；
-   - 事务异常时 `queue_manager.finish(run)` 兜底注销。
-2. **装配**（`AgentAssemblyService.build_agent`）
+   - 幂等去重 → 冲突检查 → 创建 `Message` + `AgentInvocation` + `AgentRunExecution` + `agent_run` 行；
+   - **提交前**先 `tracker.register(run)`（否则同时刻的其他请求会把这条新运行中记录判为孤儿），提交成功后才 `self._submit_execution(run)`；
+   - 事务异常时 `tracker.finish(run)` 兜底注销。
+2. **装配**（`AgentFactory.create_executor`）
    - 读应用定义 → 校验指纹 → 解析 Skills 选择 → 解析并授权模型 → 组装工具 → 准备 SubAgents → 构造 `AgentRunContext` 与 `AgentConfig` → 交给 `AgentRuntimeAssembler`。
-3. **执行**（`AgentWorkbenchRunExecutionService.execute`）
+3. **执行**（`AgentRunService._execute_run`）
    - 后台线程进入独立 Flask app context 与独立 Session；
    - 先发 `lifecycle/running(preparing)`，恢复执行时补发 `values` 清空待填表单；
    - `AgentExecutor.execute()` 驱动 `graph.stream_events(...)`；
-   - 事件经 `AgentEventNormalizer` → `AgentProtocolEventProjector` → `AgentWorkbenchEventBuffer` 分批落库并通知订阅者。
-4. **结算（`_finish_run` / `finalize_run`）**
+   - 事件经 `AgentEventNormalizer` → `AgentProtocolEventProjector` → `AgentRunEventBuffer` 分批落库并通知订阅者。
+4. **结算（`_finalize_run`）**
    - 状态映射：`completed` / `failed` / `cancelled` / `waiting_input`；
    - 写入 `Message.answer`、`latency`、用量；写入 `state_snapshot`；
    - **先在业务事务内生成 `values` → `input.requested` → `lifecycle` 事件，再提交**；
@@ -195,15 +195,15 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 四层保障：
 
-1. **会话行锁**：`lock_conversation()` 对 `conversation` 行 `FOR UPDATE`（同时校验 `app_id` 与 `is_deleted=false`），把去重、冲突检查、创建串行化。
+1. **会话行锁**：`_lock_conversation()` 对 `conversation` 行 `FOR UPDATE`（同时校验 `app_id` 与 `is_deleted=false`），把去重、冲突检查、创建串行化。
 2. **数据库部分唯一索引**（`internal/model/agent_run.py:65-84`）：
    - `agent_run_conversation_occupied_uq` on `(conversation_id) WHERE status IN ('running','waiting_input')`；
    - `agent_run_conversation_input_message_uq` on `(conversation_id, input_message_id) WHERE input_message_id IS NOT NULL`；
    - 另有 `uq_agent_run_message_id` 唯一约束（一条业务消息只承载一个 Run）。
-3. **进程内注册表**：`AgentWorkbenchEventQueueManager` 按 `conversation_id` 保存本地 `WorkbenchRun`（`active_run_ids()` 供孤儿收敛使用），用于取消信号和"仍在运行"判断。
-4. **输入消息幂等键**：同一 `input_message_id` 重复 `run.start` 返回**同一个 Run** 和 `get_initial_event_sequence()`（该 Run 最小事件序号 - 1，即从头重放）；若该消息已用于其他入口，返回 `RunRejected("输入消息已用于其他调用入口")`。
+3. **进程内注册表**：`AgentRunTracker` 按 `conversation_id` 保存本地 `AgentRunExecution`（`active_run_ids()` 供孤儿收敛使用），用于取消信号和"仍在运行"判断。
+4. **输入消息幂等键**：同一 `input_message_id` 重复 `run.start` 返回**同一个 Run**，重放起点取该 Run 最小事件序号 - 1（从头重放；本进程仍持有该执行时改取内存游标，避免读到尚未提交的序号）；若该消息已用于其他入口，返回 `RunRejected("输入消息已用于其他调用入口")`。
 
-启动冲突的提示（`_check_start_conflict`，`service/agent/agent_workbench_service.py:334-363`）：
+启动冲突的提示（`_check_start_conflict`，`agent_run_service.py:424-469`）：
 - `当前任务正在停止，请稍后重试`
 - `请先完成当前表单`
 - `当前任务已有正在执行的 Agent`
@@ -211,37 +211,37 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 ### 4.4 取消
 
-`cancel_run`（`service/agent/agent_workbench_service.py:256-290`）：
+`cancel_run`（`agent_run_service.py:309-341`）：
 
 1. `get_conversation_run` 校验 Run 属于本次请求的应用、会话、入口（该方法是纯读，不触发任何写入）；
-2. **归属确认之后**才 `settle_orphan_runs(run_id=run_id)`，未授权请求不能触发写入；
-3. 若 Run 非终态且 `request_cancel(row)` 成功 → 通知 SSE + 通过进程内注册表发取消信号。
+2. **归属确认之后**才 `_settle_orphan_runs(run_id=run_id)`，未授权请求不能触发写入；
+3. 若 Run 非终态且 `_request_cancel(row)` 成功 → 通知 SSE + 通过进程内注册表发取消信号。
 
-两条路径（`run_service.request_cancel`，`agent_workbench_run_service.py:558-594`）：
+两条路径（`_request_cancel`，`agent_run_service.py:822-858`）：
 
 - **执行中的 Run**：只写 `cancel_requested_at`（重复点击不刷新时刻），终态和执行权释放由执行线程负责。
 - **等待表单的 Run**：`_cancel_pending_input` 在同一事务内写 `cancelled` / `finished_at`、清空 `executor_id`、把待填表单搬到 `cancelled_inputs` 并记录 `input_cancellation_sequence`、追加 `interrupted/cancelled` 事件、置 `Message.status = 'stop'`——**立即取消，没有执行线程参与**。
 
-信号传递（`execution_service._watch_cancel`，`:324-336`）：
+信号传递（`_watch_cancel`，`:1202-1214`）：
 - 取消监控线程每 0.5 秒检查 `run.cancel_requested`（`threading.Event`），置位后调用 `agent.request_cancel()` 触发图排空。
 - **取消完全依赖进程内信号**：数据库中的 `cancel_requested_at` 只作为业务事实记录，没有跨进程轮询。多进程部署时，A 进程发起的取消不会终止 B 进程持有的执行。
 
 返回体表达**真实状态**：待填任务已 `cancelled`，执行中任务仍是 `running`。
 
-### 4.5 孤儿 Run 收敛（`settle_orphan_runs`）
+### 4.5 孤儿 Run 收敛（`_settle_orphan_runs`）
 
-`run_service.settle_orphan_runs`（`agent_workbench_run_service.py:311-365`）是唯一的"卡住恢复"机制，取代了早期的租约/心跳方案：
+`_settle_orphan_runs`（`agent_run_service.py:743-800`）是唯一的"卡住恢复"机制，取代了早期的租约/心跳方案：
 
-- 判据：`status IN ('running')` **且** `id NOT IN alive_run_ids`（`alive_run_ids` = 本进程注册表中未 `done` 的 Run 标识，由 `queue_manager.active_run_ids()` 提供）；
+- 判据：`status IN ('running')` **且** `id NOT IN alive_run_ids`（`alive_run_ids` = 本进程注册表中未 `done` 的 Run 标识，由 `AgentRunTracker.active_run_ids()` 提供）；
 - 可选按 `conversation_id` 或 `run_id` 进一步收窄；
 - 逐行 `with_for_update()`，`cancel_requested_at` 非空 → `cancelled`，否则 → `failed`；
 - 公开错误文案统一为 `Agent 执行已中断，请重新发送消息。`；
 - 清空 `executor_id`（撤销执行权，使迟到的事件和结果无法覆盖收敛后的状态），追加 `lifecycle` 事件，同步 `Message.status`（`stop` / `error`）。
 
 触发时机：
-- `start_run`（按会话，`agent_workbench_service.py:71`）；
+- `start_run`（按会话，`agent_run_service.py:71`）；
 - `cancel_run`（按 Run，`:266`，授权之后）；
-- `get_state` 与 SSE `subscribe`（按会话 / 按 Run，`agent_workbench_query_service.py:56,78`）——重连能立刻读到真实终态；
+- `get_state` 与 SSE `stream_events`（按会话 / 按 Run，`agent_run_query.py:56,78`）——重连能立刻读到真实终态；
 - 内部 SDK `get_run`（按 Run，`internal_agent_protocol/service.py:181`，授权之后）。
 
 **注意**：判据是"本进程是否持有"，因此该机制隐含**单进程部署**假设。多进程（多 worker / 多容器）场景下，进程 B 处理任意状态查询都会把进程 A 正在执行的 Run 判为孤儿并写成 `failed`。这是相对早期心跳方案的行为变化，需要在部署形态上确认。
@@ -273,9 +273,9 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 ## 5. 执行链路
 
-### 5.1 业务侧装配（`AgentAssemblyService`）
+### 5.1 业务侧装配（`AgentFactory`）
 
-`build_agent(req, observer)` 的步骤：
+`create_executor(req, observer=observer)` 的步骤：
 
 1. **读定义**：`AgentDefinitionService.load()` → `ApplicationAgentDefinition(name, description, account_id, config)`。
 2. **指纹复核**（仅当 invocation 带指纹）。
@@ -378,7 +378,7 @@ Agent 只能通过三个工具把产物带出临时空间（`execution/workspace
 ### 6.1 模型与会话级覆盖
 
 - 可切换模型的入口只有：`debugger`、`creator_task`、`assistant_agent`（`_MODEL_SELECTABLE_SOURCES`）；`service_api` 与 `web_app` **不允许**切换。
-- 选择只能引用模型：`WorkbenchModelSelection{provider, model, provider_connection_id}`，不接受凭证、地址或任意参数。
+- 选择只能引用模型：`AgentModelSelection{provider, model, provider_connection_id}`，不接受凭证、地址或任意参数。
 - 归属约束：`owner_account_id == account_id` 且 `created_by == owner_account_id`，否则 `只能选择当前账号的模型`。
 - 模型必须已启用且是对话模型（`ModelType.CHAT`），否则 `所选模型未激活或不是对话模型`。
 - 思考强度校验按模型声明的 `reasoning_effort` 参数**选项集合**判定，不能仅凭参数名接受（`当前模型不支持所选思考强度，请重新选择`）。
@@ -581,14 +581,14 @@ PK `(run_id, sequence)`，CHECK `sequence > 0`，`payload` 为 object 的 `Workb
 
 | 项 | 值 | 位置 |
 | --- | --- | --- |
-| Agent 执行线程池 | 4（另有等量 `BoundedSemaphore(4)` 准入） | `agent_workbench_execution_service.py:55-57` |
+| Agent 执行线程池 | 4（另有等量 `BoundedSemaphore(4)` 准入） | `agent_run_service.py:55-57` |
 | 执行繁忙提示 | `当前 Agent 执行繁忙，请稍后重试` | `:69` |
-| 事件批量提交 | 8 条 / 0.1 秒（无定时线程，仅在事件到达时判断） | `agent_workbench_event_buffer.py:75-78` |
+| 事件批量提交 | 8 条 / 0.1 秒（无定时线程，仅在事件到达时判断） | `agent_run_events.py:75-78` |
 | 取消信号轮询 | 0.5 秒（只认进程内 `threading.Event`） | `_watch_cancel` |
 | 取消监控 join 上限 | 1 秒（超时只告警，不阻塞落库） | `:209-211` |
 | SSE 心跳 | 15 秒 | 查询服务 |
 | SSE 兜底轮询 | 0.5 秒 | 查询服务 |
-| `replace_run` 等待前序停止 | 10 秒（0.1 秒步进），超时返回可重试的 `RunRejected` | `agent_workbench_service.py:131-145` |
+| `replace_run` 等待前序停止 | 10 秒（0.1 秒步进），超时返回可重试的 `RunRejected` | `agent_run_service.py:131-145` |
 | 模型调用上限 | 50（达限结束） | `platform_middleware.py` |
 | 工具调用上限 | 200（达限继续） | 同上 |
 | 模型/工具重试 | 各 2 次 | 同上 |
@@ -600,7 +600,7 @@ PK `(run_id, sequence)`，CHECK `sequence > 0`，`payload` 为 object 的 `Workb
 | 记忆配额 | 64 KiB/文件、100 文件、1 MiB 总量 | `entity/agent_memory.py` |
 | Workspace 配额 | 100 MiB / 1000 文件（可配） | `config/default_config.py` |
 | 沙箱执行 | 超时 1800 秒、输出 500 KiB | 同上 |
-| 滚动事件续传页 | 256 条/批 | `agent_workbench_run_service.py:531` |
+| 滚动事件续传页 | 256 条/批 | `agent_run_service.py:531` |
 | 历史 Run 事件分页 | 默认 20/页，最大 50 | `pkg/paginator` |
 | 状态历史消息 | 固定最近 20 条 | 查询服务 |
 
@@ -659,7 +659,7 @@ Agent 相关工作台侧**没有定时任务**：孤儿 Run 只在读取/启动/
 - 材料冻结：提交时把 `query` 与 `answer` 快照写入 `source_snapshot`，之后修改应用不改写历史结论；`query + answer` 超过 48000 字直接拒绝（`不会截断后评分`）。
 - 举证范围声明：`仅本轮任务描述与最终回答；不包含此前对话、附件内容、工具轨迹及外部系统核验。`
 - 评分标准：1–12 条、每条 ≤500 字、不允许重复。
-- 判分模型：只能引用已有模型连接（`WorkbenchModelSelection`），提交时即校验可加载。
+- 判分模型：只能引用已有模型连接（`AgentModelSelection`），提交时即校验可加载。
 - 确定性核验规则 `evidence_rules`（≤8 条）：`contains` / `json_keys` / `file_exists`，其中 `file_exists` 只接受虚拟空间绝对路径。
 - 两种模式：`historical`（对历史回答评分）与 `execute`（在隔离的临时环境里按 rubric 重新执行）；`execute` 使用**草稿配置**的模型、`preset_prompt` 与 `review_config`。
 - 执行模式的图：`StateBackend` + `InMemorySaver`，`recursion_limit=150`，模型调用上限 30、工具调用上限 50，`exit_behavior="error"`，工具白名单 `ls/read_file/write_file/edit_file/glob/grep/write_todos`。
@@ -675,13 +675,12 @@ Agent 相关工作台侧**没有定时任务**：孤儿 Run 只在读取/启动/
 
 以下为当前实现的客观事实，仅作提醒：
 
-1. **`WORKBENCH_OCCUPYING_STATUSES` 未导入**（`internal/service/agent/agent_workbench_run_service.py`）
-   模板在第 145 行（`get_blocking_run`）与第 568 行（`request_cancel`）引用了 `WORKBENCH_OCCUPYING_STATUSES`，但模块顶部（第 17–22 行）只导入了 `WORKBENCH_ACTIVE_STATUSES`、`WORKBENCH_TERMINAL_STATUSES`、`WorkbenchRun`、`WorkbenchRunStatus`，全文也没有通配导入。
-   `internal/entity/__init__.py` 确实导出了该名字，但不会注入本模块命名空间。运行到这两行会抛 `NameError`。
-   影响路径：`start_run` → `_check_start_conflict` → `get_blocking_run`；`cancel_run` → `request_cancel`。
+1. ~~**`AGENT_RUN_OCCUPYING_STATUSES` 未导入**~~（已修复）
+   原实现中 `_check_start_conflict` 与 `_request_cancel` 引用了该名字但模块顶部未导入，运行到这两行会抛 `NameError`，影响 `start_run` → `_check_start_conflict` 与 `cancel_run` → `_request_cancel` 两条路径。
+   现已补上导入，并对 `internal/`、`app/` 全量做了未定义全局名扫描，确认无同类问题。
 
 2. **孤儿收敛隐含单进程部署假设**
-   `settle_orphan_runs` 的判据是"不在本进程注册表中"，而它被 `get_state` / SSE `subscribe` / `start_run` / `cancel_run` 主动调用。多 worker 或多容器部署时，任一进程处理状态查询都会把其他进程正在执行的 Run 写成 `failed`。取消同理：`_watch_cancel` 只读进程内 `threading.Event`，跨进程的 `cancel_requested_at` 不会终止执行。
+   `_settle_orphan_runs` 的判据是"不在本进程注册表中"，而它被 `get_state` / SSE `stream_events` / `start_run` / `cancel_run` 主动调用。多 worker 或多容器部署时，任一进程处理状态查询都会把其他进程正在执行的 Run 写成 `failed`。取消同理：`_watch_cancel` 只读进程内 `threading.Event`，跨进程的 `cancel_requested_at` 不会终止执行。
 
 3. **`agent_run` 的 ORM 与迁移链双向不一致**（`internal/model/agent_run.py` vs `internal/migration/versions/`）
    - ORM 声明了 `invocation_snapshot`、`interaction_state`、`cancel_requested_at`，但**整条迁移链中没有任何一个迁移创建这三列**（全文检索确认）。
@@ -698,23 +697,23 @@ Agent 相关工作台侧**没有定时任务**：孤儿 Run 只在读取/启动/
 6. **`ReviewMiddleware` 每轮构造两个实例**
    一个在图层里（`platform_middleware.py:60`）负责入/出审核，另一个由 `AgentExecutor.__init__` 持有（`agent_executor.py:59`）只用于事件延迟投递与结果裁剪。两者配置相同，但职责分散，阅读时容易误判。
 
-7. **事件队列是进程内的**（`agent_workbench_event_queue.py`）
+7. **事件队列是进程内的**（`agent_run_events.py`）
    没有 Redis/pub-sub。多进程部署下，A 进程提交的事件不会唤醒 B 进程的订阅者，只能靠 0.5 秒兜底轮询收敛。
 
 8. **`get_state` 的 `next` 不含 `waiting_input`**
-   `waiting_input` 仍占用会话（`WORKBENCH_OCCUPYING_STATUSES`），但 `next` 只在 `running` 时返回 `["agent"]`。客户端若只用 `next` 判断"是否忙碌"会与后端的占位规则不一致。内部 SDK 侧同样如此：`InternalThreadResp.status` 对 `waiting_input` 报 `idle`，而 `InternalRunResp.status` 对同一个 Run 报 `running`。
+   `waiting_input` 仍占用会话（`AGENT_RUN_OCCUPYING_STATUSES`），但 `next` 只在 `running` 时返回 `["agent"]`。客户端若只用 `next` 判断"是否忙碌"会与后端的占位规则不一致。内部 SDK 侧同样如此：`InternalThreadResp.status` 对 `waiting_input` 报 `idle`，而 `InternalRunResp.status` 对同一个 Run 报 `running`。
 
 9. **状态查询固定读取最近 20 条消息**
    更早的分页只能靠 `values.message_page.next_before` 另行拉取。
 
 10. **模型解析账号参数不对称**
-    `restore_workbench_model_settings` 用 `owner_account_id` 解析模型实体（`agent_model_service.py:66`），`validate_workbench_reasoning` 用 `account_id`（`:133`）。两者通常相同，但语义不完全一致。
+    `restore_model_settings` 用 `owner_account_id` 解析模型实体（`agent_model_service.py:66`），`validate_reasoning_effort` 用 `account_id`（`:133`）。两者通常相同，但语义不完全一致。
 
 11. **服务层没有 Run 级重试**
     失败 Run 不会自动重投；可重试的只有三种命令的幂等重放（`run.start` 去重、`input.respond` 批次幂等、`input.reopen` 批次幂等）与 `replace_run` 的 10 秒等待。
 
 12. **`AgentRunContext.principal_id` 是死字段**（`core/agent_v2/entity/run_context.py:51`）
-    装配时写入 `end_user_id or created_by`（`agent_assembly_service.py:243`），但**全仓库再无任何读取点**。记忆命名空间只用 `(account_id, app_id)`（`entity/agent_memory.py:61-67`），Workspace 作用域同理。因此 WebApp / 开放 API 下的多个终端用户**共享同一份长期记忆与同一份 Workspace 文件**，并没有按终端用户隔离。
+    装配时写入 `end_user_id or created_by`（`agent_factory.py:243`），但**全仓库再无任何读取点**。记忆命名空间只用 `(account_id, app_id)`（`entity/agent_memory.py:61-67`），Workspace 作用域同理。因此 WebApp / 开放 API 下的多个终端用户**共享同一份长期记忆与同一份 Workspace 文件**，并没有按终端用户隔离。
 
 13. **`AgentRuntimeResources.close()` 会持续抛出已保存的异常**
     关闭失败后再次调用会重复抛出同一个 `BaseExceptionGroup`，`AgentExecutor` 也因此停留在 `CLOSE_FAILED`。这是有意的"失败可见"设计，但调用方必须能容忍重复异常。

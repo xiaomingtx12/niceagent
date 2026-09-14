@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from uuid import UUID
 from typing import Any
 
-from internal.entity import WORKBENCH_ACTIVE_STATUSES
+from internal.entity import AGENT_RUN_ACTIVE_STATUSES
 
 from internal.model import AgentRun, Message
 from internal.schema.agent.agent_workbench_schema import WorkbenchHistoryMessageResp
@@ -67,7 +67,7 @@ def merge_running_messages(
     snapshot: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     """活动 Run 的快照补齐尚未落库的消息，只允许覆盖本轮的消息标识。"""
-    if run is None or run.status not in WORKBENCH_ACTIVE_STATUSES:
+    if run is None or run.status not in AGENT_RUN_ACTIVE_STATUSES:
         return messages
     current_ids = {
         str(run.input_message_id),

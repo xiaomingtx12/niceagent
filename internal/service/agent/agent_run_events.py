@@ -1,38 +1,161 @@
-"""一次工作台执行的事件缓冲，不跨 Run 共享可变状态。"""
+"""进程内 Run 跟踪与事件落库：注册、取消信号、订阅通知和批量持久化。"""
 
+from __future__ import annotations
+
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from uuid import UUID
 
 from internal.core.agent_v2 import (
     AgentEvent,
 )
-from internal.entity import WorkbenchRun
+from internal.entity import AgentRunExecution
+from internal.entity.conversation_entity import InvokeFrom
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 
-from .agent_workbench_event_queue import AgentWorkbenchEventQueueManager
-from .agent_workbench_run_service import AgentWorkbenchRunService
+
+@dataclass
+class _EventSignal:
+    """只维护会话通知版本；先查版本再查库可避免丢失唤醒。"""
+
+    condition: threading.Condition = field(default_factory=threading.Condition)
+    version: int = 0
+    subscribers: int = 0
+
+    def snapshot(self) -> int:
+        """在读取数据库前取得版本，查询期间的提交也会触发下一次读取。"""
+        with self.condition:
+            return self.version
+
+    def notify(self) -> None:
+        """仅唤醒同一会话和入口的订阅者。"""
+        with self.condition:
+            self.version += 1
+            self.condition.notify_all()
+
+    def wait(self, version: int, *, timeout: float) -> None:
+        """通知已经到达时立即返回，超时兜底覆盖其他进程的提交。"""
+        with self.condition:
+            self.condition.wait_for(lambda: self.version != version, timeout=timeout)
 
 
-class AgentWorkbenchEventBuffer:
+class AgentRunTracker:
+    """管理本进程的活动 Run；只做内存登记与通知，不读写数据库。"""
+
+    def __init__(self) -> None:
+        """条件锁只保护本地注册表，事件正文由数据库保存。"""
+        self._runs: dict[str, AgentRunExecution] = {}
+        self._lock = threading.RLock()
+        self._signals: dict[tuple[str, InvokeFrom], _EventSignal] = {}
+
+    def get(
+        self,
+        conversation_id: UUID,
+        *,
+        app_id: UUID | None = None,
+        invoke_from: InvokeFrom | None = None,
+    ) -> AgentRunExecution | None:
+        """读取会话的活动 Run，入口不匹配时视为不存在。"""
+        with self._lock:
+            run = self._runs.get(str(conversation_id))
+            if run is None:
+                return None
+            if app_id is not None and run.spec.app_id != app_id:
+                return None
+            if invoke_from is not None and run.spec.invoke_from != invoke_from:
+                return None
+            return run
+
+    def register(self, run: AgentRunExecution) -> None:
+        """登记当前会话的新 Run，并通知等待该会话的订阅者。"""
+        with self._lock:
+            self._runs[str(run.conversation_id)] = run
+            self.notify_events(run.conversation_id, run.spec.invoke_from)
+
+    def finish(self, run: AgentRunExecution) -> None:
+        """结束本地 Run 并唤醒订阅者，旧 Run 不得移除后继 Run。"""
+        with self._lock:
+            run.done.set()
+            conversation_key = str(run.conversation_id)
+            if self._runs.get(conversation_key) is run:
+                self._runs.pop(conversation_key)
+            self.notify_events(run.conversation_id, run.spec.invoke_from)
+
+    def active_run_ids(self) -> set[UUID]:
+        """返回本进程仍在执行的 Run 标识，供失联收敛区分存活与孤儿记录。"""
+        with self._lock:
+            return {
+                run.run_id for run in self._runs.values() if not run.done.is_set()
+            }
+
+    def notify_events(self, conversation_id: UUID, invoke_from: InvokeFrom) -> None:
+        """已提交事件后唤醒本进程订阅者，不重复保存事件正文。"""
+        with self._lock:
+            signal = self._signals.get((str(conversation_id), invoke_from))
+            if signal is not None:
+                signal.notify()
+
+    def request_cancel(
+        self,
+        conversation_id: UUID,
+        run_id: UUID,
+        *,
+        app_id: UUID | None = None,
+        invoke_from: InvokeFrom | None = None,
+    ) -> bool:
+        """只通知本进程内的目标 Run，数据库取消状态由调用方负责。"""
+        with self._lock:
+            run = self.get(
+                conversation_id,
+                app_id=app_id,
+                invoke_from=invoke_from,
+            )
+            if run is None or run.run_id != run_id:
+                return False
+            if not run.done.is_set():
+                run.cancel_requested.set()
+                self.notify_events(run.conversation_id, run.spec.invoke_from)
+            return True
+
+    @contextmanager
+    def watch_events(self, conversation_id: UUID, invoke_from: InvokeFrom) -> Iterator[_EventSignal]:
+        """订阅建立前登记通知，最后一个连接断开时清理会话信号。"""
+        key = (str(conversation_id), invoke_from)
+        with self._lock:
+            signal = self._signals.setdefault(key, _EventSignal())
+            signal.subscribers += 1
+        try:
+            yield signal
+        finally:
+            with self._lock:
+                signal.subscribers -= 1
+                if signal.subscribers == 0:
+                    self._signals.pop(key, None)
+
+
+class AgentRunEventBuffer:
     """集中管理流式批次及首字计时，所有通知都发生在数据库提交之后。"""
 
     def __init__(
         self,
-        run: WorkbenchRun,
+        run: AgentRunExecution,
         projector: AgentProtocolEventProjector,
-        run_service: AgentWorkbenchRunService,
-        queue_manager: AgentWorkbenchEventQueueManager,
+        tracker: AgentRunTracker,
+        commit_events: Callable[[AgentRunExecution, list[WorkbenchEvent]], None],
         *,
         started_at: float,
         batch_size: int,
     ) -> None:
-        """缓冲只由本次执行的事件回调使用，不拥有 Agent 或数据库 Session。"""
+        """缓冲只由本次执行的事件回调使用，不拥有 Agent、数据库 Session 或持久化实现。"""
         self._run = run
         self._projector = projector
-        self._run_service = run_service
-        self._queue_manager = queue_manager
+        self._tracker = tracker
+        self._commit_events = commit_events
         self._started_at = started_at
         self._batch_size = batch_size
         self._pending: list[WorkbenchEvent] = []
@@ -102,14 +225,19 @@ class AgentWorkbenchEventBuffer:
         """刷新 Core 已交付的尾批；失败时保留批次供上层处理原始错误。"""
         self._flush()
 
+    def publish(self, event: WorkbenchEvent) -> None:
+        """直接发布已投影的单个事件；落库、游标与通知走与批量刷新同一条路。"""
+        self._pending.append(event)
+        self._flush()
+
     def _flush(self) -> None:
         """提交失败不推进游标；通知失败也不丢弃尚未完成交付的批次。"""
         if not self._pending:
             return
         # 3.先提交数据库，成功后推进游标并唤醒订阅者。
-        self._run_service.record_events(self._run, self._coalesce_deltas(self._pending))
+        self._commit_events(self._run, self._coalesce_deltas(self._pending))
         self._run.last_event_sequence = self._pending[-1].seq
-        self._queue_manager.notify_events(self._run.conversation_id, self._run.spec.invoke_from)
+        self._tracker.notify_events(self._run.conversation_id, self._run.spec.invoke_from)
         self._pending.clear()
         self._last_flush_at = time.monotonic()
 
@@ -149,3 +277,6 @@ class AgentWorkbenchEventBuffer:
                     continue
             merged.append(event)
         return merged
+
+
+__all__ = ["AgentRunTracker", "AgentRunEventBuffer"]

@@ -33,7 +33,7 @@ from internal.entity.agent_invocation import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 
-from internal.service.agent.agent_assembly_service import AgentAssemblyService
+from internal.service.agent.agent_factory import AgentFactory
 from internal.service.common.base_service import BaseService
 from internal.service.conversation.conversation_service import ConversationService
 
@@ -45,7 +45,7 @@ class WechatService(BaseService):
     """[已废弃] 微信公众号旧入口，保留用于兼容已有微信配置。"""
 
     db: SQLAlchemy
-    agent_assembly_service: AgentAssemblyService
+    agent_factory: AgentFactory
     conversation_service: ConversationService
 
     def wechat(
@@ -256,7 +256,7 @@ class WechatService(BaseService):
                 trace_id,
             )
             try:
-                agent, input_message = self.agent_assembly_service.build_agent(
+                agent, input_message = self.agent_factory.create_executor(
                     invocation,
                     observer=observer,
                 )

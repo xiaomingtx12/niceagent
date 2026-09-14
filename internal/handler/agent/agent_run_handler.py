@@ -8,7 +8,7 @@ from flask_login import current_user, login_required
 from injector import inject
 
 from internal.exception import ValidateErrorException
-from internal.service.agent.agent_workbench_query_service import AgentWorkbenchQueryService
+from internal.service.agent.agent_run_query import AgentRunQuery
 from pkg.paginator import PaginatorReq
 from pkg.response import json_response
 
@@ -18,7 +18,7 @@ from pkg.response import json_response
 class AgentRunHandler:
     """仅按 Run 标识查询，归属校验由查询服务完成。"""
 
-    query_service: AgentWorkbenchQueryService
+    query_service: AgentRunQuery
 
     @login_required
     def events(self, run_id: UUID) -> Response:
@@ -26,7 +26,7 @@ class AgentRunHandler:
         page = PaginatorReq(request.args)
         if not page.validate():
             raise ValidateErrorException("执行详情分页参数无效")
-        result = self.query_service.get_run_events(
+        result = self.query_service.list_run_events(
             run_id=run_id, account=current_user,
             current_page=page.current_page.data, page_size=page.page_size.data,
         )

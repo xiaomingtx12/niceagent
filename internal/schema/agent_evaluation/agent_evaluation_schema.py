@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
+from internal.entity.agent_run_entity import AgentModelSelection
 
 
 class EvaluationEvidenceRuleReq(BaseModel):
@@ -47,7 +47,7 @@ class AgentEvaluationReq(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     run_id: UUID
     request_id: UUID | None = None
-    judge: WorkbenchModelSelection
+    judge: AgentModelSelection
     mode: Literal["historical", "execute"] = "historical"
     max_iterations: StrictInt = Field(default=3, ge=1, le=5)
     evidence_rules: list[EvaluationEvidenceRuleReq] = Field(

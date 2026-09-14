@@ -15,8 +15,6 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    AliasChoices,
-    RootModel,
     StrictInt,
     StrictStr,
     ValidationError,
@@ -25,9 +23,14 @@ from pydantic import (
     model_validator,
 )
 
-from internal.entity import WorkbenchRunInput
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
+from internal.entity import AgentRunInput
+from internal.entity.agent_run_entity import AgentModelSelection
 from internal.exception import ValidateErrorException
+
+# 公开协议方法词表：DTO 校验、历史回放过滤和持久化查询共用同一来源，新增通道只改这里。
+PUBLIC_EVENT_METHODS = (
+    "messages", "values", "tools", "lifecycle", "custom", "input.requested",
+)
 
 
 class WorkbenchCommandMessageReq(BaseModel):
@@ -63,7 +66,7 @@ class WorkbenchCommandInputReq(BaseModel):
     query: StrictStr | None = None
     planning_enabled: bool = Field(default=False, strict=True)
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
-    model_selection: WorkbenchModelSelection | None = None
+    model_selection: AgentModelSelection | None = None
     image_urls: list[StrictStr] = Field(default_factory=list, max_length=10)
     file_ids: list[UUID] = Field(default_factory=list, max_length=5)
     selected_skills: list[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = (
@@ -98,14 +101,14 @@ class WorkbenchCommandInputReq(BaseModel):
             raise ValueError("附件不能重复提交")
         return value
 
-    def to_run_input(self) -> WorkbenchRunInput:
+    def to_run_input(self) -> AgentRunInput:
         """把已校验的协议输入转换成核心服务使用的运行输入。"""
         message = self.messages[-1] if self.messages else None
         query = message.text if message is not None else (self.query or "")
         query = query.strip()
         if not query:
             raise ValidateErrorException("run.start 需要非空的用户输入")
-        return WorkbenchRunInput(
+        return AgentRunInput(
             query=query,
             planning_enabled=self.planning_enabled,
             image_urls=tuple(self.image_urls),
@@ -168,7 +171,7 @@ class WorkbenchCommandReq(BaseModel):
     type: StrictStr | None = None
     id: StrictInt | None = None
     method: Literal["run.start", "input.respond", "input.reopen"]
-    params: WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq = Field(
+    params: AgentRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq = Field(
         default_factory=dict, validate_default=True,
     )
 
@@ -186,7 +189,7 @@ class WorkbenchCommandReq(BaseModel):
     @classmethod
     def parse_params(
         cls, value: Any, info: ValidationInfo,
-    ) -> WorkbenchRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq:
+    ) -> AgentRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq:
         """按方法解析唯一参数类型，旧 SDK 的嵌套输入和单条回答在此收敛。"""
         if not isinstance(value, Mapping):
             raise ValueError("命令 params 必须是对象")
@@ -228,69 +231,6 @@ class WorkbenchEventParams(BaseModel):
     node: StrictStr | None = None
 
 
-class _WorkbenchToolEventBase(BaseModel):
-    """工具事件的公共字段和 LangChain 兼容解析。"""
-
-    model_config = ConfigDict(extra="ignore")
-
-    tool_call_id: StrictStr = Field(validation_alias=AliasChoices("tool_call_id", "id"))
-
-    @field_validator("tool_call_id", mode="before")
-    @classmethod
-    def normalize_tool_call_id(cls, value: Any) -> str:
-        """把旧事件中的调用标识统一为协议字段。"""
-        return str(value)
-
-
-class WorkbenchToolStartedData(_WorkbenchToolEventBase):
-    """工具开始事件。"""
-
-    event: Literal["tool-started"]
-    tool_name: StrictStr = Field(validation_alias=AliasChoices("tool_name", "name"))
-    input: Any = None
-
-
-class WorkbenchToolOutputDeltaData(_WorkbenchToolEventBase):
-    """工具输出增量事件。"""
-
-    event: Literal["tool-output-delta"]
-    delta: Any = None
-
-
-class WorkbenchToolFinishedData(_WorkbenchToolEventBase):
-    """工具完成事件。"""
-
-    event: Literal["tool-finished"]
-    output: Any = None
-
-
-class WorkbenchToolErrorData(_WorkbenchToolEventBase):
-    """工具失败事件。"""
-
-    event: Literal["tool-error"]
-    message: StrictStr
-
-    @field_validator("message", mode="before")
-    @classmethod
-    def normalize_message(cls, value: Any) -> str:
-        """将异常对象转换为协议字符串，不改写或截断错误正文。"""
-        return "" if value is None else str(value)
-
-
-class WorkbenchToolEventData(
-    RootModel[
-        Annotated[
-            WorkbenchToolStartedData
-            | WorkbenchToolOutputDeltaData
-            | WorkbenchToolFinishedData
-            | WorkbenchToolErrorData,
-            Field(discriminator="event"),
-        ]
-    ]
-):
-    """标准工具生命周期事件的带判别联合。"""
-
-
 class WorkbenchEvent(BaseModel):
     """经过公开通道投影、可持久化和对外传输的工作台事件。"""
 
@@ -299,7 +239,7 @@ class WorkbenchEvent(BaseModel):
     type: Literal["event"]
     event_id: StrictStr = Field(min_length=1)
     seq: StrictInt = Field(ge=0)
-    method: Literal["messages", "values", "tools", "lifecycle", "custom", "input.requested"]
+    method: Literal[*PUBLIC_EVENT_METHODS]
     params: WorkbenchEventParams
 
 
@@ -474,6 +414,7 @@ class WorkbenchCancelResp(BaseModel):
 
 
 __all__ = [
+    "PUBLIC_EVENT_METHODS",
     "WorkbenchCommandReq",
     "WorkbenchInputReopenReq",
     "WorkbenchCommandInputReq",
@@ -484,11 +425,6 @@ __all__ = [
     "WorkbenchCommandErrorResp",
     "WorkbenchEvent",
     "WorkbenchEventParams",
-    "WorkbenchToolEventData",
-    "WorkbenchToolErrorData",
-    "WorkbenchToolFinishedData",
-    "WorkbenchToolOutputDeltaData",
-    "WorkbenchToolStartedData",
     "WorkbenchHistoryMessageResp",
     "WorkbenchMessagePageInfoResp",
     "WorkbenchRunMetadataResp",

@@ -16,7 +16,7 @@ from internal.service.internal_agent_protocol.auth import (
     InternalAgentProtocolClaims,
     parse_internal_agent_protocol_token,
 )
-from internal.entity import WORKBENCH_ACTIVE_STATUSES
+from internal.entity import AGENT_RUN_ACTIVE_STATUSES
 from internal.entity.agent_run_interaction import RunRejected
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
@@ -34,20 +34,18 @@ from internal.schema.agent_protocol.internal_agent_protocol_schema import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 
-from internal.service.agent.agent_workbench_run_service import AgentWorkbenchRunService
-from internal.service.agent.agent_workbench_service import AgentWorkbenchService
+from internal.service.agent.agent_run_service import AgentRunService
 from internal.service.conversation.conversation_service import ConversationService
 
 
 @inject
 @dataclass
 class InternalAgentProtocolService:
-    """把内部 SDK 的 threads/runs 调用映射到既有 Workbench 生命周期。"""
+    """把内部 SDK 的 threads/runs 调用映射到既有 Agent Run 生命周期。"""
 
     db: SQLAlchemy
     config: Config
-    workbench_service: AgentWorkbenchService
-    run_service: AgentWorkbenchRunService
+    run_service: AgentRunService
     conversation_service: ConversationService
 
     def authenticate(self, token: str | None) -> InternalAgentProtocolClaims:
@@ -87,7 +85,7 @@ class InternalAgentProtocolService:
         conversation_id: UUID,
         request: InternalRunCreateReq,
     ) -> InternalRunResp | RunRejected:
-        """校验 graph、可选中断前序 Run，并经 Workbench 入队后台任务。"""
+        """校验 graph、可选中断前序 Run，并经 Agent Run 服务入队后台任务。"""
         # 1.验证签名声明、目标应用和 graph_id，再解析 SDK 输入。
         account = self._get_authorized_account(claims)
         conversation = self._get_owned_conversation(
@@ -109,13 +107,13 @@ class InternalAgentProtocolService:
         except ValueError as exc:
             raise ValidateErrorException(f"后台 Run 输入格式错误: {exc}") from exc
         if request.multitask_strategy == "interrupt":
-            # 2.update 语义由 Workbench 处理停止、等待和新 Run 创建。
-            started = self.workbench_service.replace_run(
+            # 2.update 语义由 Agent Run 服务处理停止、等待和新 Run 创建。
+            started = self.run_service.restart_run(
                 account_id=account.id, app_id=conversation.app_id, conversation_id=conversation.id,
                 created_by=account.id, invoke_from=InvokeFrom.CREATOR_TASK, run_input=command_input,
             )
         else:
-            started = self.workbench_service.start_run(
+            started = self.run_service.start_run(
                 account_id=account.id, app_id=conversation.app_id, conversation_id=conversation.id,
                 created_by=account.id, invoke_from=InvokeFrom.CREATOR_TASK,
                 run_input=command_input, user_input_enabled=False,
@@ -157,7 +155,7 @@ class InternalAgentProtocolService:
             created_at=_format_datetime(conversation.created_at),
             updated_at=_format_datetime(conversation.updated_at),
             metadata={"graph_id": build_published_graph_id(claims.target_app_id)},
-            status="busy" if metadata.status in WORKBENCH_ACTIVE_STATUSES else "idle",
+            status="busy" if metadata.status in AGENT_RUN_ACTIVE_STATUSES else "idle",
             values={"messages": messages},
         )
 
@@ -173,13 +171,10 @@ class InternalAgentProtocolService:
         self._get_owned_conversation(
             app_id=claims.target_app_id, conversation_id=conversation_id, account=account,
         )
-        self.run_service.get_conversation_run(
+        row = self.run_service.get_conversation_run(
             app_id=claims.target_app_id, conversation_id=conversation_id,
             invoke_from=InvokeFrom.CREATOR_TASK, run_id=run_id,
         )
-        # 收敛孤儿记录会提交状态和事件，必须在目标 Run 的授权范围确认后执行。
-        self.workbench_service.settle_orphan_runs(run_id=run_id)
-        row = self.run_service.get_run(run_id)
         return self._to_run_response(
             row=row,
         )
@@ -191,12 +186,12 @@ class InternalAgentProtocolService:
         conversation_id: UUID,
         run_id: UUID,
     ) -> None:
-        """将 SDK cancel 映射为 Workbench 指定 Run 取消。"""
+        """将 SDK cancel 映射为指定 Agent Run 取消。"""
         account = self._get_authorized_account(claims)
         conversation = self._get_owned_conversation(
             app_id=claims.target_app_id, conversation_id=conversation_id, account=account,
         )
-        self.workbench_service.cancel_run(
+        self.run_service.cancel_run(
             app_id=conversation.app_id, conversation_id=conversation.id,
             invoke_from=InvokeFrom.CREATOR_TASK, run_id=run_id,
         )
@@ -306,7 +301,7 @@ def _format_datetime(value: datetime | None) -> str:
 
 
 def _extract_run_input(request: InternalRunCreateReq) -> dict[str, Any] | None:
-    """把 SDK 的 input/command 统一投影为 Workbench input。"""
+    """把 SDK 的 input/command 统一投影为 Agent Run 输入。"""
     if request.input is not None:
         return request.input
     command = request.command

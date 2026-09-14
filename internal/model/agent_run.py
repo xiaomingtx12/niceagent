@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 
 from internal.extension.database_extension import db
-from internal.entity.agent_workbench_entity import WORKBENCH_TERMINAL_STATUSES
+from internal.entity.agent_run_entity import AGENT_RUN_TERMINAL_STATUSES
 
 _INTERACTION_VALUE_KEYS = ("pending_inputs", "input_history", "input_recovery")
 
@@ -94,7 +94,7 @@ class AgentRun(db.Model):
     input_message_id = Column(String(255), nullable=True)  # 对齐客户端消息、历史和时间线；相同标识重复启动时复用 Run
     status = Column(
         String(32), nullable=False, server_default=text("'running'")
-    )  # WorkbenchRunStatus，独立于消息展示状态；建行即已分配执行权
+    )  # AgentRunStatus，独立于消息展示状态；建行即已分配执行权
     error_message = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 可向用户展示的 Run 失败原因；异常堆栈只写入日志
@@ -123,7 +123,7 @@ class AgentRun(db.Model):
     @property
     def is_terminal(self) -> bool:
         """统一记录的终态判断，等待用户输入仍可继续执行。"""
-        return self.status in WORKBENCH_TERMINAL_STATUSES
+        return self.status in AGENT_RUN_TERMINAL_STATUSES
 
     @property
     def public_snapshot(self) -> dict[str, Any]:

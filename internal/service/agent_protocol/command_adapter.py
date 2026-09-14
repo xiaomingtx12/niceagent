@@ -11,25 +11,25 @@ from internal.schema.agent.agent_workbench_schema import (
 )
 
 if TYPE_CHECKING:
-    from internal.service.agent.agent_workbench_service import AgentWorkbenchService
+    from internal.service.agent.agent_run_service import AgentRunService
 
 
 def execute_command(
-    service: "AgentWorkbenchService", *, account_id: UUID, app_id: UUID, conversation_id: UUID,
+    service: "AgentRunService", *, account_id: UUID, app_id: UUID, conversation_id: UUID,
     created_by: UUID, end_user_id: UUID | None = None, invoke_from: InvokeFrom,
     command: WorkbenchCommandReq, user_input_enabled: bool = True,
 ) -> WorkbenchCommandSuccessResp | WorkbenchCommandErrorResp:
     """按已解析参数分派业务操作，命令 ID 只用于响应，不进入运行状态。"""
     params = command.params
     if isinstance(params, WorkbenchInputRespondReq):
-        result = service.respond_input(
+        result = service.submit_answers(
             account_id=account_id, app_id=app_id,
             conversation_id=conversation_id, created_by=created_by,
             end_user_id=end_user_id, invoke_from=invoke_from,
             answers={item.interrupt_id: item.response for item in params.responses},
         )
     elif isinstance(params, WorkbenchInputReopenReq):
-        result = service.reopen_input(
+        result = service.reopen_form(
             account_id=account_id, app_id=app_id,
             conversation_id=conversation_id, created_by=created_by,
             end_user_id=end_user_id, invoke_from=invoke_from, run_id=params.run_id,

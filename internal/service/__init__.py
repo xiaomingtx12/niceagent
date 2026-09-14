@@ -1,7 +1,7 @@
 from .account.account_service import AccountService
 from .ai.ai_service import AIService
 from .agent.agent_conversation_cleanup_service import AgentConversationCleanupService
-from .agent.agent_assembly_service import AgentAssemblyService
+from .agent.agent_factory import AgentFactory
 from .agent.agent_attachment_service import AgentAttachmentService
 from .app.analysis_service import AnalysisService
 from .account.api_key_service import ApiKeyService
@@ -40,8 +40,7 @@ from .platform.wechat_service import WechatService
 from .file.workspace_file_service import WorkspaceFileService
 from .memory.memory_file_service import MemoryFileService
 from .workflow.workflow_service import WorkflowService
-from .agent.agent_workbench_service import AgentWorkbenchService
-from .agent.agent_workbench_run_service import AgentWorkbenchRunService
+from .agent.agent_run_service import AgentRunService
 from .internal_agent_protocol.service import InternalAgentProtocolService
 from .agent.creator_task_service import CreatorTaskService
 
@@ -70,13 +69,12 @@ __all__ = [
     "AccountService",
     "AIService",
     "AgentConversationCleanupService",
-    "AgentAssemblyService",
+    "AgentFactory",
     "AgentAttachmentService",
     "ApiKeyService",
     "AppConfigService",
     "WorkflowService",
-    "AgentWorkbenchService",
-    "AgentWorkbenchRunService",
+    "AgentRunService",
     "InternalAgentProtocolService",
     "BuiltinAppService",
     "AssistantAgentService",

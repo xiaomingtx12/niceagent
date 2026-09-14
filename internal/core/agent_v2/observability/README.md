@@ -9,7 +9,7 @@
 | `token_usage.py` | 将不同 Provider 的用量字段归一化 |
 | `internal/entity/token_usage.py` | 框架和业务模型共用的片段用量、模型累计与历史明细别名规则 |
 
-数据流：框架回调 → `AgentExecutionResult.usage` → `finalize_run()` 在 Run 锁内累计到 Message。`AgentRun.executor_id` 校验执行权：结算后标识清空、状态进入终态，旧执行与重复结算都因校验失败而无法写入；消息统计、状态和结束事件在同一事务提交。任一步骤失败全部回滚。
+数据流：框架回调 → `AgentExecutionResult.usage` → `AgentRunService._finalize_run()` 在 Run 锁内累计到 Message。`AgentRun.executor_id` 校验执行权：结算后标识清空、状态进入终态，旧执行与重复结算都因校验失败而无法写入；消息统计、状态和结束事件在同一事务提交。任一步骤失败全部回滚。
 
 `Message.apply_usage()` 只修改本行统计：工作台使用 `accumulate=True` 累计片段，微信入口保存单次执行统计。模型方法不查询数据库、不提交事务。
 

@@ -8,7 +8,7 @@ from internal.core.agent_v2 import (
     AgentExecutionResult,
     PendingUserInput,
 )
-from internal.entity import WorkbenchRunStatus
+from internal.entity import AgentRunStatus
 from copy import deepcopy
 
 _PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history", "input_recovery")
@@ -77,7 +77,7 @@ def project_execution_state(
 
 
 def project_execution_lifecycle(
-    status: WorkbenchRunStatus,
+    status: AgentRunStatus,
     *,
     message_id: UUID,
     input_message_id: str | None,
@@ -91,11 +91,11 @@ def project_execution_lifecycle(
         "message_id": str(message_id),
         "input_message_id": input_message_id,
     }
-    if status is WorkbenchRunStatus.WAITING_INPUT:
+    if status is AgentRunStatus.WAITING_INPUT:
         data.update(event="interrupted", reason="user_input_required")
-    elif status is WorkbenchRunStatus.CANCELLED:
+    elif status is AgentRunStatus.CANCELLED:
         data.update(event="interrupted", reason="cancel_requested")
-    elif status is WorkbenchRunStatus.FAILED:
+    elif status is AgentRunStatus.FAILED:
         data["error"] = public_error or "Agent 运行失败"
         if error_code is not None:
             data["code"] = error_code

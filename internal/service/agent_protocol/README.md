@@ -4,7 +4,7 @@
 
 ## 阅读顺序
 
-1. `agent_workbench_schema.WorkbenchCommandReq.from_mapping`：一次解析命令外壳与参数，兼容 SDK 的嵌套输入及单个／批量回答。`params` 在解析后已经是 `WorkbenchRunInput`、`WorkbenchInputRespondReq` 或 `WorkbenchInputReopenReq`。
+1. `agent_workbench_schema.WorkbenchCommandReq.from_mapping`：一次解析命令外壳与参数，兼容 SDK 的嵌套输入及单个／批量回答。`params` 在解析后已经是 `AgentRunInput`、`WorkbenchInputRespondReq` 或 `WorkbenchInputReopenReq`。
 2. `command_adapter.py`：消费已解析的参数，分派给启动、回答和重新填写入口，再包装协议响应；不解析原始请求字典。
 3. `event_projector.py`：接收 Core 规范化的 `AgentEvent`，绑定业务消息 ID、分配持久化序号并生成 `WorkbenchEvent`。
 4. `state_projector.py`：业务消息标识、公开运行状态和表单；不再从快照合成执行事件。
@@ -13,6 +13,8 @@
 ## HTTP 入口
 
 `internal/handler/agent` 按入口组织处理器：`DebugAgentHandler`、`WebAppAgentHandler`、`CreatorTaskAgentHandler` 各负责命令、订阅、状态、模型选项和取消；每个处理器只依赖自己的会话授权入口。`AgentRunHandler` 单独负责 Run 历史事件查询。
+
+六个入口的命令、订阅、状态、模型选项和取消行为完全一致，差异只有会话鉴权方式和 `InvokeFrom`，因此统一由 `internal/handler/agent/entry_adapter.py` 解析请求并包装响应；每个处理器只保留一个 `_caller(...)` 完成鉴权并组装可信身份，不再各自复制协议处理。鉴权先于请求体解析，未授权请求不会触发参数校验。该适配器被工作台入口和 Agent Protocol 入口共用，因此归在 `handler/agent`，`handler/agent_protocol` 只放专属入口本身。
 
 Handler 完成各入口鉴权后，按操作需要直接传递账号、应用、会话、创建者和固定调用来源，不构造通用 Context。状态查询只接收会话 ID 和来源，取消与订阅额外校验应用归属；启动和恢复接收完整调用身份。`AgentInvocation` 只在创建 Run 或恢复执行时保存完整输入，JSON 字段保持与历史快照兼容。路由保留原 URL、HTTP 方法和 Flask endpoint，Assistant、OpenAPI 和内部 SDK 的鉴权仍各自独立。
 

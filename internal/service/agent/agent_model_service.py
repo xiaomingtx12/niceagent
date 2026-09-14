@@ -8,7 +8,7 @@ from injector import inject
 
 from internal.core.language_model.entities.model_entity import ModelEntity, ModelParameter, ModelType
 from internal.core.language_model.parameters import canonicalize_parameters
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
+from internal.entity.agent_run_entity import AgentModelSelection
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.schema.agent.agent_model_schema import (
@@ -32,7 +32,7 @@ class AgentModelService:
     language_model_service: LanguageModelService
     definition_service: AgentDefinitionService
 
-    def restore_workbench_model_settings(
+    def restore_model_settings(
         self, *, account_id: UUID, app_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
         saved: Mapping[str, Any],
     ) -> WorkbenchModelSettingsResp:
@@ -49,7 +49,7 @@ class AgentModelService:
             return WorkbenchModelSettingsResp()
         try:
             raw_selection = saved.get("model_selection")
-            selection = WorkbenchModelSelection.model_validate(raw_selection) if raw_selection else None
+            selection = AgentModelSelection.model_validate(raw_selection) if raw_selection else None
         except ValueError:
             selection, saved = None, {}
 
@@ -83,7 +83,7 @@ class AgentModelService:
                 connection_id = config.provider_connection_id or model.attributes.get("provider_api_key_id")
                 needs_default_selection = selected_model is None and can_select_model
                 if needs_default_selection and connection_id:
-                    selected_model = WorkbenchModelSelection(
+                    selected_model = AgentModelSelection(
                         provider=config.provider,
                         model=config.model,
                         provider_connection_id=connection_id,
@@ -110,9 +110,9 @@ class AgentModelService:
                 saved = {}
         return WorkbenchModelSettingsResp()
 
-    def validate_workbench_reasoning(
+    def validate_reasoning_effort(
         self, *, account_id: UUID, app_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
-        effort: str | None, selection: WorkbenchModelSelection | None = None,
+        effort: str | None, selection: AgentModelSelection | None = None,
     ) -> None:
         """任务覆盖只允许当前模型明确声明的等级，在创建消息前拒绝无效选择。"""
         # 1.完全没有覆盖时不查模型；只切换模型时仍需校验连接权限。
@@ -142,7 +142,7 @@ class AgentModelService:
 
     def resolve(
         self, *, account_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
-        default_config: AppModelConfigReq | None, selection: WorkbenchModelSelection | None,
+        default_config: AppModelConfigReq | None, selection: AgentModelSelection | None,
         owner_account_id: UUID,
     ) -> tuple[AppModelConfigReq | None, ModelEntity | None]:
         """保留应用默认参数；只有切换到其他模型或连接时才采用新模型默认值。"""

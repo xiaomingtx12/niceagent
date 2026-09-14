@@ -8,11 +8,10 @@ import time
 from pydantic import ValidationError
 
 from internal.core.agent_v2 import AgentEvent
-from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
+from internal.schema.agent.agent_workbench_schema import PUBLIC_EVENT_METHODS, WorkbenchEvent
 from internal.schema.agent.agent_context_schema import ContextCompactionResp, ContextWindowResp
 from .state_projector import project_public_state
 
-_PUBLIC_METHODS = frozenset({"messages", "values", "tools", "lifecycle", "custom", "input.requested"})
 _TERMINAL_EVENTS = frozenset({"completed", "failed", "interrupted", "drained", "cancelled"})
 _CUSTOM_SCHEMAS = {"context_window": ContextWindowResp, "context_compaction": ContextCompactionResp}
 
@@ -72,7 +71,7 @@ class AgentProtocolEventProjector:
     def to_public_event(event: Mapping[str, Any]) -> WorkbenchEvent | None:
         """只用于历史 JSON 读取，实时事件不再走历史兼容转换。"""
         method = event.get("method")
-        if not isinstance(method, str) or method not in _PUBLIC_METHODS:
+        if not isinstance(method, str) or method not in PUBLIC_EVENT_METHODS:
             return None
         if method == "custom":
             params = event.get("params")

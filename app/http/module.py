@@ -15,13 +15,8 @@ from internal.repository import (
     CosObjectStorageRepository,
     WorkspaceFileStore,
 )
-from internal.service.agent.agent_workbench_event_queue import (
-    AgentWorkbenchEventQueueManager,
-)
-from internal.service.agent.agent_workbench_execution_service import (
-    AgentWorkbenchRunExecutionService,
-)
-from internal.service.agent.agent_workbench_service import AgentWorkbenchService
+from internal.service.agent.agent_run_events import AgentRunTracker
+from internal.service.agent.agent_run_service import AgentRunService
 from internal.service.dataset.embeddings_service import EmbeddingsService
 from internal.service.dataset.faiss_service import FaissService
 from pkg.sqlalchemy import SQLAlchemy
@@ -37,22 +32,9 @@ class ExtensionModule(Module):
         binder.bind(Redis, to=redis_client)
         binder.bind(LoginManager, to=login_manager)
         binder.bind(FlaskWeaviate, to=weaviate)
-        binder.bind(
-            AgentWorkbenchService,
-            to=AgentWorkbenchService,
-            scope=singleton,
-        )
-        # Workbench 的生产端和订阅端共享同一个进程级队列管理器。
-        binder.bind(
-            AgentWorkbenchEventQueueManager,
-            to=AgentWorkbenchEventQueueManager,
-            scope=singleton,
-        )
-        binder.bind(
-            AgentWorkbenchRunExecutionService,
-            to=AgentWorkbenchRunExecutionService,
-            scope=singleton,
-        )
+        binder.bind(AgentRunService, to=AgentRunService, scope=singleton)
+        # Run 的生产端和订阅端共享同一个进程级跟踪器。
+        binder.bind(AgentRunTracker, to=AgentRunTracker, scope=singleton)
         # 将 EmbeddingsService 和 FaissService 绑定为单例，确保所有地方使用同一个实例
         binder.bind(EmbeddingsService, to=EmbeddingsService, scope=singleton)
         binder.bind(FaissService, to=FaissService, scope=singleton)

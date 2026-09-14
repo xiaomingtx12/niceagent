@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from internal.entity.agent_attachment_entity import AgentAttachment
-from internal.entity.agent_workbench_entity import WorkbenchModelSelection
+from internal.entity.agent_run_entity import AgentModelSelection
 from internal.entity.conversation_entity import InvokeFrom
 
 
@@ -32,6 +32,6 @@ class AgentInvocation(BaseModel):
     user_input_enabled: bool = False
     definition_fingerprint: str | None = None
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
-    model_selection: WorkbenchModelSelection | None = None
+    model_selection: AgentModelSelection | None = None
     # 旧客户端会自动回传默认模型，只有新运行显式标记后才恢复会话覆盖。
     model_selection_explicit: bool = False

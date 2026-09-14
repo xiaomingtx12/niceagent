@@ -1,4 +1,4 @@
-"""把业务侧 AgentInvocation 转换为一次性的 Agent 执行实例。"""
+"""按 AgentInvocation 装配一次性的 Agent 执行实例。"""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ from internal.core.agent_v2 import (
     SyncSubAgentDefinition,
     PlatformAgentRunObserver,
     AgentWorkspaceLimits,
+    build_confirmed_input_context,
 )
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
@@ -46,7 +47,7 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
-from internal.model import Account, App
+from internal.model import Account, AgentRun, App
 from internal.repository import WorkspaceFileRepository, WorkspaceFileStore
 from internal.repository.agent_workspace_store import AgentWorkspaceStore
 from internal.core.agent_v2.persistence.workspace_store import WorkspaceDeliveryError
@@ -59,7 +60,6 @@ from pkg.sqlalchemy import SQLAlchemy
 from .agent_attachment_service import AgentAttachmentService
 from .agent_model_service import AgentModelService
 from .agent_definition_service import AgentDefinitionService
-from .agent_workbench_run_service import AgentWorkbenchRunService
 from internal.service.app.app_config_service import AppConfigService
 from .assistant_agent_service import AssistantAgentService
 from internal.service.language_model.language_model_service import LanguageModelService
@@ -69,11 +69,10 @@ from internal.service.skill.skill_service import SkillService
 
 @inject
 @dataclass
-class AgentAssemblyService:
+class AgentFactory:
     """解析平台应用、授权能力和输入，将资源装配交给 Agent Core。"""
 
     db: SQLAlchemy
-    run_service: AgentWorkbenchRunService
     app_config_service: AppConfigService
     retrieval_service: RetrievalService
     language_model_service: LanguageModelService
@@ -85,7 +84,7 @@ class AgentAssemblyService:
     workspace_file_store: WorkspaceFileStore
     config: Config
 
-    def build_agent(
+    def create_executor(
         self,
         req: AgentInvocation,
         *,
@@ -244,7 +243,7 @@ class AgentAssemblyService:
             memory_enabled=app_config.long_term_memory.enable,
             planning_enabled=req.planning_enabled,
             user_input_enabled=req.user_input_enabled and app_config.user_input.enable,
-            confirmed_user_inputs=self.run_service.get_confirmed_input_context(req),
+            confirmed_user_inputs=self._load_confirmed_inputs(req),
         )
         skills = self.skill_service.resolve_enabled_skills(app_config.skills)
         agent_config = AgentConfig(
@@ -267,6 +266,23 @@ class AgentAssemblyService:
         )
         return agent_config, context
 
+    def _load_confirmed_inputs(self, req: AgentInvocation) -> str:
+        """只读取同一授权会话入口的近期答案，不从客户端接收也不写长期记忆。"""
+        rows = (
+            self.db.session.query(AgentRun.interaction_state["input_history"])
+            .filter(
+                AgentRun.conversation_id == req.conversation_id,
+                AgentRun.app_id == req.app_id,
+                AgentRun.invoke_from == req.invoke_from.value,
+                AgentRun.interaction_state["input_history"].astext.isnot(None),
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(8)
+            .all()
+        )
+        return build_confirmed_input_context(
+            [history for (history,) in rows if isinstance(history, list)]
+        )
 
     def _build_configured_tools(
         self,
@@ -527,4 +543,4 @@ class AgentAssemblyService:
         )
 
 
-__all__ = ["AgentAssemblyService"]
+__all__ = ["AgentFactory"]

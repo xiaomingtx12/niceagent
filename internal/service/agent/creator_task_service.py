@@ -31,17 +31,7 @@ class CreatorTaskService:
 
     def create_conversation(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """创建任务中心会话并由数据库分配会话 ID。"""
-        app = (
-            self.db.session.query(App)
-            .filter(
-                App.id == app_id,
-                App.account_id == account.id,
-                App.status == AppStatus.PUBLISHED,
-            )
-            .one_or_none()
-        )
-        if app is None:
-            raise NotFoundException("应用不存在、未发布或无权访问")
+        app = self._get_published_app(app_id, account)
         with self.db.auto_commit():
             conversation = Conversation(
                 app_id=app.id,
@@ -62,14 +52,10 @@ class CreatorTaskService:
         account: Account,
     ) -> Conversation:
         """校验创建者、发布状态及允许的会话来源。"""
-        row = (
-            self._visible_query(account)
-            .filter(Conversation.id == conversation_id, App.id == app_id)
-            .one_or_none()
-        )
-        if row is None:
+        conversation, app = self._get_visible_conversation(conversation_id, account)
+        if app.id != app_id:
             raise NotFoundException("会话不存在或无权访问")
-        return row[0]
+        return conversation
 
     def get_agents(self, account: Account) -> list[dict[str, Any]]:
         """获取当前账号已发布 Agent 及其任务会话概览。"""
@@ -117,17 +103,7 @@ class CreatorTaskService:
 
     def get_agent(self, app_id: UUID, account: Account) -> dict[str, Any]:
         """获取任务中心运行所需的已发布 Agent 配置，不返回 WebApp token。"""
-        app = (
-            self.db.session.query(App)
-            .filter(
-                App.id == app_id,
-                App.account_id == account.id,
-                App.status == AppStatus.PUBLISHED,
-            )
-            .one_or_none()
-        )
-        if app is None:
-            raise NotFoundException("应用不存在、未发布或无权访问")
+        app = self._get_published_app(app_id, account)
         return {
             "id": str(app.id),
             "name": app.name,
@@ -246,6 +222,21 @@ class CreatorTaskService:
         if row is None:
             raise NotFoundException("会话不存在或无权访问")
         return row[0], row[1]
+
+    def _get_published_app(self, app_id: UUID, account: Account) -> App:
+        """读取当前账号下仍处于发布状态的应用；缺失、越权或已下线都视为无权访问。"""
+        app = (
+            self.db.session.query(App)
+            .filter(
+                App.id == app_id,
+                App.account_id == account.id,
+                App.status == AppStatus.PUBLISHED,
+            )
+            .one_or_none()
+        )
+        if app is None:
+            raise NotFoundException("应用不存在、未发布或无权访问")
+        return app
 
     def _visible_query(self, account: Account):
         """构建同账号可见的任务会话查询。

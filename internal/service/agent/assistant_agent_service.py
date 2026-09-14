@@ -38,11 +38,7 @@ class AssistantAgentService:
 
     def get_or_create_conversation(self, account: Account) -> Conversation:
         """首次使用辅助 Agent 时创建会话，之后按归属复用。"""
-        try:
-            app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
-        except (AttributeError, TypeError, ValueError) as exc:
-            raise FailException("辅助 Agent 应用配置无效") from exc
-
+        app_id = self._assistant_app_id()
         with self.db.auto_commit():
             locked_account = (
                 self.db.session.query(Account)
@@ -65,10 +61,7 @@ class AssistantAgentService:
         account: Account,
     ) -> Conversation:
         """校验内置助手配置及当前账号的会话归属。"""
-        try:
-            app_id = UUID(str(self.config.ASSISTANT_AGENT_ID))
-        except (AttributeError, TypeError, ValueError) as exc:
-            raise FailException("辅助 Agent 应用配置无效") from exc
+        app_id = self._assistant_app_id()
         conversation = (
             self.db.session.query(Conversation)
             .filter(
@@ -103,8 +96,8 @@ class AssistantAgentService:
             self.convert_app_with_workflow_generator_to_tool(account_id),
         ]
 
-    @classmethod
-    def convert_create_app_to_tool(cls, account_id: UUID) -> BaseTool:
+    @staticmethod
+    def convert_create_app_to_tool(account_id: UUID) -> BaseTool:
         """定义自动创建Agent应用LangChain工具"""
 
         @tool("create_app", args_schema=CreateAppToolReq)
@@ -118,8 +111,8 @@ class AssistantAgentService:
 
         return create_app
 
-    @classmethod
-    def convert_workflow_generator_to_tool(cls, account_id: UUID) -> BaseTool:
+    @staticmethod
+    def convert_workflow_generator_to_tool(account_id: UUID) -> BaseTool:
         """将工作流生成功能转换为LangChain工具"""
 
         account_id_str = str(account_id)
@@ -152,8 +145,8 @@ class AssistantAgentService:
 
         return workflow_generator
 
-    @classmethod
-    def convert_app_with_workflow_generator_to_tool(cls, account_id: UUID) -> BaseTool:
+    @staticmethod
+    def convert_app_with_workflow_generator_to_tool(account_id: UUID) -> BaseTool:
         """将Agent应用+工作流生成功能转换为LangChain工具"""
 
         account_id_str = str(account_id)
@@ -197,3 +190,10 @@ class AssistantAgentService:
 生成完成后{publish_status}，您可以在应用管理页面和工作流管理页面查看。"""
 
         return app_with_workflow_generator
+
+    def _assistant_app_id(self) -> UUID:
+        """解析内置助手应用 ID；配置缺失时直接拒绝，不触碰数据库。"""
+        try:
+            return UUID(str(self.config.ASSISTANT_AGENT_ID))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise FailException("辅助 Agent 应用配置无效") from exc

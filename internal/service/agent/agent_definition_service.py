@@ -67,10 +67,3 @@ class AgentDefinitionService:
         except (ValidationError, ValidateErrorException) as exc:
             raise ValidateErrorException(f"应用运行配置无效: {exc}") from exc
         return ApplicationAgentDefinition(app.name, app.description, app.account_id, app_config)
-
-
-    def get_definition_fingerprint(
-        self, *, account_id: UUID, app_id: UUID, invoke_from: InvokeFrom,
-    ) -> str:
-        """恢复前重新读取有效定义，阻止旧图在新配置上继续运行。"""
-        return self.load(account_id=account_id, app_id=app_id, invoke_from=invoke_from).fingerprint()
