@@ -18,7 +18,7 @@ from langgraph.types import Command
 
 from internal.core.agent_v2.entity.agent_event import AgentEvent
 from internal.core.agent_v2.entity.execution_result import AgentExecutionResult
-from internal.core.agent_v2.execution.event_delivery import AgentEventDelivery
+from internal.core.agent_v2.execution.event_normalizer import AgentEventNormalizer
 from internal.core.agent_v2.execution.message_parser import final_answer, json_value
 from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources
 from internal.core.agent_v2.execution.summary_progress import SummaryProgressCallback
@@ -65,37 +65,38 @@ class AgentExecutor:
         cancel_requested: Event | None = None,
     ) -> AgentExecutionResult:
         """消息与恢复答案二选一；统一交付结果并关闭资源，事件订阅和取消信号可选。"""
-        # 1.准备交付容器与初始状态；调用前已取消则直接走清理路径。
+        # 1.准备交付容器与初始状态；调用前已取消则跳过执行直接清理。
         if cancel_requested is None:
             cancel_requested = Event()
         state: dict[str, Any] = {}
         error: Exception | None = None
         cancelled = cancel_requested.is_set()
-        delivery = AgentEventDelivery(on_event)
+        normalizer = AgentEventNormalizer()
+        raw_stream: Generator[dict[str, Any], None, None] | None = None
         try:
             # 2.消耗框架事件流；取消后协作排空，未取消时事件随到随交付。
             raw_stream = self._stream_events(message, resume=resume, cancel_requested=cancel_requested)
-            try:
-                if not cancelled:
-                    cancelled = self._consume_stream(raw_stream, state, delivery, cancel_requested)
-            except GraphDrained as exc:
-                # 3.取消排空是正常退出，仅当原因不明时才视作执行错误。
-                if exc.reason == "cancel_requested" or cancel_requested.is_set():
-                    cancelled = True
-                else:
+            if not cancelled:
+                try:
+                    cancelled = self._consume_stream(raw_stream, state, normalizer, cancel_requested)
+                except GraphDrained as exc:
+                    # 3.取消排空是正常退出，仅当原因不明时才视作执行错误。
+                    if exc.reason != "cancel_requested" and not cancel_requested.is_set():
+                        error = exc
+                except Exception as exc:
                     error = exc
-            except Exception as exc:
-                error = exc
-            finally:
-                # 4.清理顺序固定：关事件流、关运行资源；首个错误保留为执行错误。
-                error = _close_safely("Agent 事件流关闭", raw_stream.close, error)
-                error = _close_safely("Agent 运行资源关闭", self.close, error)
-        except BaseException:
-            # raw_stream 创建前的输入校验或状态守卫异常，仍要走同一清理。
-            error = _close_safely("Agent 运行资源关闭", self.close, error)
+        except BaseException as exc:
+            # 输入校验或状态守卫异常：不吞掉，保留 raise 让后台线程的兜底结算分类。
+            error = exc if isinstance(exc, Exception) else error
+            self.close()
             raise
-        # 5.图正常或异常退出后收尾已交付文本，再统一汇总结果。
-        error = _close_safely("Agent 消息流收尾", delivery.finish, error)
+        finally:
+            # 4.清理顺序固定：关事件流、关运行资源、收尾消息；首个错误保留为执行错误。
+            if raw_stream is not None:
+                error = _close_safely("Agent 事件流关闭", raw_stream.close, error)
+            error = _close_safely("Agent 运行资源关闭", self.close, error)
+            error = _close_safely("Agent 消息流收尾", normalizer.finish, error)
+        # 5.图正常或异常退出后统一汇总结果。
         return self._build_result(
             state=state,
             error=error,
@@ -196,7 +197,8 @@ class AgentExecutor:
         self,
         raw_stream: Generator[dict[str, Any], None, None],
         state: dict[str, Any],
-        delivery: AgentEventDelivery,
+        normalizer: AgentEventNormalizer,
+        on_event: Callable[[AgentEvent], None] | None,
         cancel_requested: Event,
     ) -> bool:
         """取消后协作式排空图；继续收集根状态，但停止公开后续事件。"""
@@ -205,7 +207,7 @@ class AgentExecutor:
         for raw_event in raw_stream:
             params = raw_event.get("params", {})
             data = params.get("data")
-            # 1.持续记录根状态快照，供结果构建和审核使用。
+            # 1.持续记录根状态快照，供结果构建使用。
             if raw_event.get("method") == "values" and not params.get("namespace") and isinstance(data, Mapping):
                 state.clear()
                 state.update(data)
@@ -217,9 +219,10 @@ class AgentExecutor:
                     if not drain_requested:
                         break
                 continue
-            delivery.accept(raw_event)
+            # 3.一次框架事件可拆成多个标准分片，按顺序交给订阅者。
+            for event in normalizer.accept(raw_event):
+                self._on_event(on_event, event)
         return cancelled
-
     def _build_result(
         self,
         *,
@@ -254,6 +257,15 @@ class AgentExecutor:
             self._state = _ExecutorState.FINISHED
             self._run_control = None
             self._cancel_requested = None
+
+    @staticmethod
+    def _on_event(
+        on_event: Callable[[AgentEvent], None] | None,
+        event: AgentEvent,
+    ) -> None:
+        """有订阅者时交付一个规范化事件；订阅回调失败按执行错误上抛。"""
+        if on_event is not None:
+            on_event(event)
 
 
 def _close_safely(stage: str, close: Callable[[], None], error: Exception | None) -> Exception | None:
