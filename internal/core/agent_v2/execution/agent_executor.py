@@ -78,7 +78,7 @@ class AgentExecutor:
             raw_stream = self._stream_events(message, resume=resume, cancel_requested=cancel_requested)
             if not cancelled:
                 try:
-                    cancelled = self._consume_stream(raw_stream, state, normalizer, cancel_requested)
+                    cancelled = self._consume_stream(raw_stream, state, normalizer, on_event, cancel_requested)
                 except GraphDrained as exc:
                     # 3.取消排空是正常退出，仅当原因不明时才视作执行错误。
                     if exc.reason != "cancel_requested" and not cancel_requested.is_set():
@@ -223,6 +223,7 @@ class AgentExecutor:
             for event in normalizer.accept(raw_event):
                 self._on_event(on_event, event)
         return cancelled
+
     def _build_result(
         self,
         *,
