@@ -45,7 +45,7 @@ class AIService(BaseService):
                 .filter(
                     EndUser.id == message.created_by,
                     EndUser.app_id == message.app_id,
-                    EndUser.external_user_id == account.id,
+                    EndUser.account_id == account.id,
                 )
                 .one_or_none()
                 is not None

@@ -147,7 +147,7 @@ class ConversationService(BaseService):
                 raise ForbiddenException("应用不存在、未发布或无权访问")
 
             if end_user_id is None:
-                end_user = EndUser(tenant_id=app.account_id, app_id=app.id)
+                end_user = EndUser(app_id=app.id)
                 self.db.session.add(end_user)
                 self.db.session.flush()
             else:
@@ -155,7 +155,6 @@ class ConversationService(BaseService):
                 if (
                     end_user is None
                     or end_user.app_id != app.id
-                    or end_user.tenant_id != app.account_id
                 ):
                     raise ForbiddenException("终端用户不属于当前应用")
 
@@ -209,7 +208,6 @@ class ConversationService(BaseService):
             .filter(
                 EndUser.id == conversation.created_by,
                 EndUser.app_id == app.id,
-                EndUser.tenant_id == app.account_id,
             )
             .one_or_none()
         )
@@ -475,7 +473,7 @@ class ConversationService(BaseService):
                 .filter(
                     EndUser.id == conversation.created_by,
                     EndUser.app_id == conversation.app_id,
-                    EndUser.external_user_id == account.id,
+                    EndUser.account_id == account.id,
                 )
                 .one_or_none()
                 is not None

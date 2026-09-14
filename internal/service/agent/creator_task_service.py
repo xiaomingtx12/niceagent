@@ -254,7 +254,7 @@ class CreatorTaskService:
         条件用于兼容历史 WebApp 会话，待业务侧完成数据回填后仍可保留。
         """
         legacy_end_users = select(EndUser.id).where(
-            EndUser.external_user_id == account.id,
+            EndUser.account_id == account.id,
             EndUser.app_id == Conversation.app_id,
         )
         # 新数据只认稳定的 owner；只有尚未回填的会话才允许按旧创建者关系判断。

@@ -121,7 +121,7 @@ class WechatService(BaseService):
             if not wechat_end_user:
                 with self.db.auto_commit():
                     # 10.新增终端用户并刷新获取id
-                    end_user = EndUser(tenant_id=app.account_id, app_id=app.id)
+                    end_user = EndUser(app_id=app.id)
                     self.db.session.add(end_user)
                     self.db.session.flush()
 

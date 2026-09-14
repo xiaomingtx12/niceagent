@@ -9,8 +9,12 @@ An authenticated platform identity that can own and manage platform resources.
 _Avoid_: User, End User
 
 **End User**:
-An application-scoped consumer that interacts through WebApp, Service API, or another external channel. An End User may map to an Account, but is not itself an authorization identity for platform resources.
+An application-scoped consumer that interacts through WebApp, Service API, or another external channel. Its optional linked Account identifies the consumer, while the application's owner remains a separate role.
 _Avoid_: Account, platform user
+
+**Application Owner**:
+The Account that owns and configures an application. This can differ from the Account consuming the application or owning a conversation in it.
+_Avoid_: End User, Conversation Owner
 
 **Conversation Owner**:
 The Account authorized to access and manage a conversation. Ownership remains stable regardless of which entry point created later messages.

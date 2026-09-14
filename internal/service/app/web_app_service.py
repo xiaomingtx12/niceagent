@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
-from internal.exception import NotFoundException, ForbiddenException
+from internal.exception import NotFoundException
 from internal.model import App, Account, Conversation, EndUser
 from pkg.sqlalchemy import SQLAlchemy
 from .app_config_service import AppConfigService
@@ -53,14 +53,12 @@ class WebAppService(BaseService):
             self.db.session.query(EndUser)
             .filter(
                 EndUser.app_id == app.id,
-                EndUser.external_user_id == account.id,
+                EndUser.account_id == account.id,
             )
             .one_or_none()
         )
 
         if end_user is not None:
-            if end_user.tenant_id != app.account_id:
-                raise ForbiddenException("终端用户不属于当前应用")
             return end_user
 
         # 2.首次访问使用数据库唯一约束处理并发创建。
@@ -69,12 +67,11 @@ class WebAppService(BaseService):
         statement = (
             insert(EndUser)
             .values(
-                tenant_id=app.account_id,
                 app_id=app.id,
-                external_user_id=account.id,
+                account_id=account.id,
             )
             .on_conflict_do_nothing(
-                index_elements=[EndUser.app_id, EndUser.external_user_id]
+                index_elements=[EndUser.app_id, EndUser.account_id]
             )
         )
         self.db.session.execute(statement)
@@ -86,14 +83,12 @@ class WebAppService(BaseService):
             self.db.session.query(EndUser)
             .filter(
                 EndUser.app_id == app.id,
-                EndUser.external_user_id == account.id,
+                EndUser.account_id == account.id,
             )
             .one_or_none()
         )
         if end_user is None:
             raise NotFoundException("无法初始化WebApp终端用户")
-        if end_user.tenant_id != app.account_id:
-            raise ForbiddenException("终端用户不属于当前应用")
         return end_user
 
     def get_owned_web_conversation(
@@ -139,7 +134,7 @@ class WebAppService(BaseService):
     ) -> Conversation:
         """使用稳定应用归属校验 WebApp 会话，不依赖可能轮换的访问 token。"""
         legacy_end_users = select(EndUser.id).where(
-            EndUser.app_id == app_id, EndUser.external_user_id == account.id,
+            EndUser.app_id == app_id, EndUser.account_id == account.id,
         )
         legacy_owner = or_(
             Conversation.created_by == account.id,
