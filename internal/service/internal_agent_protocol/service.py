@@ -177,8 +177,8 @@ class InternalAgentProtocolService:
             app_id=claims.target_app_id, conversation_id=conversation_id,
             invoke_from=InvokeFrom.CREATOR_TASK, run_id=run_id,
         )
-        # 失联恢复会提交状态和事件，必须在目标 Run 的授权范围确认后执行。
-        self.run_service.recover_stale_runs(run_id=run_id)
+        # 收敛孤儿记录会提交状态和事件，必须在目标 Run 的授权范围确认后执行。
+        self.workbench_service.settle_orphan_runs(run_id=run_id)
         row = self.run_service.get_run(run_id)
         return self._to_run_response(
             row=row,
@@ -238,7 +238,7 @@ class InternalAgentProtocolService:
         """应用授权通过后校验内部 SDK 会话；兼容旧 WebApp 记录，但不借用任务中心规则。"""
         legacy_end_users = select(EndUser.id).where(
             EndUser.app_id == app_id,
-            EndUser.external_user_id == account.id,
+            EndUser.account_id == account.id,
         )
         legacy_owner = or_(
             Conversation.created_by == account.id,
@@ -271,10 +271,10 @@ class InternalAgentProtocolService:
         """把平台 Run 映射为 LangGraph SDK 可识别的状态对象。"""
         if row is None:
             raise NotFoundException("内部 Agent Protocol Run 不存在")
+        # 等待填写表单的 Run 仍然存活，对 SDK 表现为运行中而不是错误。
         status = {
-            "queued": "pending",
             "running": "running",
-            "cancelling": "running",
+            "waiting_input": "running",
             "completed": "success",
             "failed": "error",
             "cancelled": "cancelled",
@@ -290,7 +290,7 @@ class InternalAgentProtocolService:
             metadata={},
             created_at=created_at,
             updated_at=updated_at,
-            error="Agent 运行失败" if status == "error" else None,
+            error=row.error_message or ("Agent 运行失败" if status == "error" else None),
         )
 
 

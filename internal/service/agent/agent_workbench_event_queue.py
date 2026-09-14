@@ -79,6 +79,13 @@ class AgentWorkbenchEventQueueManager:
                 self._runs.pop(conversation_key)
             self.notify_events(run.conversation_id, run.spec.invoke_from)
 
+    def active_run_ids(self) -> set[UUID]:
+        """返回本进程仍在执行的 Run 标识，供失联收敛区分存活与孤儿记录。"""
+        with self._lock:
+            return {
+                run.run_id for run in self._runs.values() if not run.done.is_set()
+            }
+
     def notify_events(self, conversation_id: UUID, invoke_from: InvokeFrom) -> None:
         """已提交事件后唤醒本进程订阅者，不重复保存事件正文。"""
         with self._lock:

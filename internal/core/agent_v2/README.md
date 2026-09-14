@@ -32,7 +32,7 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 
 平台通过 `AgentExecutor.execute(message=...)` 发起一次新输入，通过 `execute(resume=...)` 提交按中断 ID 组织的恢复答案。二者只能提供一个；空字典仍按恢复输入处理，不会误发新的用户消息。模型消息继续携带装配层设置的业务标识和附件信息。
 
-`on_event` 和 `cancel_requested` 可选：工作台传入事件接收方和共享取消信号；微信兼容入口只取最终结果。没有事件订阅者时仍执行输出审核，但不缓存待交付事件。`request_cancel()` 同时设置本次取消信号并请求图排空，调用方无需额外设置 Event；未启动或已结束时返回 False。数据库取消轮询、Session 和执行租约由 Service 管理。
+`on_event` 和 `cancel_requested` 可选：工作台传入事件接收方和共享取消信号；微信兼容入口只取最终结果。没有事件订阅者时仍执行输出审核，但不缓存待交付事件。`request_cancel()` 同时设置本次取消信号并请求图排空，调用方无需额外设置 Event；未启动或已结束时返回 False。取消信号、Session 生命周期和执行标识由 Service 管理。
 
 原生 `stream_events`、`Command` 和 `RunControl` 留在执行器内部。所有会话配置由 `AgentRunContext.conversation` 生成，调用方不再传入任意图配置。每个执行器只执行一次，返回结果前关闭独占资源；需要恢复时重新装配执行器并沿用会话身份与 Checkpointer。
 
@@ -86,7 +86,7 @@ LangChain Callback 自动累计模型和工具调用数及用量，业务入口�
 | 数据 | 消费者与保留原因 |
 | --- | --- |
 | Token、缓存/推理明细、调用数、分模型用量 | `Message.apply_usage()` 更新消息字段，Service 控制事务；Protocol 消息 metrics、工作台用量展示和 `AnalysisService` 报表使用。 |
-| trace_id、last_settled_executor_id | trace_id 关联消息与 Run；结算标识作为 Run 的独立列，在同一事务中防止片段重复累计。 |
+| trace_id、executor_id | trace_id 关联消息与 Run；`executor_id` 标识当前执行段，在同一事务中校验执行权并阻止重复结算。 |
 
 Observer 只保留活动模型的 ID/名称、活动工具 ID 及累计统计；不保存 Span、父子调用关系、阶段、诊断事件和执行片段列表。结束后拒绝迟到回调，重复结束不再次计费。装配、沙箱和首字交付保留已有日志；页面执行过程仍由 AgentRunEvent 提供。
 

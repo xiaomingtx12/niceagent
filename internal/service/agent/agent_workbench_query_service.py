@@ -47,12 +47,13 @@ class AgentWorkbenchQueryService:
         stream_request: WorkbenchEventStreamReq,
     ) -> Iterator[dict[str, Any] | None]:
         """创建事件流；数据库 Session 在流开始前释放，避免占用请求连接。"""
-        # 1.会话权限已在 Handler 中校验；这里释放请求 Session，避免流连接长期占用。
+        # 1.会话权限已在 Handler 中校验；先收敛孤儿运行，重连才不会一直等不到终态。
         run_id = stream_request.run_id
         self.run_service.get_conversation_run(
             app_id=app_id, conversation_id=conversation_id, invoke_from=invoke_from,
             run_id=run_id,
         )
+        self._settle_orphan_runs(conversation_id=conversation_id, run_id=run_id)
         self.db.session.close()
         # 2.返回延迟执行的生成器，首批事件会在 SSE 响应开始迭代后读取。
         return self._stream_events(
@@ -60,11 +61,22 @@ class AgentWorkbenchQueryService:
             stream_request=stream_request, run_id=run_id,
         )
 
+    def _settle_orphan_runs(
+        self, *, conversation_id: UUID, run_id: UUID | None = None,
+    ) -> None:
+        """读取入口顺带收敛本进程已不持有的运行记录，使重连能读到真实终态。"""
+        self.run_service.settle_orphan_runs(
+            alive_run_ids=self.queue_manager.active_run_ids(),
+            conversation_id=conversation_id, run_id=run_id,
+        )
+
     def get_state(
         self, *, conversation_id: UUID, invoke_from: InvokeFrom,
     ) -> WorkbenchStateResp:
         """读取已授权会话在指定入口下的状态。"""
-        # 1.由会话服务读取业务消息和稳定游标，再关联对应的 Agent Run。
+        # 1.重连和轮询都从这里读真实状态，先收敛孤儿运行再组装响应。
+        self._settle_orphan_runs(conversation_id=conversation_id)
+        # 2.由会话服务读取业务消息和稳定游标，再关联对应的 Agent Run。
         rows, has_more, next_before = self.conversation_service.get_message_page(
             conversation_id=conversation_id,
             page_size=20,
@@ -84,10 +96,10 @@ class AgentWorkbenchQueryService:
         )
         latest_run = persisted_runs[-1] if persisted_runs else None
 
-        # 2.只读取已提交的快照，状态查询与跨进程 SSE 使用同一数据源。
+        # 2.只读取已提交的快照，状态查询与 SSE 订阅使用同一数据源。
         source_snapshot: Mapping[str, Any] = {}
-        if latest_run is not None and isinstance(latest_run.state_snapshot, Mapping):
-            source_snapshot = latest_run.state_snapshot
+        if latest_run is not None:
+            source_snapshot = latest_run.public_snapshot
         values = project_snapshot_values(source_snapshot)
         values["messages"] = [
             message.model_dump(mode="json") for message in messages
@@ -97,7 +109,7 @@ class AgentWorkbenchQueryService:
         )
         values["message_page"] = message_page.model_dump(mode="json")
 
-        # 3.状态接口只返回摘要；公开错误统一来自业务消息。
+        # 3.状态接口只返回摘要；失败原因以 Run 自身记录为准，旧记录回落到业务消息。
         message_errors = {message.id: message.error for message in rows}
         values["runs"] = [
             WorkbenchRunSummaryResp(
@@ -107,7 +119,7 @@ class AgentWorkbenchQueryService:
                 created_at=run.created_at.replace(tzinfo=UTC),
                 started_at=run.started_at.replace(tzinfo=UTC) if run.started_at else None,
                 finished_at=run.finished_at.replace(tzinfo=UTC) if run.finished_at else None,
-                error=(message_errors.get(run.message_id) or "Agent 运行失败")
+                error=(run.error_message or message_errors.get(run.message_id) or "Agent 运行失败")
                 if run.status == "failed" else None,
             ).model_dump(mode="json")
             for run in persisted_runs

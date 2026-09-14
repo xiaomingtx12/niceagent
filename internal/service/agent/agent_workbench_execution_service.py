@@ -59,18 +59,22 @@ class AgentWorkbenchRunExecutionService:
     _persistence_batch_size: ClassVar[int] = 8
 
     def launch(self, run: WorkbenchRun) -> None:
-        """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。"""
+        """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。
+
+        调用方必须在提交前把 Run 登记进本地队列，否则并发请求会把它判成孤儿记录。
+        """
+        acquired = self._run_slots.acquire(blocking=False)
         try:
-            if not self._run_slots.acquire(blocking=False):
+            if not acquired:
                 raise FailException("当前 Agent 执行繁忙，请稍后重试")
-            self.queue_manager.register(run)
             self._run_executor.submit(
                 self._execute_background_run,
                 current_app._get_current_object(),
                 run,
             )
         except Exception as exc:
-            if self.queue_manager.get(run.conversation_id) is run:
+            # 只归还本次真正占用的执行槽；提交失败由兜底收敛负责移除本地登记。
+            if acquired:
                 self._run_slots.release()
             self._fail_background_run(run, exc)
             raise
@@ -153,7 +157,7 @@ class AgentWorkbenchRunExecutionService:
             row = self.run_service.get_run(run.run_id)
             snapshot = {}
             if row is not None:
-                snapshot = row.state_snapshot or {}
+                snapshot = row.public_snapshot
             self._publish_event(run, projector.generated("values", {
                 "pending_inputs": [],
                 "input_recovery": None,
@@ -168,11 +172,11 @@ class AgentWorkbenchRunExecutionService:
         finally:
             self.db.session.close()
 
-        # 4.取消监控使用独立线程和 Session；它启动失败时必须释放已装配资源。
+        # 4.取消监控只等待进程内取消信号；它启动失败时必须释放已装配资源。
         done = threading.Event()
         monitor = threading.Thread(
             target=self._watch_cancel,
-            args=(current_app._get_current_object(), run, agent, done),
+            args=(run, agent, done),
             daemon=True,
             name=f"agent-cancel-{run.run_id}",
         )
@@ -221,7 +225,7 @@ class AgentWorkbenchRunExecutionService:
 
         # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
         row = self.run_service.get_run(run.run_id)
-        state = project_execution_state(result, row.state_snapshot if row is not None else None)
+        state = project_execution_state(result, row.public_snapshot if row is not None else None)
 
         # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
         events = projector.generated_state_transition(state, lifecycle)
@@ -296,29 +300,6 @@ class AgentWorkbenchRunExecutionService:
             error_code=error_code,
         )
 
-    def _watch_cancel(
-        self,
-        flask_app: Flask,
-        run: WorkbenchRun,
-        agent: AgentExecutor,
-        done: threading.Event,
-    ) -> None:
-        """独立 Session 读取跨进程取消，执行已结束时不再触碰 Agent。"""
-        with flask_app.app_context():
-            while not done.wait(0.5):
-                try:
-                    status = self.run_service.get_run_status(run.run_id)
-                    if done.is_set():
-                        return
-                    if status == WorkbenchRunStatus.CANCELLING.value:
-                        run.cancel_requested.set()
-                    if run.cancel_requested.is_set() and agent.request_cancel():
-                        return
-                except Exception:
-                    logger.exception("读取 Agent 取消状态失败 run_id=%s", run.run_id)
-                finally:
-                    self.db.session.remove()
-
     def _publish_event(
         self,
         run: WorkbenchRun,
@@ -332,46 +313,27 @@ class AgentWorkbenchRunExecutionService:
     def _execute_background_run(self, flask_app: Flask, run: WorkbenchRun) -> None:
         """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
         with flask_app.app_context():
-            lease_done = threading.Event()
-            lease_monitor = threading.Thread(
-                target=self._watch_run_lease,
-                args=(flask_app, run, lease_done),
-                name=f"agent-lease-{run.run_id}",
-                daemon=True,
-            )
             try:
-                if not self.run_service.renew_lease(run):
-                    raise FailException("Agent Run 执行权已失效")
-                lease_monitor.start()
                 self.execute(run)
             except Exception as exc:
                 self._fail_background_run(run, exc)
             finally:
-                lease_done.set()
-                if lease_monitor.ident is not None:
-                    lease_monitor.join(timeout=1)
                 self.db.session.remove()
                 self._run_slots.release()
 
-    def _watch_run_lease(
-        self, flask_app: Flask, run: WorkbenchRun, done: threading.Event
+    def _watch_cancel(
+        self,
+        run: WorkbenchRun,
+        agent: AgentExecutor,
+        done: threading.Event,
     ) -> None:
-        """从装配开始独立续租，模型无输出或工具耗时不会被误判为进程退出。"""
-        last_renewed = time.monotonic()
-        with flask_app.app_context():
-            while not done.wait(10):
-                try:
-                    if not self.run_service.renew_lease(run):
-                        run.cancel_requested.set()
-                        return
-                    last_renewed = time.monotonic()
-                except Exception:
-                    logger.exception("Agent Run 心跳更新失败 run_id=%s", run.run_id)
-                    if time.monotonic() - last_renewed >= self.run_service.lease_seconds:
-                        run.cancel_requested.set()
-                        return
-                finally:
-                    self.db.session.remove()
+        """把本进程的取消请求转成图排空；阻塞中的工具只有主动排空才会立刻停止。"""
+        while not done.is_set():
+            if run.cancel_requested.is_set() and agent.request_cancel():
+                return
+            # 图尚未进入运行态时按固定节奏重试；取消标志已置位也要等待而不是空转。
+            if done.wait(0.5):
+                return
 
     def _fail_background_run(self, run: WorkbenchRun, exc: Exception) -> None:
         """后台执行异常时保证数据库状态和本地队列都进入终态。"""

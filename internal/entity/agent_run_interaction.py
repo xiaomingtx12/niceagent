@@ -1,8 +1,9 @@
 """运行表单的业务规则；不依赖数据库事务或 Agent Protocol 响应。"""
 
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
+from hashlib import sha256
+import json
 from typing import Any
 from uuid import UUID
 
@@ -45,28 +46,18 @@ class RunCancellation:
 
 
 class AgentRunInteraction:
-    """集中维护提交幂等、待填答案和取消恢复的 JSON 契约，保留未知快照字段。"""
+    """只处理待填表单及取消恢复规则；提交记录和调用参数由持久化层管理。"""
 
-    def __init__(self, status: str, snapshot: Mapping[str, Any] | None):
-        """读取已锁定 Run 的快照；规则只生成新快照，不原地修改 ORM 数据。"""
+    def __init__(self, status: str, state: Mapping[str, Any] | None):
+        """读取已锁定 Run 的交互状态；规则返回新字典，不原地修改 ORM 数据。"""
         self.status = status
-        self._snapshot = dict(snapshot or {})
-        self._interaction = dict(self._snapshot.get("_interaction") or {})
+        self._state = dict(state or {})
 
-    @property
-    def invocation(self) -> Any:
-        """返回暂停时的调用参数；恢复身份仍由服务重新鉴权覆盖。"""
-        return self._interaction.get("invocation")
-
-    def submitted_sequence(self, answers: Mapping[str, Any]) -> int | None:
-        """相同提交返回首次序号，同一批表单的不同答案不能重复提交。"""
-        for submitted in self._interaction.get("submissions") or []:
-            if set(submitted["answers"]) != set(answers):
-                continue
-            if submitted["answers"] != answers:
-                raise ValueError("该表单已提交，不能重复修改")
-            return submitted["sequence"]
-        return None
+    @staticmethod
+    def input_batch_id(answers: Mapping[str, Any]) -> str:
+        """中断 ID 集合标识一批表单，答案值和请求键顺序不影响批次身份。"""
+        encoded = json.dumps(sorted(answers), ensure_ascii=False, separators=(",", ":"))
+        return sha256(encoded.encode("utf-8")).hexdigest()
 
     def validate_answers(self, answers: Mapping[str, Any]) -> dict[str, Any]:
         """必须一次覆盖全部待填表单，未知字段和无效答案由领域表单拒绝。"""
@@ -87,70 +78,65 @@ class AgentRunInteraction:
         return validated
 
     def after_submission(
-        self, answers: Mapping[str, Any], validated: Mapping[str, Any], sequence: int,
+        self, validated: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """生成回答历史与去重记录；调用方将其与新执行租约原子保存。"""
-        history = list(self._snapshot.get("input_history") or [])
+        """保留已校验答案的展示投影；提交幂等事实独立保存为 Submission。"""
+        history = list(self._state.get("input_history") or [])
         for item in self._pending_inputs():
             history.append({**item.model_dump(mode="json"), "answers": validated[item.interrupt_id]})
-        submissions = list(self._interaction.get("submissions") or [])
-        submissions.append({"answers": deepcopy(answers), "sequence": sequence})
         return {
-            **self._snapshot,
+            **self._state,
             "pending_inputs": [], "input_history": history, "input_recovery": None,
-            "_interaction": {**self._interaction, "submissions": submissions},
         }
 
     def reopened_sequence(self, cancellation_sequence: int) -> int | None:
         """先核对取消批次再判断重复恢复，迟到请求不能复活后续状态。"""
-        if self._interaction.get("input_cancellation_sequence") != cancellation_sequence:
+        if self._state.get("input_cancellation_sequence") != cancellation_sequence:
             raise ValueError("任务状态已更新，请刷新后重新操作")
-        if self._interaction.get("last_reopened_cancellation_sequence") == cancellation_sequence:
-            return self._interaction["reopened_sequence"]
-        if self.status != "cancelled" or not self._interaction.get("cancelled_input"):
+        if self._state.get("last_reopened_cancellation_sequence") == cancellation_sequence:
+            return self._state["reopened_sequence"]
+        if self.status != "cancelled" or not self._state.get("cancelled_inputs"):
             raise ValueError("当前任务没有可恢复的表单")
         return None
 
-    def restored_snapshot(self) -> dict[str, Any]:
+    def restored_state(self) -> dict[str, Any]:
         """恢复已取消表单；没有保留表单时拒绝产生空的等待状态。"""
         pending = [
             PendingUserInput.model_validate(item).model_dump(mode="json")
-            for item in self._interaction.get("cancelled_inputs", [])
+            for item in self._state.get("cancelled_inputs", [])
         ]
         if not pending:
             raise ValueError("此任务没有保留待填写内容，请创建新会话")
-        return {**self._snapshot, "pending_inputs": pending, "input_recovery": None}
+        return {**self._state, "pending_inputs": pending, "input_recovery": None}
 
-    def after_reopen(self, snapshot: Mapping[str, Any], cancellation_sequence: int, sequence: int) -> dict[str, Any]:
-        """记录恢复批次以支持重复请求，保留原始调用和历史提交。"""
-        return {**snapshot, "_interaction": {
-            **self._interaction,
-            "cancelled_input": False, "cancelled_inputs": [],
+    def after_reopen(
+        self, restored: Mapping[str, Any], cancellation_sequence: int, sequence: int,
+    ) -> dict[str, Any]:
+        """恢复原表单并记住取消批次，迟到的重复请求仍返回首次结果。"""
+        return {
+            **restored, "cancelled_inputs": [],
             "last_reopened_cancellation_sequence": cancellation_sequence,
             "reopened_sequence": sequence,
-        }}
+        }
 
     def after_cancel(self, run_id: UUID, sequence: int) -> dict[str, Any]:
         """取消待填任务时保留原表单，恢复标识绑定最终提交的事件序号。"""
-        pending = self._snapshot.get("pending_inputs", [])
+        pending = self._state.get("pending_inputs", [])
         return {
-            **self._snapshot,
+            **self._state,
             "pending_inputs": [],
             "input_recovery": {"run_id": str(run_id), "cancellation_sequence": sequence} if pending else None,
-            "_interaction": {
-                **self._interaction, "cancelled_input": True,
-                "cancelled_inputs": pending, "input_cancellation_sequence": sequence,
-            },
+            "cancelled_inputs": pending, "input_cancellation_sequence": sequence,
         }
 
     def start_conflict(self) -> str | None:
         """在表单处取消后必须走恢复流程，不能用新消息跳过原有中断。"""
-        if self.status != "cancelled" or not self._interaction.get("cancelled_input"):
+        if self.status != "cancelled" or not self._state.get("cancelled_inputs"):
             return None
-        if self._snapshot.get("input_recovery"):
+        if self._state.get("input_recovery"):
             return "此任务已在表单处停止，请点击重新填写后继续，或创建新会话"
         return "此任务已在表单处停止，请创建新会话"
 
     def _pending_inputs(self) -> list[PendingUserInput]:
         """仅在提交时解析表单，不让纯查询和取消承担无关校验。"""
-        return [PendingUserInput.model_validate(item) for item in self._snapshot.get("pending_inputs", [])]
+        return [PendingUserInput.model_validate(item) for item in self._state.get("pending_inputs", [])]

@@ -1,6 +1,7 @@
 from .agent_attachment_entity import AgentAttachment
 from .agent_workbench_entity import (
     WORKBENCH_ACTIVE_STATUSES,
+    WORKBENCH_OCCUPYING_STATUSES,
     WORKBENCH_TERMINAL_STATUSES,
     WorkbenchRun,
     WorkbenchRunInput,
@@ -20,6 +21,7 @@ __all__ = [
     "supports_text_preview",
     "AgentAttachment",
     "WORKBENCH_ACTIVE_STATUSES",
+    "WORKBENCH_OCCUPYING_STATUSES",
     "WORKBENCH_TERMINAL_STATUSES",
     "WorkbenchRun",
     "WorkbenchRunInput",

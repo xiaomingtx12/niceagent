@@ -40,8 +40,6 @@ app = Http(
 )
 
 celery = app.extensions["celery"]
-# 确保 Celery Worker/Beat 注册工作台失联 Run 恢复任务。
-from internal.task import agent_workbench_task  # noqa: E402,F401
 
 if __name__ == "__main__":
     app.run(debug=True)

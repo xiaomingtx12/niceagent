@@ -14,21 +14,21 @@ _InvocationReqT = TypeVar("_InvocationReqT")
 
 
 class WorkbenchRunStatus(str, Enum):
-    """工作台 Run 生命周期状态。"""
+    """工作台 Run 生命周期状态；取消请求由 cancel_requested_at 表达，不占用状态位。"""
 
-    QUEUED = "queued"
     RUNNING = "running"
-    CANCELLING = "cancelling"
     WAITING_INPUT = "waiting_input"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
 
-WORKBENCH_ACTIVE_STATUSES = (
-    WorkbenchRunStatus.QUEUED.value,
+# 正在执行、持有执行租约的唯一状态。
+WORKBENCH_ACTIVE_STATUSES = (WorkbenchRunStatus.RUNNING.value,)
+# 仍占用会话的状态；等待输入虽无执行进程，但不允许同会话启动新任务。
+WORKBENCH_OCCUPYING_STATUSES = (
     WorkbenchRunStatus.RUNNING.value,
-    WorkbenchRunStatus.CANCELLING.value,
+    WorkbenchRunStatus.WAITING_INPUT.value,
 )
 WORKBENCH_TERMINAL_STATUSES = frozenset(
     {
@@ -65,7 +65,7 @@ class WorkbenchRunInput(BaseModel):
 
 @dataclass
 class WorkbenchRun(Generic[_InvocationReqT]):
-    """当前进程内正在排队或执行的工作台 Run。"""
+    """当前进程持有的执行片段；Run 身份稳定，每次恢复分配新的 executor_id。"""
 
     run_id: UUID
     conversation_id: UUID
@@ -80,6 +80,7 @@ class WorkbenchRun(Generic[_InvocationReqT]):
 
 __all__ = [
     "WORKBENCH_ACTIVE_STATUSES",
+    "WORKBENCH_OCCUPYING_STATUSES",
     "WORKBENCH_TERMINAL_STATUSES",
     "WorkbenchRun",
     "WorkbenchRunInput",
