@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
@@ -53,7 +52,6 @@ class AgentConfig:
     description: str
     model: BaseChatModel
     preset_prompt: str
-    review_config: Mapping[str, Any] = field(default_factory=dict)
     tools: tuple[BaseTool, ...] = ()
     skills: tuple[AgentSkill, ...] = ()
     selected_skills: tuple[str, ...] = ()

@@ -48,9 +48,6 @@ class BuiltinAppEntity(BaseModel):
             DEFAULT_APP_CONFIG.get("suggested_after_answer", {"enable": True})
         ),
     )
-    review_config: dict[str, Any] = Field(
-        default_factory=lambda: deepcopy(DEFAULT_APP_CONFIG.get("review_config"))
-    )
     created_at: int = Field(default=0)
 
     def to_draft_config(self) -> dict[str, Any]:

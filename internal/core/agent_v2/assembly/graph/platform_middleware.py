@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
-
 from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ModelRetryMiddleware,
@@ -24,7 +21,6 @@ from internal.core.agent_v2.middleware.reloading_memory_middleware import (
 from internal.core.agent_v2.middleware.reloading_skills_middleware import (
     ReloadingSkillsMiddleware,
 )
-from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.middleware.runtime_context_middleware import (
     RuntimeContextMiddleware,
 )
@@ -42,7 +38,6 @@ _TOOL_CALL_LIMIT = 200
 
 def build_platform_middleware(
     *,
-    review_config: Mapping[str, Any],
     runtime: AgentRuntimeResources,
 ) -> list[AgentMiddleware]:
     """按稳定顺序构造 MyDify 扩展的 DeepAgents 中间件。"""
@@ -56,9 +51,7 @@ def build_platform_middleware(
         ToolCallValidationMiddleware(),
         ShellExecutionMiddleware(virtual_paths=runtime.execution_uses_virtual_paths),
         RuntimeContextMiddleware(),
-        # 2.业务约束层：保护图状态，公开事件审核由执行阶段单独负责。
-        ReviewMiddleware(review_config=dict(review_config)),
-        # 3.运行策略层：模型重试、只读工具重试和调用限制保持固定顺序。
+        # 2.运行策略层：模型重试、只读工具重试和调用限制保持固定顺序。
         ModelRetryMiddleware(
             max_retries=2,
             retry_on=_is_retryable_model_error,
@@ -81,7 +74,7 @@ def build_platform_middleware(
             exit_behavior="continue",
         ),
     ]
-    # 4.上下文增强层：记忆必须先刷新，窗口观测才能看到实际注入内容。
+    # 3.上下文增强层：记忆必须先刷新，窗口观测才能看到实际注入内容。
     if runtime.memory_sources:
         middleware.append(
             ReloadingMemoryMiddleware(
@@ -89,7 +82,7 @@ def build_platform_middleware(
             )
         )
     middleware.append(ContextWindowMiddleware())
-    # 5.交互能力层：只有启用持久化时才允许恢复用户输入状态。
+    # 4.交互能力层：只有启用持久化时才允许恢复用户输入状态。
     if runtime.runtime_context.user_input_enabled and runtime.checkpointer:
         middleware.append(UserInputMiddleware())
     return middleware

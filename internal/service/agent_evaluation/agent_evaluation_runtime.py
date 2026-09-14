@@ -14,14 +14,12 @@ from langchain_core.messages import HumanMessage
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 
-from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
-
 from internal.core.agent_v2.execution.evaluation_evidence import candidate_snapshot
 from internal.core.agent_v2.middleware.evaluation_tool_middleware import EvaluationToolBoundary
 from internal.core.agent_v2.middleware.evidence_rubric_middleware import EvidenceRubricMiddleware
 
 EXECUTION_VERSION = "rubric-runtime-v1"
-EXECUTION_SCOPE = "使用提交时 Agent 的模型、提示词和审核规则，在独立会话与临时文件空间运行；不接入生产工具、知识库、Skills、子 Agent、长期记忆或历史附件。"
+EXECUTION_SCOPE = "使用提交时 Agent 的模型和提示词，在独立会话与临时文件空间运行；不接入生产工具、知识库、Skills、子 Agent、长期记忆或历史附件。"
 
 
 def execute_with_rubric(
@@ -58,7 +56,6 @@ def execute_with_rubric(
         checkpointer=InMemorySaver(),
         middleware=[
             EvaluationToolBoundary(),
-            ReviewMiddleware(review_config=definition.get("review_config", {})),
             ModelCallLimitMiddleware(run_limit=30, exit_behavior="error"),
             ToolCallLimitMiddleware(run_limit=50, exit_behavior="error"),
             middleware,

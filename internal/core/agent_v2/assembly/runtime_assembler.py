@@ -69,10 +69,7 @@ class AgentRuntimeAssembler:
             self._log_stage(context, "attachments", started_at)
             started_at = time.monotonic()
             graph = build_deep_agent(definition=definition, runtime=runtime)
-            agent = AgentExecutor(
-                graph=graph, runtime=runtime, observer=observer,
-                review_config=definition.review_config,
-            )
+            agent = AgentExecutor(graph=graph, runtime=runtime, observer=observer)
             self._log_stage(context, "graph", started_at)
             return agent
         except BaseException:

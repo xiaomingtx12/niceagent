@@ -129,41 +129,6 @@ class TextToSpeechConfigReq(ToggleConfigReq):
         return value
 
 
-class ReviewInputConfigReq(ToggleConfigReq):
-    """输入审核策略。"""
-
-    preset_response: StrictStr = ""
-
-    @field_validator("preset_response", mode="before")
-    @classmethod
-    def normalize_null_preset_response(cls, value: Any) -> Any:
-        """兼容旧配置和前端传入的 null；启用审核时再由组合校验拦截空值。"""
-        return "" if value is None else value
-
-
-class ReviewConfigReq(BaseModel):
-    """输入输出审核配置及其组合约束。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enable: StrictBool
-    keywords: list[StrictStr] = Field(max_length=100)
-    inputs_config: ReviewInputConfigReq
-    outputs_config: ToggleConfigReq
-
-    @model_validator(mode="after")
-    def validate_enabled_policy(self) -> "ReviewConfigReq":
-        if not self.enable:
-            return self
-        if not self.keywords:
-            raise ValueError("启用审核时 keywords 不能为空")
-        if not self.inputs_config.enable and not self.outputs_config.enable:
-            raise ValueError("输入审核和输出审核至少需要开启一项")
-        if self.inputs_config.enable and not self.inputs_config.preset_response.strip():
-            raise ValueError("输入审核预设响应不能为空")
-        return self
-
-
 class AgentAppResourceReq(BaseModel):
     """运行配置中已完成租户校验的资源引用。"""
 
@@ -257,17 +222,6 @@ class AgentAppConfigReq(BaseModel):
     suggested_after_answer: ToggleConfigReq = Field(
         default_factory=lambda: ToggleConfigReq(enable=True)
     )
-    review_config: ReviewConfigReq = Field(
-        default_factory=lambda: ReviewConfigReq(
-            enable=False,
-            keywords=[],
-            inputs_config=ReviewInputConfigReq(
-                enable=False,
-                preset_response="",
-            ),
-            outputs_config=ToggleConfigReq(enable=False),
-        )
-    )
     updated_at: StrictInt | None = None
     created_at: StrictInt | None = None
 
@@ -323,7 +277,6 @@ class DraftAppConfigPatchReq(BaseModel):
     speech_to_text: ToggleConfigReq | None = None
     text_to_speech: TextToSpeechConfigReq | None = None
     suggested_after_answer: ToggleConfigReq | None = None
-    review_config: ReviewConfigReq | None = None
 
     @field_validator("model_config_data", mode="before")
     @classmethod

@@ -458,7 +458,6 @@ class AppService(BaseService):
             speech_to_text=draft_app_config["speech_to_text"],
             text_to_speech=draft_app_config["text_to_speech"],
             suggested_after_answer=draft_app_config["suggested_after_answer"],
-            review_config=draft_app_config["review_config"],
         )
 
         # 3.更新应用关联的运行时配置以及状态

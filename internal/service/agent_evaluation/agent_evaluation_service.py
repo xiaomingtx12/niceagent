@@ -315,7 +315,6 @@ class AgentEvaluationService(BaseService):
                 "config_id": str(draft.id),
                 "model_config": model_config,
                 "preset_prompt": draft.preset_prompt or "",
-                "review_config": draft.review_config or {},
             },
         }
 

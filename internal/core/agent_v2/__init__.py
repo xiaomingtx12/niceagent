@@ -11,7 +11,6 @@ from .observability.run_observer import PlatformAgentRunObserver
 from .entity.user_input import PendingUserInput, build_confirmed_input_context
 from .entity.workspace_quota import AgentWorkspaceLimits
 from .middleware.tool_call_validation_middleware import AgentMessageError
-from .middleware.review_middleware import ReviewBlocked
 from .persistence.postgres_connection import AGENT_PERSISTENCE_ERRORS
 from .persistence.langgraph_checkpoint_provider import get_postgres_pool_stats
 
@@ -31,7 +30,6 @@ __all__ = [
     "build_confirmed_input_context",
     "AgentWorkspaceLimits",
     "AgentMessageError",
-    "ReviewBlocked",
     "AGENT_PERSISTENCE_ERRORS",
     "get_postgres_pool_stats",
 ]

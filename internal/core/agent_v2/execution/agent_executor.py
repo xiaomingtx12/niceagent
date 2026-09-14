@@ -23,7 +23,6 @@ from internal.core.agent_v2.execution.message_parser import final_answer, json_v
 from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources
 from internal.core.agent_v2.execution.summary_progress import SummaryProgressCallback
 from internal.core.agent_v2.execution.user_input_interrupt_tracker import UserInputInterruptTracker
-from internal.core.agent_v2.middleware.review_middleware import ReviewMiddleware
 from internal.core.agent_v2.observability.run_observer import PlatformAgentRunObserver
 from internal.extension.logging_extension import logger
 
@@ -46,13 +45,11 @@ class AgentExecutor:
         graph: CompiledStateGraph,
         runtime: AgentRuntimeResources,
         observer: PlatformAgentRunObserver,
-        review_config: Mapping[str, Any] | None = None,
     ) -> None:
         """接管已编译图和当前 Run 的资源生命周期。"""
         self._graph: CompiledStateGraph = graph
         self._resources = runtime
         self._observer = observer
-        self._review = ReviewMiddleware(review_config=dict(review_config or {}))
         self._run_lock = Lock()
         self._state = _ExecutorState.READY
         self._run_control: RunControl | None = None
@@ -74,15 +71,13 @@ class AgentExecutor:
         state: dict[str, Any] = {}
         error: Exception | None = None
         cancelled = cancel_requested.is_set()
-        delivery = AgentEventDelivery(self._review, on_event)
+        delivery = AgentEventDelivery(on_event)
         try:
-            # 2.消耗框架事件流；取消后协作排空，成功时按整轮审核结果回放缓存事件。
+            # 2.消耗框架事件流；取消后协作排空，未取消时事件随到随交付。
             raw_stream = self._stream_events(message, resume=resume, cancel_requested=cancel_requested)
             try:
                 if not cancelled:
                     cancelled = self._consume_stream(raw_stream, state, delivery, cancel_requested)
-                    if not cancelled and not cancel_requested.is_set():
-                        delivery.flush(cancel_requested)
             except GraphDrained as exc:
                 # 3.取消排空是正常退出，仅当原因不明时才视作执行错误。
                 if exc.reason == "cancel_requested" or cancel_requested.is_set():
@@ -92,13 +87,11 @@ class AgentExecutor:
             except Exception as exc:
                 error = exc
             finally:
-                # 4.清理顺序固定：释放缓存、关事件流、关运行资源；首个错误保留为执行错误。
-                delivery.discard()
+                # 4.清理顺序固定：关事件流、关运行资源；首个错误保留为执行错误。
                 error = _close_safely("Agent 事件流关闭", raw_stream.close, error)
                 error = _close_safely("Agent 运行资源关闭", self.close, error)
         except BaseException:
             # raw_stream 创建前的输入校验或状态守卫异常，仍要走同一清理。
-            delivery.discard()
             error = _close_safely("Agent 运行资源关闭", self.close, error)
             raise
         # 5.图正常或异常退出后收尾已交付文本，再统一汇总结果。
@@ -234,13 +227,10 @@ class AgentExecutor:
         error: Exception | None,
         cancelled: bool,
     ) -> AgentExecutionResult:
-        """统一完成状态、回答与用量，阻止未通过交付审核的消息进入业务历史。"""
-        # 1.启用输出审核时，失败或取消的结果不把本轮消息写入业务历史。
-        if self._review.output_enabled and (error is not None or cancelled):
-            state = {key: value for key, value in state.items() if key != "messages"}
+        """统一完成状态、回答与用量。"""
         messages = state.get("messages")
         answer = final_answer(messages) if isinstance(messages, list) else ""
-        # 2.状态优先级：错误 > 取消 > 等待输入 > 完成。
+        # 1.状态优先级：错误 > 取消 > 等待输入 > 完成。
         status: Literal["completed", "cancelled", "failed", "waiting_input"] = "completed"
         if error is not None:
             status = "failed"

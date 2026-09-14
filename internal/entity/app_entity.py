@@ -54,15 +54,4 @@ DEFAULT_APP_CONFIG = {
         "voice": "xiaoxiao",
         "auto_play": False,
     },
-    "review_config": {
-        "enable": False,
-        "keywords": [],
-        "inputs_config": {
-            "enable": False,
-            "preset_response": "",
-        },
-        "outputs_config": {
-            "enable": False,
-        },
-    },
 }

@@ -39,10 +39,7 @@ def build_deep_agent(
         memory_enabled=runtime.runtime_context.memory_enabled,
         user_input_enabled=bool(runtime.runtime_context.user_input_enabled and runtime.checkpointer),
     )
-    middleware = build_platform_middleware(
-        review_config=definition.review_config,
-        runtime=runtime,
-    )
+    middleware = build_platform_middleware(runtime=runtime)
 
     # 2.将已授权的同步、异步 SubAgent 配置转换为原生规格。
     # 持久化记录仅作业务适配，其余运行时能力由 DeepAgents 负责。

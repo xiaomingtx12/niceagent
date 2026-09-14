@@ -29,7 +29,6 @@ from internal.core.agent_v2 import (
     AgentExecutor,
     AgentMessageError,
     PlatformAgentRunObserver,
-    ReviewBlocked,
     get_postgres_pool_stats,
 )
 from internal.entity import (
@@ -1105,8 +1104,6 @@ class AgentRunService:
                 error_code = error.code.value
             elif isinstance(error, AgentMessageError):
                 public_error = f"模型工具调用格式错误：{error}"
-            elif isinstance(error, ReviewBlocked):
-                public_error = "输出内容未通过审核。"
             message_updates = {"status": MessageStatus.ERROR, "error": public_error}
             if isinstance(error, AGENT_PERSISTENCE_ERRORS):
                 logger.error(

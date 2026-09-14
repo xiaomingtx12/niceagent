@@ -251,7 +251,6 @@ class AgentFactory:
             description=definition.description,
             model=cast(BaseChatModel, model),
             preset_prompt=app_config.preset_prompt,
-            review_config=app_config.review_config.model_dump(mode="json"),
             tools=tuple(tools),
             skills=tuple(
                 AgentSkill(
