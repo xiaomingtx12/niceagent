@@ -51,14 +51,17 @@ def build_deep_agent(
         skill_sources_by_agent=runtime.skill_projection.subagent_sources,
     )
 
-    # 框架默认通用子 Agent 不继承主 Agent 中间件；虚拟 Shell 模式显式补齐路径说明。
-    if runtime.execution_uses_virtual_paths:
-        if not any(spec["name"] == GENERAL_PURPOSE_SUBAGENT["name"] for spec in subagent_specs):
-            subagent_specs.insert(0, {
-                **GENERAL_PURPOSE_SUBAGENT,
-                "skills": list(runtime.skill_projection.sources),
-                "middleware": [ShellExecutionMiddleware(virtual_paths=True)],
-            })
+    # 框架默认通用子 Agent 不继承主 Agent 中间件，却会继承父工具（含 execute）；
+    # 这里统一显式声明，按平台策略在执行入口关闭子 Agent 的共享 Shell。
+    if not any(spec["name"] == GENERAL_PURPOSE_SUBAGENT["name"] for spec in subagent_specs):
+        subagent_specs.insert(0, {
+            **GENERAL_PURPOSE_SUBAGENT,
+            "skills": list(runtime.skill_projection.sources),
+            "middleware": [ShellExecutionMiddleware(
+                allow_execution=False,
+                virtual_paths=runtime.execution_uses_virtual_paths,
+            )],
+        })
 
     # 3.把模型、工具、权限、持久化和上下文边界编译成运行图。
     return create_deep_agent(
