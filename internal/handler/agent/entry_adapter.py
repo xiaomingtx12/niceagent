@@ -11,14 +11,18 @@ from uuid import UUID
 
 from flask import Response, request
 
+from internal.entity.agent_run_interaction import RunRejected
 from internal.entity.conversation_entity import InvokeFrom
 from internal.schema.agent.agent_protocol_schema import (
+    AgentProtocolCommandErrorResp,
     AgentProtocolCommandReq,
+    AgentProtocolCommandSuccessResp,
     AgentProtocolEventStreamReq,
+    AgentProtocolInputReopenReq,
+    AgentProtocolInputRespondReq,
 )
 from internal.service.agent.agent_run_query import AgentRunQuery
 from internal.service.agent.agent_run_service import AgentRunService
-from internal.service.agent_protocol.command_adapter import execute_command
 from pkg.response import json_response, sse_response
 
 
@@ -35,14 +39,42 @@ class AgentRunCaller:
 
 
 def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Response:
-    """解析命令并分派业务操作，命令 ID 只进入响应外壳。"""
+    """解析命令并按类型分派业务操作，命令 ID 只进入响应外壳。"""
     command = AgentProtocolCommandReq.from_mapping(request.get_json(silent=True))
-    result = execute_command(
-        service, app_id=caller.app_id, conversation_id=caller.conversation_id,
-        invoke_from=caller.invoke_from, account_id=caller.account_id,
-        created_by=caller.created_by, end_user_id=caller.end_user_id, command=command,
-    )
-    return json_response(result.model_dump(mode="json", exclude_none=True))
+    params = command.params
+    if isinstance(params, AgentProtocolInputRespondReq):
+        result = service.submit_answers(
+            account_id=caller.account_id, app_id=caller.app_id,
+            conversation_id=caller.conversation_id, created_by=caller.created_by,
+            end_user_id=caller.end_user_id, invoke_from=caller.invoke_from,
+            answers={item.interrupt_id: item.response for item in params.responses},
+        )
+    elif isinstance(params, AgentProtocolInputReopenReq):
+        result = service.reopen_form(
+            account_id=caller.account_id, app_id=caller.app_id,
+            conversation_id=caller.conversation_id, created_by=caller.created_by,
+            end_user_id=caller.end_user_id, invoke_from=caller.invoke_from,
+            run_id=params.run_id, cancellation_sequence=params.cancellation_sequence,
+        )
+    else:
+        result = service.start_run(
+            account_id=caller.account_id, app_id=caller.app_id,
+            conversation_id=caller.conversation_id, created_by=caller.created_by,
+            end_user_id=caller.end_user_id, invoke_from=caller.invoke_from,
+            run_input=params,
+        )
+    if isinstance(result, RunRejected):
+        response: AgentProtocolCommandErrorResp | AgentProtocolCommandSuccessResp = (
+            AgentProtocolCommandErrorResp(
+                id=command.id, message=result.message, field_errors=result.field_errors,
+            )
+        )
+    else:
+        response = AgentProtocolCommandSuccessResp.create(
+            command_id=command.id, run_id=result.run_id,
+            applied_through_sequence=result.sequence,
+        )
+    return json_response(response.model_dump(mode="json", exclude_none=True))
 
 
 def respond_stream(query_service: AgentRunQuery, caller: AgentRunCaller) -> Response:

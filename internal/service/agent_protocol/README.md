@@ -5,7 +5,7 @@
 ## 阅读顺序
 
 1. `agent_protocol_schema.AgentProtocolCommandReq.from_mapping`：一次解析命令外壳与参数，兼容 SDK 的嵌套输入及单个／批量回答。`params` 在解析后已经是 `AgentRunInput`、`AgentProtocolInputRespondReq` 或 `AgentProtocolInputReopenReq`。
-2. `command_adapter.py`：消费已解析的参数，分派给启动、回答和重新填写入口，再包装协议响应；不解析原始请求字典。
+2. 命令分派与成功／错误外壳由 `internal/handler/agent/entry_adapter.py` 的 `respond_command` 处理：消费已解析的参数直接调用启动、回答和重新填写入口，再包装协议响应。
 3. `event_projector.py`：接收 Core 规范化的 `AgentEvent`，绑定业务消息 ID、分配持久化序号并生成 `AgentProtocolEvent`。
 4. `state_projector.py`：业务消息标识、公开运行状态和表单；不再从快照合成执行事件。
 5. `message_projector.py`：业务消息历史转换与活动 Run 消息补齐。

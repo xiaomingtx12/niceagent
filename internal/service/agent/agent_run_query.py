@@ -17,7 +17,7 @@ from internal.schema.agent.agent_model_schema import (
     AgentProtocolModelSettingsResp,
 )
 from internal.schema.agent.agent_protocol_schema import (
-    PUBLIC_EVENT_METHODS, AgentProtocolEvent, AgentProtocolEventStreamReq, AgentProtocolStateResp,
+    PUBLIC_EVENT_METHODS, AgentProtocolEventStreamReq, AgentProtocolStateResp,
     AgentProtocolMessagePageInfoResp, AgentProtocolRunMetadataResp, AgentProtocolRunSummaryResp,
     AgentProtocolRunEventsResp,
 )
@@ -27,17 +27,8 @@ from internal.service.agent_protocol.state_projector import project_snapshot_val
 from internal.service.conversation.conversation_service import ConversationService
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_model_service import AgentModelService
-from .agent_run_events import AgentRunTracker
+from .agent_run_events import event_signal
 from .agent_run_service import AgentRunService
-
-
-@dataclass(frozen=True)
-class EventBatch:
-    """内部扫描结果；游标独立于过滤后的事件，不作为 HTTP 响应校验或序列化。"""
-
-    events: list[AgentProtocolEvent]
-    next_sequence: int
-    has_more: bool
 
 
 @inject
@@ -47,24 +38,31 @@ class AgentRunQuery:
 
     db: SQLAlchemy
     run_service: AgentRunService
-    tracker: AgentRunTracker
     model_service: AgentModelService
     conversation_service: ConversationService
 
     _SSE_HEARTBEAT_SECONDS = 15
+    _SSE_BATCH_SIZE = 256
 
     def stream_events(
         self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom,
         stream_request: AgentProtocolEventStreamReq,
     ) -> Iterator[dict[str, Any] | None]:
-        """创建事件流；数据库 Session 在流开始前释放，避免占用请求连接。"""
-        # 1.会话权限已在 Handler 中校验；这里只读，终态由执行结算与写路径收敛保证。
+        """创建事件流；归属校验在请求阶段完成，连接由 Flask 上下文回收。"""
+        # 1.会话权限已在 Handler 中校验；Run 归属必须在这里确认，异常要在响应头发出前抛出。
         run_id = stream_request.run_id
-        self.run_service.get_conversation_run(
-            app_id=app_id, conversation_id=conversation_id, invoke_from=invoke_from,
-            run_id=run_id,
+        owned = (
+            self.db.session.query(AgentRun.id)
+            .filter(
+                AgentRun.id == run_id,
+                AgentRun.app_id == app_id,
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.invoke_from == invoke_from.value,
+            )
+            .one_or_none()
         )
-        self.db.session.close()
+        if owned is None:
+            raise NotFoundException("Agent Run 不存在或不属于当前会话")
         # 2.返回延迟执行的生成器，首批事件会在 SSE 响应开始迭代后读取。
         return self._stream_events(
             conversation_id=conversation_id, invoke_from=invoke_from,
@@ -84,11 +82,27 @@ class AgentRunQuery:
             has_more=has_more,
             next_before=next_before,
         )
+        # 状态不受消息分页截断：一条查询同时取回消息页关联 Run 和当前入口最新 Run。
         message_ids = [message.id for message in rows]
-        persisted_runs = self._list_state_runs(
-            conversation_id=conversation_id,
-            invoke_from=invoke_from,
-            message_ids=message_ids,
+        latest_run_id = (
+            self.db.session.query(AgentRun.id)
+            .filter(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.invoke_from == invoke_from.value,
+            )
+            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+        persisted_runs = (
+            self.db.session.query(AgentRun)
+            .filter(
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.invoke_from == invoke_from.value,
+                or_(AgentRun.message_id.in_(message_ids), AgentRun.id == latest_run_id),
+            )
+            .order_by(AgentRun.created_at.asc(), AgentRun.id.asc())
+            .all()
         )
         messages = project_conversation_messages(
             rows, runs_by_message={run.message_id: run for run in persisted_runs}
@@ -184,48 +198,7 @@ class AgentRunQuery:
         invoke_from: InvokeFrom,
     ) -> AgentProtocolModelSettingsResp:
         """独立读取当前可用模型配置，恢复最近一次覆盖时不加载消息和运行事件。"""
-        saved = self._get_latest_model_overrides(
-            conversation_id=conversation_id,
-            invoke_from=invoke_from,
-        )
-        return self.model_service.restore_model_settings(
-            account_id=account_id, app_id=app_id, created_by=created_by,
-            invoke_from=invoke_from, saved=saved,
-        )
-
-    def _list_state_runs(
-        self,
-        *,
-        conversation_id: UUID,
-        invoke_from: InvokeFrom,
-        message_ids: list[UUID],
-    ) -> list[AgentRun]:
-        """一条查询读取消息页关联 Run 及当前入口最新 Run，状态不受消息分页截断。"""
-        latest_run_id = (
-            self.db.session.query(AgentRun.id)
-            .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == invoke_from.value,
-            )
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-            .limit(1)
-            .scalar_subquery()
-        )
-        return (
-            self.db.session.query(AgentRun)
-            .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == invoke_from.value,
-                or_(AgentRun.message_id.in_(message_ids), AgentRun.id == latest_run_id),
-            )
-            .order_by(AgentRun.created_at.asc(), AgentRun.id.asc())
-            .all()
-        )
-
-    def _get_latest_model_overrides(
-        self, *, conversation_id: UUID, invoke_from: InvokeFrom,
-    ) -> dict[str, Any]:
-        """只投影最近任务的模型字段，避免读取大快照、观测数据及触发状态恢复。"""
+        # 1.只投影最近任务的模型字段，避免读取大快照、观测数据及触发状态恢复。
         invocation = AgentRun.invocation_snapshot
         row = (
             self.db.session.query(
@@ -240,90 +213,73 @@ class AgentRunQuery:
             .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
             .first()
         )
-        return dict(row._mapping) if row is not None else {}
-
-    def _get_reconnect_events(
-        self,
-        *,
-        conversation_id: UUID,
-        invoke_from: InvokeFrom,
-        run_id: UUID,
-        since: int,
-        limit: int = 256,
-    ) -> EventBatch:
-        """按落库序号推进扫描游标，避免隐藏事件占满一批后阻断续传。"""
-        rows = (
-            self.db.session.query(AgentRunEvent.sequence, AgentRunEvent.payload)
-            .join(AgentRun, AgentRun.id == AgentRunEvent.run_id)
-            .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == invoke_from.value,
-                AgentRunEvent.sequence > since,
-                AgentRun.id == run_id,
-            )
-            .order_by(AgentRunEvent.sequence.asc())
-            .limit(limit)
-            .all()
-        )
-        events = []
-        for row in rows:
-            event = AgentProtocolEventProjector.to_public_event(row.payload)
-            if event is not None:
-                events.append(event)
-        return EventBatch(
-            events=events,
-            next_sequence=rows[-1].sequence if rows else since,
-            has_more=len(rows) == limit,
+        # 2.没有历史覆盖时传空字典，恢复规则仍然由模型服务决定。
+        return self.model_service.restore_model_settings(
+            account_id=account_id, app_id=app_id, created_by=created_by,
+            invoke_from=invoke_from, saved=dict(row._mapping) if row is not None else {},
         )
 
     def _stream_events(
         self, *, conversation_id: UUID, invoke_from: InvokeFrom, stream_request: AgentProtocolEventStreamReq,
         run_id: UUID,
     ) -> Iterator[dict[str, Any] | None]:
-        """读取已提交事件并产生 SSE 心跳哨兵，进程内跟踪器只负责事件通知。"""
+        """读取已提交事件并产生 SSE 心跳哨兵；通知只用于唤醒，数据库才是重连数据源。"""
         # 1.从客户端游标开始续传；游标只根据已扫描的事件批次推进。
         cursor = stream_request.since
         heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
-        with self.tracker.watch_events(
-            conversation_id, invoke_from
-        ) as signal:
-            while True:
-                # 2.先记录通知版本，再查询数据库，避免查询期间的提交被漏掉。
-                version = signal.snapshot()
-                try:
-                    # 3.先观察状态再扫描事件，看到终态时本次扫描一定覆盖终态提交。
-                    status = self.run_service.get_run_status(run_id)
-                    batch = self._get_reconnect_events(
-                        conversation_id=conversation_id,
-                        invoke_from=invoke_from,
-                        run_id=run_id,
-                        since=cursor,
+        while True:
+            # 2.先记录通知版本，再查询数据库，避免查询期间的提交被漏掉。
+            version = event_signal.snapshot()
+            try:
+                # 3.先观察状态再扫描事件，看到终态时本次扫描一定覆盖终态提交。
+                status = self.run_service.get_run_status(run_id)
+                # 4.隐藏事件同样占用一批配额，游标按扫描到的行推进而不是按已发送事件推进。
+                rows = (
+                    self.db.session.query(AgentRunEvent.sequence, AgentRunEvent.payload)
+                    .join(AgentRun, AgentRun.id == AgentRunEvent.run_id)
+                    .filter(
+                        AgentRun.conversation_id == conversation_id,
+                        AgentRun.invoke_from == invoke_from.value,
+                        AgentRunEvent.sequence > cursor,
+                        AgentRun.id == run_id,
                     )
-                finally:
-                    # 3.事件和状态查询结束后立即释放连接，等待通知期间不占用 Session。
-                    self.db.session.close()
-
-                # 5.过滤只影响发送内容，不影响内部游标，避免被过滤事件反复扫描。
-                for event in batch.events:
-                    if stream_request.matches(event):
-                        yield event.model_dump(mode="json")
-                terminal = any(
-                    event.method == "lifecycle"
-                    and not event.params.namespace
-                    and isinstance(event.params.data, Mapping)
-                    and event.params.data.get("status") in AGENT_RUN_TERMINAL_STATUSES
-                    for event in batch.events
+                    .order_by(AgentRunEvent.sequence.asc())
+                    .limit(self._SSE_BATCH_SIZE)
+                    .all()
                 )
-                cursor = batch.next_sequence
+            finally:
+                # 5.事件和状态查询结束后立即释放连接，等待通知期间不占用 Session。
+                self.db.session.close()
 
-                if time.monotonic() >= heartbeat_at:
-                    # 6.心跳仅维持 SSE 连接；None 由响应适配器编码为注释行，不进入业务事件流。
-                    yield None
-                    heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
-                if not batch.has_more:
-                    if terminal:
-                        return
-                    if not batch.events and status in AGENT_RUN_TERMINAL_STATUSES:
-                        return
-                    # 7.当前批次已读完才等待通知；仍有后续批次时立即继续读取。
-                    signal.wait(version, timeout=0.5)
+            # 6.投影失败和过滤掉的事件都不发送，但都随扫描游标一起越过，不会被重复读取。
+            events = [
+                event for row in rows
+                if (event := AgentProtocolEventProjector.to_public_event(row.payload)) is not None
+            ]
+            for event in events:
+                if stream_request.matches(event):
+                    yield event.model_dump(mode="json")
+
+            # 7.只有本批扫描到的行才推进游标；终态事件由本事务提交，看到它即可结束。
+            terminal = any(
+                event.method == "lifecycle"
+                and not event.params.namespace
+                and isinstance(event.params.data, Mapping)
+                and event.params.data.get("status") in AGENT_RUN_TERMINAL_STATUSES
+                for event in events
+            )
+            if rows:
+                cursor = rows[-1].sequence
+
+            if time.monotonic() >= heartbeat_at:
+                # 8.心跳仅维持 SSE 连接；None 由响应适配器编码为注释行，不进入业务事件流。
+                yield None
+                heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
+            if len(rows) < self._SSE_BATCH_SIZE:
+                if terminal:
+                    return
+                if not events and status in AGENT_RUN_TERMINAL_STATUSES:
+                    return
+                # 9.当前批次已读完才等待通知；仍有后续批次时立即继续读取。
+                # 单进程内提交必然触发唤醒，空闲时睡到下一次心跳，不做固定节奏空轮询。
+                event_signal.wait(version, timeout=max(0.0, heartbeat_at - time.monotonic()))

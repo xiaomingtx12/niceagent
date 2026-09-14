@@ -220,7 +220,7 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 两条路径（`_request_cancel`，`agent_run_service.py:822-858`）：
 
 - **执行中的 Run**：只写 `cancel_requested_at`（重复点击不刷新时刻），终态和执行权释放由执行线程负责。
-- **等待表单的 Run**：`_cancel_pending_input` 在同一事务内写 `cancelled` / `finished_at`、清空 `executor_id`、把待填表单搬到 `cancelled_inputs` 并记录 `input_cancellation_sequence`、追加 `interrupted/cancelled` 事件、置 `Message.status = 'stop'`——**立即取消，没有执行线程参与**。
+- **等待表单的 Run**：`_request_cancel` 的待填分支在同一事务内写 `cancelled` / `finished_at`、清空 `executor_id`、把待填表单搬到 `cancelled_inputs` 并记录 `input_cancellation_sequence`、追加 `interrupted/cancelled` 事件、置 `Message.status = 'stop'`——**立即取消，没有执行线程参与**。
 
 信号传递（`_watch_cancel`，`:1202-1214`）：
 - 取消监控线程每 0.5 秒检查 `run.cancel_requested`（`threading.Event`），置位后调用 `agent.request_cancel()` 触发图排空。

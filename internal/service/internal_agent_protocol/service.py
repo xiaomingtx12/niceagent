@@ -171,10 +171,18 @@ class InternalAgentProtocolService:
         self._get_owned_conversation(
             app_id=claims.target_app_id, conversation_id=conversation_id, account=account,
         )
-        row = self.run_service.get_conversation_run(
-            app_id=claims.target_app_id, conversation_id=conversation_id,
-            invoke_from=InvokeFrom.CREATOR_TASK, run_id=run_id,
+        row = (
+            self.db.session.query(AgentRun)
+            .filter(
+                AgentRun.id == run_id,
+                AgentRun.app_id == claims.target_app_id,
+                AgentRun.conversation_id == conversation_id,
+                AgentRun.invoke_from == InvokeFrom.CREATOR_TASK.value,
+            )
+            .one_or_none()
         )
+        if row is None:
+            raise NotFoundException("Agent Run 不存在或不属于当前会话")
         return self._to_run_response(
             row=row,
         )

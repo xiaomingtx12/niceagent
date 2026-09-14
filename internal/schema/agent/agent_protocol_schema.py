@@ -311,18 +311,12 @@ def _parse_last_event_sequence(value: str) -> int | None:
         return None
 
 
-class AgentProtocolCommandResultResp(BaseModel):
-    """命令成功响应中的运行标识。"""
-
-    run_id: UUID
-
-
 class AgentProtocolCommandSuccessResp(BaseModel):
-    """Agent Protocol 命令成功响应。"""
+    """Agent Protocol 命令成功响应；result 保持官方协议的单键信封，SDK 从 result.run_id 读取。"""
 
     type: Literal["success"] = "success"
     id: int = 0
-    result: AgentProtocolCommandResultResp
+    result: dict[str, UUID]
     meta: dict[str, int] | None = None
 
     @classmethod
@@ -341,7 +335,7 @@ class AgentProtocolCommandSuccessResp(BaseModel):
         )
         return cls(
             id=command_id or 0,
-            result=AgentProtocolCommandResultResp(run_id=run_id),
+            result={"run_id": run_id},
             meta=meta,
         )
 
@@ -429,7 +423,6 @@ __all__ = [
     "AgentProtocolCommandInputReq",
     "AgentProtocolCommandMessageReq",
     "AgentProtocolEventStreamReq",
-    "AgentProtocolCommandResultResp",
     "AgentProtocolCommandSuccessResp",
     "AgentProtocolCommandErrorResp",
     "AgentProtocolEvent",
