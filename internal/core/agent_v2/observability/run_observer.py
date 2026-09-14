@@ -9,7 +9,7 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
-from internal.core.agent_v2.entity.token_usage import AgentTokenUsageSummary, RunUsage
+from internal.entity.token_usage import AgentTokenUsageSummary, RunUsage
 from internal.core.agent_v2.observability.callback_metadata import request_model_name, response_model_name
 from internal.core.agent_v2.observability.token_usage import normalize_llm_result
 

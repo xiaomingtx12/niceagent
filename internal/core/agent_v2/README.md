@@ -85,7 +85,7 @@ LangChain Callback 自动累计模型和工具调用数及用量，业务入口�
 
 | 数据 | 消费者与保留原因 |
 | --- | --- |
-| Token、缓存/推理明细、调用数、分模型用量 | `ConversationService` 写入消息统计；Protocol 消息 metrics、工作台用量展示和 `AnalysisService` 报表使用。 |
+| Token、缓存/推理明细、调用数、分模型用量 | `Message.apply_usage()` 更新消息字段，Service 控制事务；Protocol 消息 metrics、工作台用量展示和 `AnalysisService` 报表使用。 |
 | trace_id、last_settled_executor_id | trace_id 关联消息与 Run；结算标识作为 Run 的独立列，在同一事务中防止片段重复累计。 |
 
 Observer 只保留活动模型的 ID/名称、活动工具 ID 及累计统计；不保存 Span、父子调用关系、阶段、诊断事件和执行片段列表。结束后拒绝迟到回调，重复结束不再次计费。装配、沙箱和首字交付保留已有日志；页面执行过程仍由 AgentRunEvent 提供。

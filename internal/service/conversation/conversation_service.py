@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -23,58 +22,14 @@ from internal.service.agent.agent_conversation_cleanup_service import AgentConve
 from internal.service.language_model.provider_api_key_service import ProviderApiKeyService
 from internal.exception import ForbiddenException, NotFoundException
 from internal.model import App, Conversation, EndUser, Message, Account
-from internal.core.agent_v2.entity.token_usage import merge_model_token_usage, normalize_token_details
 
 
 @inject
 @dataclass
 class ConversationService(BaseService):
-    """会话服务，负责 Agent 轨迹、消息状态和 Run 用量持久化。"""
+    """负责会话归属、消息创建和历史管理。"""
 
     db: SQLAlchemy
-
-    @staticmethod
-    def build_run_usage_updates(
-        run_usage: Mapping[str, Any] | None,
-        *,
-        message: Message | None = None,
-    ) -> dict[str, Any]:
-        """将片段用量映射为消息字段；传入消息时累计，调用方负责事务与去重。"""
-        # 1.没有 Run 用量时不覆盖消息原有统计。
-        if not run_usage:
-            return {}
-        # 2.规范化输入、输出 Token 明细，兼容缺失或异常结构。
-        input_details = normalize_token_details(run_usage.get("input_details"))
-        output_details = normalize_token_details(run_usage.get("output_details"))
-
-        # 3.即使本片段没有返回 Token，用量统计仍保留真实调用次数。
-        updates: dict[str, Any] = {
-            "trace_id": run_usage.get("trace_id"),
-            "model_call_count": int(run_usage.get("model_call_count", 0) or 0),
-            "tool_call_count": int(run_usage.get("tool_call_count", 0) or 0),
-            "token_usage": merge_model_token_usage(
-                (message.token_usage or {}) if message is not None else {},
-                run_usage.get("models", {}) or {},
-            ),
-        }
-        if run_usage.get("usage_present"):
-            # 4.补充输入、输出、缓存、推理和总 Token 统计。
-            updates.update(
-                {
-                    "input_token_count": int(run_usage.get("input_tokens", 0) or 0),
-                    "output_token_count": int(run_usage.get("output_tokens", 0) or 0),
-                    "cached_token_count": input_details.get("cached", 0),
-                    "reasoning_token_count": max(
-                        input_details.get("reasoning", 0),
-                        output_details.get("reasoning", 0),
-                    ),
-                    "total_token_count": int(run_usage.get("total_tokens", 0) or 0),
-                }
-            )
-        if message is not None:
-            for key in updates.keys() - {"trace_id", "token_usage"}:
-                updates[key] += getattr(message, key, 0) or 0
-        return updates
 
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None

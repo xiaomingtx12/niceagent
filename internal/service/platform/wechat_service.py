@@ -272,9 +272,6 @@ class WechatService(BaseService):
                 updates = {
                     "status": MessageStatus.NORMAL,
                     "latency": max(0.0, time.monotonic() - started_at),
-                    **ConversationService.build_run_usage_updates(
-                        result.usage
-                    ),
                 }
                 if result.answer:
                     updates["answer"] = result.answer
@@ -283,6 +280,7 @@ class WechatService(BaseService):
                     if persisted_message is not None:
                         for field, value in updates.items():
                             setattr(persisted_message, field, value)
+                        persisted_message.apply_usage(result.usage)
             except Exception as exc:
                 observer.finish()
                 with self.db.auto_commit():
@@ -294,10 +292,7 @@ class WechatService(BaseService):
                             0.0,
                             time.monotonic() - started_at,
                         )
-                        for field, value in ConversationService.build_run_usage_updates(
-                            observer.build_run_usage()
-                        ).items():
-                            setattr(persisted_message, field, value)
+                        persisted_message.apply_usage(observer.build_run_usage())
                 logger.error(
                     "微信公众号 Agent 执行失败 message_id=%s",
                     message_id,

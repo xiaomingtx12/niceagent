@@ -17,7 +17,7 @@ from .run_context import (
     AgentRunContext,
     AgentConversationIdentity,
 )
-from .token_usage import AgentTokenUsage, AgentTokenUsageSummary
+from internal.entity.token_usage import AgentTokenUsage, AgentTokenUsageSummary
 from .tool import DATASET_RETRIEVAL_TOOL_NAME
 from .workspace_path import (
     AgentWorkspacePathPolicy,

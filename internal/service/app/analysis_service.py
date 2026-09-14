@@ -8,7 +8,7 @@ from injector import inject
 from redis import Redis
 
 from internal.model import Account, App, Message
-from internal.core.agent_v2.entity.token_usage import normalize_token_details
+from internal.entity.token_usage import normalize_token_details
 from pkg.sqlalchemy import SQLAlchemy
 from .app_service import AppService
 from internal.service.common.base_service import BaseService

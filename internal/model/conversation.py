@@ -1,3 +1,6 @@
+from collections.abc import Mapping
+from typing import Any
+
 from sqlalchemy import (
     Column,
     UUID,
@@ -15,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from internal.extension.database_extension import db
+from internal.entity.token_usage import merge_model_token_usage, normalize_token_details
 
 
 class Conversation(db.Model):
@@ -177,6 +181,51 @@ class Message(db.Model):
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
+
+    def apply_usage(
+        self,
+        run_usage: Mapping[str, Any] | None,
+        *,
+        accumulate: bool = False,
+    ) -> None:
+        """写入执行用量；工作台按片段累计，单次执行覆盖统计，事务与去重由调用方控制。"""
+        # 1.没有 Run 用量时不覆盖消息原有统计。
+        if not run_usage:
+            return
+        # 2.规范化输入、输出 Token 明细，兼容缺失或异常结构。
+        input_details = normalize_token_details(run_usage.get("input_details"))
+        output_details = normalize_token_details(run_usage.get("output_details"))
+
+        # 3.即使本片段没有返回 Token，用量统计仍保留真实调用次数。
+        updates: dict[str, Any] = {
+            "trace_id": run_usage.get("trace_id"),
+            "model_call_count": int(run_usage.get("model_call_count", 0) or 0),
+            "tool_call_count": int(run_usage.get("tool_call_count", 0) or 0),
+            "token_usage": merge_model_token_usage(
+                (self.token_usage or {}) if accumulate else {},
+                run_usage.get("models", {}) or {},
+            ),
+        }
+        if run_usage.get("usage_present"):
+            # 4.补充输入、输出、缓存、推理和总 Token 统计。
+            updates.update(
+                {
+                    "input_token_count": int(run_usage.get("input_tokens", 0) or 0),
+                    "output_token_count": int(run_usage.get("output_tokens", 0) or 0),
+                    "cached_token_count": input_details.get("cached", 0),
+                    "reasoning_token_count": max(
+                        input_details.get("reasoning", 0),
+                        output_details.get("reasoning", 0),
+                    ),
+                    "total_token_count": int(run_usage.get("total_tokens", 0) or 0),
+                }
+            )
+        if accumulate:
+            for key in updates.keys() - {"trace_id", "token_usage"}:
+                updates[key] += getattr(self, key, 0) or 0
+        for key, value in updates.items():
+            setattr(self, key, value)
+
 
     @property
     def conversation(self) -> Conversation:

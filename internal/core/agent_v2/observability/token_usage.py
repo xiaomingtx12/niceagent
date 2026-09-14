@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, AIMessageChunk
 from langchain_core.outputs import LLMResult
 
-from internal.core.agent_v2.entity.token_usage import AgentTokenUsage, normalize_token_details
+from internal.entity.token_usage import AgentTokenUsage, normalize_token_details
 
 
 _INPUT_KEYS = ("input_tokens", "prompt_tokens", "prompt_token_count")

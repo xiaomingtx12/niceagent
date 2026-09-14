@@ -7,7 +7,7 @@
 | `run_observer.py` | 活动调用登记、用量累计、重复结束保护和统计冻结 |
 | `callback_metadata.py` | 请求/响应模型名称与摘要进度的异常分类 |
 | `token_usage.py` | 将不同 Provider 的用量字段归一化 |
-| `../entity/token_usage.py` | 片段用量结构、按模型累计与历史 Token 明细别名归一化 |
+| `internal/entity/token_usage.py` | 框架和业务模型共用的片段用量、模型累计与历史明细别名规则 |
 
 数据流：框架回调 → `AgentExecutionResult.usage` → `finalize_run()` 在 Run 锁内累计到 Message。`AgentRun.executor_id` 校验执行权，`last_settled_executor_id` 防止同一片段重复结算；消息统计、结算标识、状态和结束事件在同一事务提交。任一步骤失败全部回滚。
 
