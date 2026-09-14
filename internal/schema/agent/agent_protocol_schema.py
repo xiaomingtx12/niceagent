@@ -1,4 +1,4 @@
-"""Agent Protocol 工作台的输入协议 Schema。
+"""Agent Protocol 的输入协议 Schema。
 
 协议字段由前端 SDK 发送，HTTP 层只负责读取 JSON；业务字段的结构和
 限制在这里集中定义，避免 Service 里散落大量 ``Mapping`` 取值代码。
@@ -33,7 +33,7 @@ PUBLIC_EVENT_METHODS = (
 )
 
 
-class WorkbenchCommandMessageReq(BaseModel):
+class AgentProtocolCommandMessageReq(BaseModel):
     """一次 run.start 中最后一条用户消息。"""
 
     model_config = ConfigDict(extra="allow")
@@ -57,12 +57,12 @@ class WorkbenchCommandMessageReq(BaseModel):
         return str(self.content or "")
 
 
-class WorkbenchCommandInputReq(BaseModel):
+class AgentProtocolCommandInputReq(BaseModel):
     """从 Agent Protocol command 中提取出的业务输入。"""
 
     model_config = ConfigDict(extra="allow")
 
-    messages: list[WorkbenchCommandMessageReq] = Field(default_factory=list)
+    messages: list[AgentProtocolCommandMessageReq] = Field(default_factory=list)
     query: StrictStr | None = None
     planning_enabled: bool = Field(default=False, strict=True)
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
@@ -120,7 +120,7 @@ class WorkbenchCommandInputReq(BaseModel):
         )
 
 
-class WorkbenchInputResponseReq(BaseModel):
+class AgentProtocolInputResponseReq(BaseModel):
     """只接受已知中断的答案，不开放图跳转或状态任意写入。"""
 
     model_config = ConfigDict(extra="forbid")
@@ -130,12 +130,12 @@ class WorkbenchInputResponseReq(BaseModel):
     response: dict[str, Any]
 
 
-class WorkbenchInputRespondReq(BaseModel):
+class AgentProtocolInputRespondReq(BaseModel):
     """兼容 SDK 单个与批量 input.respond 请求。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    responses: list[WorkbenchInputResponseReq] = Field(min_length=1, max_length=40)
+    responses: list[AgentProtocolInputResponseReq] = Field(min_length=1, max_length=40)
 
     @model_validator(mode="before")
     @classmethod
@@ -146,7 +146,7 @@ class WorkbenchInputRespondReq(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def reject_duplicates(self) -> "WorkbenchInputRespondReq":
+    def reject_duplicates(self) -> "AgentProtocolInputRespondReq":
         """一条命令中的中断只能出现一次。"""
         ids = [item.interrupt_id for item in self.responses]
         if len(ids) != len(set(ids)):
@@ -154,7 +154,7 @@ class WorkbenchInputRespondReq(BaseModel):
         return self
 
 
-class WorkbenchInputReopenReq(BaseModel):
+class AgentProtocolInputReopenReq(BaseModel):
     """用取消事件序号限定恢复批次，防止迟到请求复活后来停止的任务。"""
 
     model_config = ConfigDict(extra="forbid")
@@ -163,7 +163,7 @@ class WorkbenchInputReopenReq(BaseModel):
     cancellation_sequence: int = Field(gt=0, strict=True)
 
 
-class WorkbenchCommandReq(BaseModel):
+class AgentProtocolCommandReq(BaseModel):
     """在请求解析时确定命令参数类型，分派阶段只消费已规范化的数据。"""
 
     model_config = ConfigDict(extra="allow", frozen=True)
@@ -171,12 +171,12 @@ class WorkbenchCommandReq(BaseModel):
     type: StrictStr | None = None
     id: StrictInt | None = None
     method: Literal["run.start", "input.respond", "input.reopen"]
-    params: AgentRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq = Field(
+    params: AgentRunInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq = Field(
         default_factory=dict, validate_default=True,
     )
 
     @classmethod
-    def from_mapping(cls, command: Any) -> "WorkbenchCommandReq":
+    def from_mapping(cls, command: Any) -> "AgentProtocolCommandReq":
         """HTTP 入口一次完成外壳与参数校验，失败使用统一项目异常。"""
         if not isinstance(command, Mapping):
             raise ValidateErrorException("工作台命令必须是 JSON 对象")
@@ -189,19 +189,19 @@ class WorkbenchCommandReq(BaseModel):
     @classmethod
     def parse_params(
         cls, value: Any, info: ValidationInfo,
-    ) -> AgentRunInput | WorkbenchInputRespondReq | WorkbenchInputReopenReq:
+    ) -> AgentRunInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq:
         """按方法解析唯一参数类型，旧 SDK 的嵌套输入和单条回答在此收敛。"""
         if not isinstance(value, Mapping):
             raise ValueError("命令 params 必须是对象")
         method = info.data.get("method")
         if method == "input.respond":
             try:
-                return WorkbenchInputRespondReq.model_validate(value)
+                return AgentProtocolInputRespondReq.model_validate(value)
             except ValidationError as exc:
                 raise ValidateErrorException("表单提交格式错误") from exc
         if method == "input.reopen":
             try:
-                return WorkbenchInputReopenReq.model_validate(value)
+                return AgentProtocolInputReopenReq.model_validate(value)
             except ValidationError as exc:
                 raise ValidateErrorException("表单恢复格式错误") from exc
         if method != "run.start":
@@ -210,7 +210,7 @@ class WorkbenchCommandReq(BaseModel):
         if not isinstance(raw, Mapping):
             raise ValidateErrorException("run.start 的 input 必须是对象")
         try:
-            parsed = WorkbenchCommandInputReq.model_validate(raw)
+            parsed = AgentProtocolCommandInputReq.model_validate(raw)
             if not parsed.messages and not parsed.query:
                 raise ValidateErrorException("run.start 需要 input.messages 或 query")
             return parsed.to_run_input()
@@ -219,7 +219,7 @@ class WorkbenchCommandReq(BaseModel):
 
 
 
-class WorkbenchEventParams(BaseModel):
+class AgentProtocolEventParams(BaseModel):
     """一条工作台协议事件的公共参数。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -231,7 +231,7 @@ class WorkbenchEventParams(BaseModel):
     node: StrictStr | None = None
 
 
-class WorkbenchEvent(BaseModel):
+class AgentProtocolEvent(BaseModel):
     """经过公开通道投影、可持久化和对外传输的工作台事件。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -240,10 +240,10 @@ class WorkbenchEvent(BaseModel):
     event_id: StrictStr = Field(min_length=1)
     seq: StrictInt = Field(ge=0)
     method: Literal[*PUBLIC_EVENT_METHODS]
-    params: WorkbenchEventParams
+    params: AgentProtocolEventParams
 
 
-class WorkbenchEventStreamReq(BaseModel):
+class AgentProtocolEventStreamReq(BaseModel):
     """SSE 订阅过滤条件。
 
     ``input`` 和 ``checkpoints`` 是 LangGraph SDK 根订阅的控制 channel。
@@ -275,7 +275,7 @@ class WorkbenchEventStreamReq(BaseModel):
         body: Mapping[str, Any] | None,
         *,
         last_event_id: str | None = None,
-    ) -> "WorkbenchEventStreamReq":
+    ) -> "AgentProtocolEventStreamReq":
         payload = dict(body) if isinstance(body, Mapping) else {}
         if last_event_id:
             sequence = _parse_last_event_sequence(last_event_id)
@@ -287,7 +287,7 @@ class WorkbenchEventStreamReq(BaseModel):
         except ValidationError as exc:
             raise ValidateErrorException(f"工作台订阅参数错误: {exc}") from exc
 
-    def matches(self, event: WorkbenchEvent) -> bool:
+    def matches(self, event: AgentProtocolEvent) -> bool:
         """判断协议事件是否符合订阅过滤条件。"""
         channel = "input" if event.method == "input.requested" else event.method
         if self.channels and channel not in self.channels:
@@ -311,18 +311,18 @@ def _parse_last_event_sequence(value: str) -> int | None:
         return None
 
 
-class WorkbenchCommandResultResp(BaseModel):
+class AgentProtocolCommandResultResp(BaseModel):
     """命令成功响应中的运行标识。"""
 
     run_id: UUID
 
 
-class WorkbenchCommandSuccessResp(BaseModel):
+class AgentProtocolCommandSuccessResp(BaseModel):
     """Agent Protocol 命令成功响应。"""
 
     type: Literal["success"] = "success"
     id: int = 0
-    result: WorkbenchCommandResultResp
+    result: AgentProtocolCommandResultResp
     meta: dict[str, int] | None = None
 
     @classmethod
@@ -332,7 +332,7 @@ class WorkbenchCommandSuccessResp(BaseModel):
         command_id: int | None,
         run_id: UUID,
         applied_through_sequence: int | None = None,
-    ) -> "WorkbenchCommandSuccessResp":
+    ) -> "AgentProtocolCommandSuccessResp":
         """创建命令成功响应。"""
         meta = (
             {"applied_through_seq": applied_through_sequence}
@@ -341,12 +341,12 @@ class WorkbenchCommandSuccessResp(BaseModel):
         )
         return cls(
             id=command_id or 0,
-            result=WorkbenchCommandResultResp(run_id=run_id),
+            result=AgentProtocolCommandResultResp(run_id=run_id),
             meta=meta,
         )
 
 
-class WorkbenchCommandErrorResp(BaseModel):
+class AgentProtocolCommandErrorResp(BaseModel):
     """Agent Protocol 命令错误响应。"""
 
     type: Literal["error"] = "error"
@@ -356,7 +356,7 @@ class WorkbenchCommandErrorResp(BaseModel):
     field_errors: dict[str, dict[str, str]] | None = None
 
 
-class WorkbenchHistoryMessageResp(BaseModel):
+class AgentProtocolHistoryMessageResp(BaseModel):
     """状态水合和消息分页中的一条对话消息。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -367,14 +367,14 @@ class WorkbenchHistoryMessageResp(BaseModel):
     additional_kwargs: dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkbenchMessagePageInfoResp(BaseModel):
+class AgentProtocolMessagePageInfoResp(BaseModel):
     """工作台历史消息分页信息。"""
 
     has_more: bool = False
     next_before: UUID | None = None
 
 
-class WorkbenchRunMetadataResp(BaseModel):
+class AgentProtocolRunMetadataResp(BaseModel):
     """工作台状态中的当前 Run 摘要。"""
 
     run_id: UUID | None = None
@@ -382,7 +382,7 @@ class WorkbenchRunMetadataResp(BaseModel):
     last_event_sequence: int = Field(default=0, ge=0)
 
 
-class WorkbenchRunSummaryResp(BaseModel):
+class AgentProtocolRunSummaryResp(BaseModel):
     """会话中的运行摘要；不包含执行事件，也不占用事件序号。"""
 
     run_id: UUID
@@ -396,16 +396,16 @@ class WorkbenchRunSummaryResp(BaseModel):
     error: str | None = None
 
 
-class WorkbenchStateResp(BaseModel):
+class AgentProtocolStateResp(BaseModel):
     """兼容 LangGraph SDK 的工作台状态响应。"""
 
     values: dict[str, Any] = Field(default_factory=dict)
     next: list[str] = Field(default_factory=list)
     tasks: list[dict[str, Any]] = Field(default_factory=list)
-    metadata: WorkbenchRunMetadataResp
+    metadata: AgentProtocolRunMetadataResp
 
 
-class WorkbenchCancelResp(BaseModel):
+class AgentProtocolCancelResp(BaseModel):
     """工作台取消指定 Run 的响应。"""
 
     cancel_requested: bool
@@ -413,22 +413,31 @@ class WorkbenchCancelResp(BaseModel):
     status: str
 
 
+class AgentProtocolRunEventsResp(BaseModel):
+    """单个 Run 的执行详情按稳定序号升序分页。"""
+
+    run_id: UUID
+    events: list[AgentProtocolEvent]
+    next_page: int | None = None
+
+
 __all__ = [
     "PUBLIC_EVENT_METHODS",
-    "WorkbenchCommandReq",
-    "WorkbenchInputReopenReq",
-    "WorkbenchCommandInputReq",
-    "WorkbenchCommandMessageReq",
-    "WorkbenchEventStreamReq",
-    "WorkbenchCommandResultResp",
-    "WorkbenchCommandSuccessResp",
-    "WorkbenchCommandErrorResp",
-    "WorkbenchEvent",
-    "WorkbenchEventParams",
-    "WorkbenchHistoryMessageResp",
-    "WorkbenchMessagePageInfoResp",
-    "WorkbenchRunMetadataResp",
-    "WorkbenchRunSummaryResp",
-    "WorkbenchStateResp",
-    "WorkbenchCancelResp",
+    "AgentProtocolRunEventsResp",
+    "AgentProtocolCommandReq",
+    "AgentProtocolInputReopenReq",
+    "AgentProtocolCommandInputReq",
+    "AgentProtocolCommandMessageReq",
+    "AgentProtocolEventStreamReq",
+    "AgentProtocolCommandResultResp",
+    "AgentProtocolCommandSuccessResp",
+    "AgentProtocolCommandErrorResp",
+    "AgentProtocolEvent",
+    "AgentProtocolEventParams",
+    "AgentProtocolHistoryMessageResp",
+    "AgentProtocolMessagePageInfoResp",
+    "AgentProtocolRunMetadataResp",
+    "AgentProtocolRunSummaryResp",
+    "AgentProtocolStateResp",
+    "AgentProtocolCancelResp",
 ]

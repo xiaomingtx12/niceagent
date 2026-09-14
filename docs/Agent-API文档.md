@@ -225,7 +225,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
   - 流式事件参数：
     - `event -> str`：SSE 事件名，取自事件的 `method`，例如：`messages(消息)`、`values(状态)`、`tools(工具)`、`lifecycle(生命周期)`、`custom(上下文观测)`、`input.requested(待填表单)`。
     - `id -> str`：SSE 事件 id，格式为 `<run_id>:<seq>`，可直接作为下次请求的 `Last-Event-ID`。
-    - `data -> dict`：事件正文，为一个完整的 `WorkbenchEvent` 对象，结构见文末「工作台事件数据结构」。
+    - `data -> dict`：事件正文，为一个完整的 `AgentProtocolEvent` 对象，结构见文末「工作台事件数据结构」。
 
   首次建立连接时会先发送一行 `: connected` 注释；空闲超过 15 秒会发送一行 `: heartbeat` 心跳注释，用于保持连接与探测断线。**响应为 `text/event-stream`，不包含平台信封。**
 
@@ -583,7 +583,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
     - `page_size -> int`：可选参数，每页数据条数，默认为 20，范围为 1–50。
   - 响应参数：
     - `run_id -> uuid`：运行 id，类型为 uuid。
-    - `events -> list[dict]`：该页的执行事件，元素为 `WorkbenchEvent` 对象，结构见文末「工作台事件数据结构」。
+    - `events -> list[dict]`：该页的执行事件，元素为 `AgentProtocolEvent` 对象，结构见文末「工作台事件数据结构」。
     - `next_page -> int`：下一页页码；没有下一页时为 `null`。
 
 - **请求示例**：
@@ -3256,7 +3256,7 @@ Agent 测评用于对已完成的历史任务或重新执行的任务按评分�
 
 ### 01. 工作台命令与事件数据结构
 
-工作台事件（`WorkbenchEvent`）是所有实时事件、历史事件和运行详情的统一结构：
+工作台事件（`AgentProtocolEvent`）是所有实时事件、历史事件和运行详情的统一结构：
 
 ```json
 {

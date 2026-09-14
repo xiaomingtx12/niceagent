@@ -12,8 +12,8 @@ from internal.entity.agent_run_entity import AgentModelSelection
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.schema.agent.agent_model_schema import (
-    WorkbenchModelSettingsResp,
-    WorkbenchModelChoiceResp,
+    AgentProtocolModelSettingsResp,
+    AgentProtocolModelChoiceResp,
 )
 from internal.schema.app.app_config_schema import AppModelConfigReq
 from internal.service.language_model.language_model_service import LanguageModelService
@@ -35,7 +35,7 @@ class AgentModelService:
     def restore_model_settings(
         self, *, account_id: UUID, app_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
         saved: Mapping[str, Any],
-    ) -> WorkbenchModelSettingsResp:
+    ) -> AgentProtocolModelSettingsResp:
         """一次读取默认配置，恢复有效历史覆盖；覆盖失效时就地回退，不重复查询应用。"""
         # 1.默认来源只读取一次；旧客户端的默认展示值不能变成永久模型绑定。
         if saved.get("model_selection") and saved.get("model_selection_explicit") is not True:
@@ -46,7 +46,7 @@ class AgentModelService:
                 invoke_from=invoke_from,
             )
         except (NotFoundException, ValidateErrorException, ValueError):
-            return WorkbenchModelSettingsResp()
+            return AgentProtocolModelSettingsResp()
         try:
             raw_selection = saved.get("model_selection")
             selection = AgentModelSelection.model_validate(raw_selection) if raw_selection else None
@@ -65,7 +65,7 @@ class AgentModelService:
                 if config is not None and model is None:
                     model = self._get_model_entity(config, owner_account_id)
                 if config is None or model is None:
-                    return WorkbenchModelSettingsResp()
+                    return AgentProtocolModelSettingsResp()
 
                 # 3.思考强度优先采用应用配置，未设置时才采用模型声明的默认值。
                 parameter = self._reasoning_parameter(model)
@@ -90,12 +90,12 @@ class AgentModelService:
                     )
 
                 # 5.构造响应时只引用已算好的字段，不在响应内部混入权限和回退分支。
-                return WorkbenchModelSettingsResp(
+                return AgentProtocolModelSettingsResp(
                     model=config.model,
                     provider=config.provider,
                     selected_model=selected_model,
                     model_override=selection,
-                    available_models=self._workbench_model_choices(
+                    available_models=self._model_choices(
                         account_id=account_id, created_by=created_by,
                         invoke_from=invoke_from,
                     ),
@@ -108,7 +108,7 @@ class AgentModelService:
             except (NotFoundException, ValidateErrorException, ValueError):
                 # 无效覆盖的思考强度不能被带到回退模型。
                 saved = {}
-        return WorkbenchModelSettingsResp()
+        return AgentProtocolModelSettingsResp()
 
     def validate_reasoning_effort(
         self, *, account_id: UUID, app_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
@@ -193,9 +193,9 @@ class AgentModelService:
         )
         return definition.config.model_config_data, definition.account_id
 
-    def _workbench_model_choices(
+    def _model_choices(
         self, *, account_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
-    ) -> list[WorkbenchModelChoiceResp]:
+    ) -> list[AgentProtocolModelChoiceResp]:
         """目录按可信账号和创建者身份过滤，不向 WebApp 或开放 API 暴露。"""
         if invoke_from not in _MODEL_SELECTABLE_SOURCES:
             return []
@@ -217,7 +217,7 @@ class AgentModelService:
                 if parameter:
                     reasoning_levels = [option["value"] for option in parameter.get("options", [])]
                     default_effort = parameter.get("default")
-                choices.append(WorkbenchModelChoiceResp(
+                choices.append(AgentProtocolModelChoiceResp(
                     provider=group["provider_name"],
                     model=model["model_name"],
                     provider_connection_id=group["connection_id"],

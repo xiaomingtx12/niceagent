@@ -14,12 +14,12 @@ from internal.entity import AGENT_RUN_ACTIVE_STATUSES, AGENT_RUN_TERMINAL_STATUS
 from internal.exception import NotFoundException
 from internal.model import Account, AgentRun, AgentRunEvent
 from internal.schema.agent.agent_model_schema import (
-    WorkbenchModelSettingsResp,
+    AgentProtocolModelSettingsResp,
 )
-from internal.schema.agent.agent_workbench_read_schema import WorkbenchRunEventsResp
-from internal.schema.agent.agent_workbench_schema import (
-    PUBLIC_EVENT_METHODS, WorkbenchEvent, WorkbenchEventStreamReq, WorkbenchStateResp,
-    WorkbenchMessagePageInfoResp, WorkbenchRunMetadataResp, WorkbenchRunSummaryResp,
+from internal.schema.agent.agent_protocol_schema import (
+    PUBLIC_EVENT_METHODS, AgentProtocolEvent, AgentProtocolEventStreamReq, AgentProtocolStateResp,
+    AgentProtocolMessagePageInfoResp, AgentProtocolRunMetadataResp, AgentProtocolRunSummaryResp,
+    AgentProtocolRunEventsResp,
 )
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 from internal.service.agent_protocol.message_projector import project_conversation_messages, merge_running_messages
@@ -35,7 +35,7 @@ from .agent_run_service import AgentRunService
 class EventBatch:
     """内部扫描结果；游标独立于过滤后的事件，不作为 HTTP 响应校验或序列化。"""
 
-    events: list[WorkbenchEvent]
+    events: list[AgentProtocolEvent]
     next_sequence: int
     has_more: bool
 
@@ -55,7 +55,7 @@ class AgentRunQuery:
 
     def stream_events(
         self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom,
-        stream_request: WorkbenchEventStreamReq,
+        stream_request: AgentProtocolEventStreamReq,
     ) -> Iterator[dict[str, Any] | None]:
         """创建事件流；数据库 Session 在流开始前释放，避免占用请求连接。"""
         # 1.会话权限已在 Handler 中校验；这里只读，终态由执行结算与写路径收敛保证。
@@ -73,14 +73,14 @@ class AgentRunQuery:
 
     def get_state(
         self, *, conversation_id: UUID, invoke_from: InvokeFrom,
-    ) -> WorkbenchStateResp:
+    ) -> AgentProtocolStateResp:
         """读取已授权会话在指定入口下的状态。"""
         # 1.重连和轮询都从这里读真实状态，只读不写；崩溃残留的运行中记录由下一次写操作收敛。
         rows, has_more, next_before = self.conversation_service.get_message_page(
             conversation_id=conversation_id,
             page_size=20,
         )
-        message_page = WorkbenchMessagePageInfoResp(
+        message_page = AgentProtocolMessagePageInfoResp(
             has_more=has_more,
             next_before=next_before,
         )
@@ -111,7 +111,7 @@ class AgentRunQuery:
         # 3.状态接口只返回摘要；失败原因以 Run 自身记录为准，旧记录回落到业务消息。
         message_errors = {message.id: message.error for message in rows}
         values["runs"] = [
-            WorkbenchRunSummaryResp(
+            AgentProtocolRunSummaryResp(
                 run_id=run.id, message_id=run.message_id,
                 input_message_id=run.input_message_id, status=run.status,
                 last_event_sequence=int(run.last_event_sequence or 0),
@@ -133,11 +133,11 @@ class AgentRunQuery:
             last_event_sequence = int(latest_run.last_event_sequence or 0)
         # 5.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
         tasks = project_pending_tasks(status, values)
-        return WorkbenchStateResp(
+        return AgentProtocolStateResp(
             values=values,
             next=["agent"] if status in AGENT_RUN_ACTIVE_STATUSES else [],
             tasks=tasks,
-            metadata=WorkbenchRunMetadataResp(
+            metadata=AgentProtocolRunMetadataResp(
                 run_id=run_id,
                 status=status,
                 last_event_sequence=last_event_sequence,
@@ -146,7 +146,7 @@ class AgentRunQuery:
 
     def list_run_events(
         self, *, run_id: UUID, account: Account, current_page: int, page_size: int,
-    ) -> WorkbenchRunEventsResp:
+    ) -> AgentProtocolRunEventsResp:
         """校验 Run 所属会话的访问权限，再分页读取已保存的执行事件。"""
         row = (
             self.db.session.query(AgentRun.app_id, AgentRun.conversation_id)
@@ -174,7 +174,7 @@ class AgentRunQuery:
             event for row in rows[:page_size]
             if (event := AgentProtocolEventProjector.to_public_event(row.payload)) is not None
         ]
-        return WorkbenchRunEventsResp(
+        return AgentProtocolRunEventsResp(
             run_id=run_id, events=events,
             next_page=current_page + 1 if len(rows) > page_size else None,
         )
@@ -182,7 +182,7 @@ class AgentRunQuery:
     def get_model_settings(
         self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
         invoke_from: InvokeFrom,
-    ) -> WorkbenchModelSettingsResp:
+    ) -> AgentProtocolModelSettingsResp:
         """独立读取当前可用模型配置，恢复最近一次覆盖时不加载消息和运行事件。"""
         saved = self._get_latest_model_overrides(
             conversation_id=conversation_id,
@@ -277,7 +277,7 @@ class AgentRunQuery:
         )
 
     def _stream_events(
-        self, *, conversation_id: UUID, invoke_from: InvokeFrom, stream_request: WorkbenchEventStreamReq,
+        self, *, conversation_id: UUID, invoke_from: InvokeFrom, stream_request: AgentProtocolEventStreamReq,
         run_id: UUID,
     ) -> Iterator[dict[str, Any] | None]:
         """读取已提交事件并产生 SSE 心跳哨兵，进程内跟踪器只负责事件通知。"""

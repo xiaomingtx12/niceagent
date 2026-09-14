@@ -8,7 +8,7 @@ import time
 from pydantic import ValidationError
 
 from internal.core.agent_v2 import AgentEvent
-from internal.schema.agent.agent_workbench_schema import PUBLIC_EVENT_METHODS, WorkbenchEvent
+from internal.schema.agent.agent_protocol_schema import PUBLIC_EVENT_METHODS, AgentProtocolEvent
 from internal.schema.agent.agent_context_schema import ContextCompactionResp, ContextWindowResp
 from .state_projector import project_public_state
 
@@ -27,7 +27,7 @@ class AgentProtocolEventProjector:
         self.last_event_sequence = start_sequence
         self._root_message_id = root_message_id
 
-    def project(self, event: AgentEvent) -> WorkbenchEvent | None:
+    def project(self, event: AgentEvent) -> AgentProtocolEvent | None:
         """筛选展示通道并绑定业务身份，根终态由业务事务提交后生成。"""
         # 1.根终态只由平台事务发布，避免图结束早于业务提交。
         data = event.data
@@ -52,11 +52,11 @@ class AgentProtocolEventProjector:
     def generated(
         self, method: Literal["values", "lifecycle", "input.requested"], data: Mapping[str, Any],
         *, namespace: list[str] | None = None,
-    ) -> WorkbenchEvent:
-        """业务事务产生的事件与 Core 事件共用持久化序号。"""
+    ) -> AgentProtocolEvent:
+        """业务事务产生的事件与 Core 事件共用持久化序号；来源标识 ``workbench`` 是已发布的线协议取值，不随 Python 命名调整。"""
         return self._create_event(method, data, namespace=namespace or (), source="workbench")
 
-    def generated_state_transition(self, state: Mapping[str, Any], lifecycle: Mapping[str, Any]) -> list[WorkbenchEvent]:
+    def generated_state_transition(self, state: Mapping[str, Any], lifecycle: Mapping[str, Any]) -> list[AgentProtocolEvent]:
         """状态、表单、生命周期按顺序生成，调用方负责同一事务提交。"""
         # 1.先保存状态，再发送表单，最后发送生命周期。
         events = [self.generated("values", state)]
@@ -68,7 +68,7 @@ class AgentProtocolEventProjector:
         return events
 
     @staticmethod
-    def to_public_event(event: Mapping[str, Any]) -> WorkbenchEvent | None:
+    def to_public_event(event: Mapping[str, Any]) -> AgentProtocolEvent | None:
         """只用于历史 JSON 读取，实时事件不再走历史兼容转换。"""
         method = event.get("method")
         if not isinstance(method, str) or method not in PUBLIC_EVENT_METHODS:
@@ -79,19 +79,19 @@ class AgentProtocolEventProjector:
             if data is None:
                 return None
             event = {**event, "params": {**params, "data": data}}
-        return WorkbenchEvent.model_validate(event)
+        return AgentProtocolEvent.model_validate(event)
 
     def _create_event(
         self, method: str, data: Mapping[str, Any], *, namespace: tuple[str, ...] | list[str],
         source: str, timestamp: int | float | None = None, node: str | None = None,
         source_sequence: int | None = None,
-    ) -> WorkbenchEvent:
+    ) -> AgentProtocolEvent:
         """直接构造最终协议对象，避免字典外壳与 JSON 序列化往返。"""
         self.last_event_sequence += 1
         metadata: dict[str, Any] = {"source": source}
         if source_sequence is not None:
             metadata["source_seq"] = source_sequence
-        return WorkbenchEvent(
+        return AgentProtocolEvent(
             type="event", event_id=f"{self.run_id}:{self.last_event_sequence}",
             seq=self.last_event_sequence, method=method,
             params={

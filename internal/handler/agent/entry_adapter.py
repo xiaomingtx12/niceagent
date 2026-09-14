@@ -12,9 +12,9 @@ from uuid import UUID
 from flask import Response, request
 
 from internal.entity.conversation_entity import InvokeFrom
-from internal.schema.agent.agent_workbench_schema import (
-    WorkbenchCommandReq,
-    WorkbenchEventStreamReq,
+from internal.schema.agent.agent_protocol_schema import (
+    AgentProtocolCommandReq,
+    AgentProtocolEventStreamReq,
 )
 from internal.service.agent.agent_run_query import AgentRunQuery
 from internal.service.agent.agent_run_service import AgentRunService
@@ -36,7 +36,7 @@ class AgentRunCaller:
 
 def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Response:
     """解析命令并分派业务操作，命令 ID 只进入响应外壳。"""
-    command = WorkbenchCommandReq.from_mapping(request.get_json(silent=True))
+    command = AgentProtocolCommandReq.from_mapping(request.get_json(silent=True))
     result = execute_command(
         service, app_id=caller.app_id, conversation_id=caller.conversation_id,
         invoke_from=caller.invoke_from, account_id=caller.account_id,
@@ -47,7 +47,7 @@ def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Respons
 
 def respond_stream(query_service: AgentRunQuery, caller: AgentRunCaller) -> Response:
     """按已解析游标订阅当前入口的 Run；游标同时接受 Last-Event-ID 头。"""
-    stream_request = WorkbenchEventStreamReq.from_mapping(
+    stream_request = AgentProtocolEventStreamReq.from_mapping(
         request.get_json(silent=True),
         last_event_id=request.headers.get("Last-Event-ID"),
     )

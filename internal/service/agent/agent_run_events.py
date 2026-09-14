@@ -15,7 +15,7 @@ from internal.core.agent_v2 import (
 from internal.entity import AgentRunExecution
 from internal.entity.conversation_entity import InvokeFrom
 from internal.extension.logging_extension import logger
-from internal.schema.agent.agent_workbench_schema import WorkbenchEvent
+from internal.schema.agent.agent_protocol_schema import AgentProtocolEvent
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 
 
@@ -146,7 +146,7 @@ class AgentRunEventBuffer:
         run: AgentRunExecution,
         projector: AgentProtocolEventProjector,
         tracker: AgentRunTracker,
-        commit_events: Callable[[AgentRunExecution, list[WorkbenchEvent]], None],
+        commit_events: Callable[[AgentRunExecution, list[AgentProtocolEvent]], None],
         *,
         started_at: float,
         batch_size: int,
@@ -158,7 +158,7 @@ class AgentRunEventBuffer:
         self._commit_events = commit_events
         self._started_at = started_at
         self._batch_size = batch_size
-        self._pending: list[WorkbenchEvent] = []
+        self._pending: list[AgentProtocolEvent] = []
         self._last_flush_at = time.monotonic()
         self._first_text_published = False
         self._first_reasoning_published = False
@@ -225,7 +225,7 @@ class AgentRunEventBuffer:
         """刷新 Core 已交付的尾批；失败时保留批次供上层处理原始错误。"""
         self._flush()
 
-    def publish(self, event: WorkbenchEvent) -> None:
+    def publish(self, event: AgentProtocolEvent) -> None:
         """直接发布已投影的单个事件；落库、游标与通知走与批量刷新同一条路。"""
         self._pending.append(event)
         self._flush()
@@ -242,9 +242,9 @@ class AgentRunEventBuffer:
         self._last_flush_at = time.monotonic()
 
     @staticmethod
-    def _coalesce_deltas(events: list[WorkbenchEvent]) -> list[WorkbenchEvent]:
+    def _coalesce_deltas(events: list[AgentProtocolEvent]) -> list[AgentProtocolEvent]:
         """只合并尚未提交的相邻同块增量；沿用最后一个序号，重连游标允许跳号。"""
-        merged: list[WorkbenchEvent] = []
+        merged: list[AgentProtocolEvent] = []
         for event in events:
             data = event.params.data
             delta = data.get("delta") if isinstance(data, Mapping) else None

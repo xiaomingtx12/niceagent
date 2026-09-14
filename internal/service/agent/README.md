@@ -31,7 +31,7 @@
 
 会话状态接口只返回消息、Run 摘要和公开状态，不加载执行事件。执行过程由历史分页和实时 SSE 提供；前端共用一个事件集合，运行摘要不再转换为合成事件。
 
-事件投影器直接返回 `WorkbenchEvent`，事件缓冲只批量保存与通知。框架消息解析、摘要过滤及消息结束分片由 Core 完成；`to_public_event` 仅用于读取历史 JSON。
+事件投影器直接返回 `AgentProtocolEvent`，事件缓冲只批量保存与通知。框架消息解析、摘要过滤及消息结束分片由 Core 完成；`to_public_event` 仅用于读取历史 JSON。
 
 终态展示由 `agent_protocol.state_projector` 的 `project_execution_state` 和 `project_execution_lifecycle` 生成；`AgentRunService` 保留数据库读取、业务消息状态、错误脱敏和原子提交顺序。
 
@@ -68,7 +68,7 @@
 - 已发布子 Agent 的模型由其发布配置决定，自定义跟随子 Agent 绑定本次父模型。
 - SDK 的命令 ID、分派及成功／错误外壳由 `agent_protocol/command_adapter.py` 处理，业务命令返回 `RunAccepted` 或 `RunRejected`。
 - `EventBatch` 是 `AgentRunQuery` 内部扫描结果，保留扫描游标，不作为 HTTP 响应 Schema。
-- 公开事件通道词表只在 `agent_workbench_schema.PUBLIC_EVENT_METHODS` 定义一次：DTO 校验的 `Literal`、历史回放过滤和持久化查询都从它派生，新增通道只改这一处。
+- 公开事件通道词表只在 `agent_protocol_schema.PUBLIC_EVENT_METHODS` 定义一次：DTO 校验的 `Literal`、历史回放过滤和持久化查询都从它派生，新增通道只改这一处。
 
 ## 数据对象的位置
 

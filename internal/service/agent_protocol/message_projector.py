@@ -7,21 +7,21 @@ from typing import Any
 from internal.entity import AGENT_RUN_ACTIVE_STATUSES
 
 from internal.model import AgentRun, Message
-from internal.schema.agent.agent_workbench_schema import WorkbenchHistoryMessageResp
+from internal.schema.agent.agent_protocol_schema import AgentProtocolHistoryMessageResp
 
 
 def project_conversation_messages(
     rows: Sequence[Message],
     *,
     runs_by_message: Mapping[UUID, AgentRun] | None = None,
-) -> list[WorkbenchHistoryMessageResp]:
+) -> list[AgentProtocolHistoryMessageResp]:
     """仅在协议适配层把一个业务回合拆成 human 和 ai 消息。"""
-    messages: list[WorkbenchHistoryMessageResp] = []
+    messages: list[AgentProtocolHistoryMessageResp] = []
     for row in rows:
         run = (runs_by_message or {}).get(row.id)
         run_id = str(run.id) if run is not None else row.trace_id
         messages.append(
-            WorkbenchHistoryMessageResp(
+            AgentProtocolHistoryMessageResp(
                 id=(
                     run.input_message_id
                     if run is not None and run.input_message_id
@@ -39,7 +39,7 @@ def project_conversation_messages(
         )
         if row.answer:
             messages.append(
-                WorkbenchHistoryMessageResp(
+                AgentProtocolHistoryMessageResp(
                     id=f"{row.id}:assistant",
                     type="ai",
                     content=row.answer,

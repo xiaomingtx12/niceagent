@@ -41,7 +41,7 @@ from internal.handler import (
     CreatorTaskHandler,
     AgentEvaluationHandler,
 )
-from .agent_workbench_routes import (
+from .agent_routes import (
     register_debug_agent_routes,
     register_web_app_agent_routes,
     register_creator_task_agent_routes,

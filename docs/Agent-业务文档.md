@@ -53,7 +53,7 @@
 | `AgentRunExecution` | `entity/agent_run_entity.py:67` | 当前进程持有的执行片段（`run_id` 稳定，每次恢复分配新 `executor_id`） |
 | `AgentExecutionResult` | `core/agent_v2/entity/execution_result.py:8` | 内核交付结果：status / interrupts / answer / state / usage / error |
 | `AgentEvent` | `core/agent_v2/entity/agent_event.py:7` | 内核规范化事件（channel + data + sequence + namespace） |
-| `WorkbenchEvent` | `schema/agent/agent_workbench_schema.py:294` | 对外协议事件（`type/event_id/seq/method/params`） |
+| `AgentProtocolEvent` | `schema/agent/agent_protocol_schema.py:294` | 对外协议事件（`type/event_id/seq/method/params`） |
 
 ### 2.3 业务模型（应用配置）
 
@@ -518,7 +518,7 @@ Agent 只能通过三个工具把产物带出临时空间（`execution/workspace
 
 ### 7.5 历史消息形状
 
-`WorkbenchHistoryMessageResp{id, type: "human"|"ai", content, additional_kwargs}`：
+`AgentProtocolHistoryMessageResp{id, type: "human"|"ai", content, additional_kwargs}`：
 
 - human：`id = input_message_id 或 "<message_id>:human"`，`additional_kwargs = {business_message_id, run_id, image_urls, attachments}`；
 - ai：`id = "<message_id>:assistant"`，`additional_kwargs = {run_id, metrics: {latency, total_token_count, input_token_count, output_token_count, cached_token_count, reasoning_token_count}}`；仅当 `answer` 非空才存在。
@@ -556,7 +556,7 @@ PK `(run_id, input_batch_id)`；`input_batch_id` 是中断 ID 集合的 sha256�
 
 ### 8.3 `agent_run_event`
 
-PK `(run_id, sequence)`，CHECK `sequence > 0`，`payload` 为 object 的 `WorkbenchEvent` JSON。写入走 `ON CONFLICT DO NOTHING`（按 `(run_id, sequence)` 去重）。
+PK `(run_id, sequence)`，CHECK `sequence > 0`，`payload` 为 object 的 `AgentProtocolEvent` JSON。写入走 `ON CONFLICT DO NOTHING`（按 `(run_id, sequence)` 去重）。
 
 ### 8.4 `agent_evaluation`
 
@@ -595,7 +595,7 @@ PK `(run_id, sequence)`，CHECK `sequence > 0`，`payload` 为 object 的 `Workb
 | 提问表单 | ≤8 题、每题 ≤20 选项、标题 ≤200、描述 ≤1000、文本 ≤4000 字、数值 ±1e15 | `entity/user_input.py` |
 | 已确认答案回注预算 | 12000 字符（渲染预算 11500、≤48 条） | `entity/run_context.py`、`entity/user_input.py` |
 | 已确认答案读取批 | 同一会话同一入口最近 8 条 Run | `run_service.get_confirmed_input_context` |
-| 图片 / 附件 | 每次 ≤10 张图片、≤5 个附件，均不可重复 | `schema/agent/agent_workbench_schema.py` |
+| 图片 / 附件 | 每次 ≤10 张图片、≤5 个附件，均不可重复 | `schema/agent/agent_protocol_schema.py` |
 | 本轮 Skill 选择 | ≤20 个 | 同上 |
 | 记忆配额 | 64 KiB/文件、100 文件、1 MiB 总量 | `entity/agent_memory.py` |
 | Workspace 配额 | 100 MiB / 1000 文件（可配） | `config/default_config.py` |
@@ -692,7 +692,7 @@ Agent 相关工作台侧**没有定时任务**：孤儿 Run 只在读取/启动/
    `validate_agent_tools(definition.tools)` 在追加 `list_saved_files / load_saved_file / deliver_file` **之前**执行，因此应用工具与这三个名字冲突时不会被拦截。
 
 5. **提问中断的 namespace 被硬编码为空**（`execution/agent_executor.py:206`）
-   `AgentEvent.namespace` 在别处是有值的，但收集 interrupt 时固定写入 `[]`，导致 `PendingUserInput.namespace` 恒为空。配合 `WorkbenchInputResponseReq.namespace` 的 `max_length=0`，子 Agent 的提问在当前协议下无法被回答。
+   `AgentEvent.namespace` 在别处是有值的，但收集 interrupt 时固定写入 `[]`，导致 `PendingUserInput.namespace` 恒为空。配合 `AgentProtocolInputResponseReq.namespace` 的 `max_length=0`，子 Agent 的提问在当前协议下无法被回答。
 
 6. **`ReviewMiddleware` 每轮构造两个实例**
    一个在图层里（`platform_middleware.py:60`）负责入/出审核，另一个由 `AgentExecutor.__init__` 持有（`agent_executor.py:59`）只用于事件延迟投递与结果裁剪。两者配置相同，但职责分散，阅读时容易误判。

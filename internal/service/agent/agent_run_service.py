@@ -57,10 +57,10 @@ from internal.exception import (
 from internal.extension.logging_extension import logger
 from internal.model import AgentRun, AgentRunEvent, AgentRunSubmission, Conversation, Message
 from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
-from internal.schema.agent.agent_workbench_schema import (
-    WorkbenchCancelResp,
-    WorkbenchEvent,
-    WorkbenchRunMetadataResp,
+from internal.schema.agent.agent_protocol_schema import (
+    AgentProtocolCancelResp,
+    AgentProtocolEvent,
+    AgentProtocolRunMetadataResp,
 )
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 from internal.service.agent_protocol.state_projector import (
@@ -308,7 +308,7 @@ class AgentRunService:
 
     def cancel_run(
         self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom, run_id: UUID,
-    ) -> WorkbenchCancelResp:
+    ) -> AgentProtocolCancelResp:
         """核对应用、会话和调用来源后停止指定 Agent Run。"""
         # 1.校验目标 Run 是否属于本次请求的会话和入口。
         row = self.get_conversation_run(
@@ -334,7 +334,7 @@ class AgentRunService:
             )
 
         # 3.原样返回真实状态；等待表单的任务已直接取消，执行中的任务仍是 running。
-        return WorkbenchCancelResp(
+        return AgentProtocolCancelResp(
             cancel_requested=cancel_requested,
             run_id=row.id,
             status=str(row.status),
@@ -671,7 +671,7 @@ class AgentRunService:
         *,
         message_updates: Mapping[str, Any] | None = None,
         usage: Mapping[str, Any] | None = None,
-        events: list[WorkbenchEvent] | None = None,
+        events: list[AgentProtocolEvent] | None = None,
         state_snapshot: Mapping[str, Any] | None = None,
     ) -> bool:
         """在 Run 锁内一次结算片段用量、消息与事件，重复或过期执行不能再次写入。"""
@@ -712,7 +712,7 @@ class AgentRunService:
     def _record_events(
         self,
         run: AgentRunExecution,
-        events: list[WorkbenchEvent],
+        events: list[AgentProtocolEvent],
     ) -> None:
         """一次事务更新 Run 快照并追加一批需要历史恢复的事件。"""
         # 1.空批次直接返回，不开启事务。
@@ -780,7 +780,7 @@ class AgentRunService:
                 row.executor_id = None
                 # 4.补一条生命周期事件并同步消息状态，客户端重连才能看到真实终态。
                 sequence = int(row.last_event_sequence or 0) + 1
-                event = WorkbenchEvent(
+                event = AgentProtocolEvent(
                     type="event",
                     event_id=f"{row.id}:{sequence}",
                     seq=sequence,
@@ -807,7 +807,7 @@ class AgentRunService:
         """只读取状态列，避免重复传输和解析运行快照。"""
         return self.db.session.query(AgentRun.status).filter(AgentRun.id == run_id).scalar()
 
-    def get_run_metadata(self, *, conversation_id: UUID, invoke_from: InvokeFrom) -> WorkbenchRunMetadataResp:
+    def get_run_metadata(self, *, conversation_id: UUID, invoke_from: InvokeFrom) -> AgentProtocolRunMetadataResp:
         """停止操作只需要运行标识与状态，不读取消息和 JSON 快照。"""
         row = (
             self.db.session.query(AgentRun.id, AgentRun.status, AgentRun.last_event_sequence)
@@ -815,9 +815,9 @@ class AgentRunService:
             .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
             .first()
         )
-        return WorkbenchRunMetadataResp(
+        return AgentProtocolRunMetadataResp(
             run_id=row.id, status=row.status, last_event_sequence=row.last_event_sequence,
-        ) if row else WorkbenchRunMetadataResp()
+        ) if row else AgentProtocolRunMetadataResp()
 
     def _request_cancel(self, row: AgentRun) -> bool:
         """运行中的任务先记录取消请求；等待表单的任务直接取消并保留重新填写信息。"""
@@ -905,7 +905,7 @@ class AgentRunService:
             return None
         return row
 
-    def _append_events(self, row: AgentRun, events: list[WorkbenchEvent]) -> None:
+    def _append_events(self, row: AgentRun, events: list[AgentProtocolEvent]) -> None:
         """调用方已锁 Run；事件追加与游标更新共用事务，重试不重复插入。"""
         if not events:
             return
@@ -917,13 +917,13 @@ class AgentRunService:
         self.db.session.execute(statement.on_conflict_do_nothing(index_elements=["run_id", "sequence"]))
         row.last_event_sequence = max(int(row.last_event_sequence or 0), max(payloads))
 
-    def _state_transition_events(self, row: AgentRun, lifecycle: Mapping[str, Any]) -> list[WorkbenchEvent]:
+    def _state_transition_events(self, row: AgentRun, lifecycle: Mapping[str, Any]) -> list[AgentProtocolEvent]:
         """取消和重新填写共享公开快照投影，私有恢复信息不会进入事件载荷。"""
         projector = AgentProtocolEventProjector(row.id, start_sequence=int(row.last_event_sequence or 0))
         return projector.generated_state_transition(project_snapshot_values(row.public_snapshot), dict(lifecycle))
 
     _RUN_WORKERS: ClassVar[int] = 4
-    _run_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=_RUN_WORKERS, thread_name_prefix="agent-workbench")
+    _run_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=_RUN_WORKERS, thread_name_prefix="agent-run")
     _run_slots: ClassVar[threading.BoundedSemaphore] = threading.BoundedSemaphore(_RUN_WORKERS)
 
     _persistence_batch_size: ClassVar[int] = 8

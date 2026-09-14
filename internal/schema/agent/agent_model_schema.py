@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from internal.entity.agent_run_entity import AgentModelSelection
 
 
-class WorkbenchModelChoiceResp(BaseModel):
+class AgentProtocolModelChoiceResp(BaseModel):
     """工作台模型目录仅公开标识、名称和推理等级。"""
 
     provider: str
@@ -17,7 +17,7 @@ class WorkbenchModelChoiceResp(BaseModel):
 
 
 
-class WorkbenchModelSettingsResp(BaseModel):
+class AgentProtocolModelSettingsResp(BaseModel):
     """只有创建者入口公开可切换的模型目录。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -25,7 +25,7 @@ class WorkbenchModelSettingsResp(BaseModel):
     provider: str = ""
     selected_model: AgentModelSelection | None = None
     model_override: AgentModelSelection | None = None
-    available_models: list[WorkbenchModelChoiceResp] = Field(default_factory=list)
+    available_models: list[AgentProtocolModelChoiceResp] = Field(default_factory=list)
     reasoning_levels: list[str] = Field(default_factory=list)
     default_reasoning_effort: str | None = None
     selected_reasoning_effort: str | None = None

@@ -195,7 +195,7 @@ class AgentRunEvent(db.Model):
 
     run_id = Column(UUID, ForeignKey("agent_run.id", ondelete="CASCADE"), nullable=False)
     sequence = Column(Integer, nullable=False)  # 事件顺序与续传游标，同一 Run 内唯一
-    payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))  # WorkbenchEvent 协议载荷
+    payload = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))  # AgentProtocolEvent 协议载荷
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP AT TIME ZONE 'UTC'")
     )
