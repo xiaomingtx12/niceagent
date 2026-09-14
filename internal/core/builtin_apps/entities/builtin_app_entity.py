@@ -21,7 +21,6 @@ class BuiltinAppEntity(BaseModel):
     language_model_config: dict[str, Any] = Field(
         default_factory=lambda: deepcopy(DEFAULT_APP_CONFIG.get("model_config"))
     )
-    dialog_round: int = Field(default=DEFAULT_APP_CONFIG.get("dialog_round"))
     preset_prompt: str = Field(default=DEFAULT_APP_CONFIG.get("preset_prompt"))
     tools: list[dict[str, Any]] = Field(default_factory=list)
     workflows: list[str] = Field(default_factory=list)

@@ -29,7 +29,6 @@ class AppConfigType(str, Enum):
 DEFAULT_APP_CONFIG = {
     # 模型配置由当前账号已激活的模型注入，不能使用全局固定模型。
     "model_config": {},
-    "dialog_round": 3,
     "preset_prompt": "",
     "skills": [],
     "subagents": [],

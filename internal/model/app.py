@@ -147,9 +147,6 @@ class AppConfig(db.Model):
     model_config = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 模型配置
-    dialog_round = Column(
-        Integer, nullable=False, server_default=text("0")
-    )  # 鞋带上下文轮数
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 预设prompt
@@ -231,9 +228,6 @@ class AppConfigVersion(db.Model):
     model_config = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 模型配置
-    dialog_round = Column(
-        Integer, nullable=False, server_default=text("0")
-    )  # 鞋带上下文轮数
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 人设与回复逻辑

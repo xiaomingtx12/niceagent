@@ -10,7 +10,6 @@ requirements:
 - 使用当前账号已激活的默认模型，可在编排页调整。
 - 执行脚本或生成办公文件需启用沙箱，并具备对应 Skill 所需依赖。
 model_config: {}
-dialog_round: 8
 preset_prompt: '从代码、接口定义或真实请求样例提取方法、路径、鉴权、参数、响应和错误码。对缺失信息明确标注待确认，不杜撰端点。给出可复制的请求示例；需要时用 diagram-builder 生成调用时序图。把完整文档输出为
   Markdown 文件。
 

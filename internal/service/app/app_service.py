@@ -437,7 +437,6 @@ class AppService(BaseService):
             AppConfig,
             app_id=app_id,
             model_config=draft_app_config["model_config"],
-            dialog_round=draft_app_config["dialog_round"],
             preset_prompt=draft_app_config["preset_prompt"],
             skills=draft_app_config["skills"],
             subagents=draft_app_config["subagents"],

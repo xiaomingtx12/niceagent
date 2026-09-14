@@ -9,7 +9,6 @@ tags:
 requirements:
 - 使用当前账号已激活的默认模型，可在编排页调整。
 model_config: {}
-dialog_round: 8
 preset_prompt: '根据事实整理已完成、进行中、风险和下一步行动。区分计划与成果，保留负责人及截止日期，缺失信息标为待补充；不虚构产出和完成率。使用 meeting-and-brief 整理素材，再用 humanizer
   改写为简洁、自然的汇报。
 

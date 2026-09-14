@@ -673,7 +673,6 @@ class AppConfigService(BaseService):
             {
                 "id": app_config.id,
                 "model_config": app_config.model_config,
-                "dialog_round": app_config.dialog_round,
                 "preset_prompt": app_config.preset_prompt,
                 "skills": app_config.skills or [],
                 "subagents": app_config.subagents or [],
@@ -826,7 +825,6 @@ class AppConfigService(BaseService):
         return {
             "id": str(app_config.id),
             "model_config": model_config,
-            "dialog_round": app_config.dialog_round,
             "preset_prompt": app_config.preset_prompt,
             "skills": getattr(app_config, "skills", []) or [],
             "subagents": app_config.subagents or [],

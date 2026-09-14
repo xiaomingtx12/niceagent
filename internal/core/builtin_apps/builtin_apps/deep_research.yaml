@@ -12,7 +12,6 @@ requirements:
 - 执行脚本或生成办公文件需启用沙箱，并具备对应 Skill 所需依赖。
 - 联网检索需配置 Searx 搜索服务；正文与 PDF 读取需部署网络能够访问公开来源。
 model_config: {}
-dialog_round: 8
 preset_prompt: '先明确研究问题、时间范围和预期深度。把资料收集交给 researcher，把来源一致性及论证缺口检查交给 fact-checker，向子 Agent 提供清晰任务与必要文件路径。综合结果，保留可访问的引用、检索日期和证据局限。矛盾来源并列说明，不用搜索摘要冒充完整原文。
 
 

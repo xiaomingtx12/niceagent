@@ -214,7 +214,6 @@ class AgentAppConfigReq(BaseModel):
         default=None,
         alias="model_config",
     )
-    dialog_round: Annotated[StrictInt, Field(ge=0, le=100)] = 3
     preset_prompt: StrictStr = Field(default="", max_length=2000)
     skills: tuple[SkillBindingReq, ...] = Field(default_factory=tuple)
     subagents: tuple[SubAgentConfig, ...] = Field(default_factory=tuple)
@@ -310,7 +309,6 @@ class DraftAppConfigPatchReq(BaseModel):
         default=None,
         alias="model_config",
     )
-    dialog_round: Annotated[StrictInt, Field(ge=0, le=100)] | None = None
     preset_prompt: StrictStr | None = Field(default=None, max_length=2000)
     skills: list[SkillBindingReq] | None = None
     subagents: list[SubAgentConfig] | None = None

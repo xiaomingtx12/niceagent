@@ -10,7 +10,6 @@ requirements:
 - 使用当前账号已激活的默认模型，可在编排页调整。
 - 执行脚本或生成办公文件需启用沙箱，并具备对应 Skill 所需依赖。
 model_config: {}
-dialog_round: 8
 preset_prompt: '确认受众、演讲目的、页数和可用素材。先拟定每页的核心信息与证据，再使用 ppt-generator 制作演示文稿。图表只引用真实数据，必要时用 diagram-builder 说明流程。生成后检查页面完整性、文字溢出与来源，报告无法检查的部分。
 
 
