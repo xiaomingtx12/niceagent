@@ -1,6 +1,6 @@
 # Model ID 字段说明
 
-核对日期：2026-09-14。对应 `internal/model` 当前代码；业务流程见 [Agent 业务说明](agent-business.md)。本次结构调整限于 EndUser，其余内容说明现有含义。
+核对日期：2026-09-14。对应 `internal/model` 当前代码；业务流程见 [Agent 业务文档](Agent-业务文档.md)。本次结构调整限于 EndUser，其余内容说明现有含义。
 
 ## 1. 先分清谁拥有应用、谁使用应用
 
