@@ -189,11 +189,13 @@ emit(event)
 
 同步子 Agent 的过程属于父 Run 的嵌套事件，异步子 Agent 则有独立的 Run。将 `async_tasks` 当成同步子图渲染，会一直等待父流中不会出现的子任务输出，即使子任务早已完成。
 
+派发时的任务名称与执行者名称是两个概念。[NamedAsyncSubAgentMiddleware](../internal/core/agent_v2/middleware/named_async_subagent_middleware.py) 扩展原生启动工具，接收可选的 `title`，缺少名称时从任务说明提取首句；在成功返回的 `Command` 中保存最终 `title` 和完整 `description`，`agent_name` 仍是配置中的执行者名称。Schema 和同步、异步执行函数都允许省略 `title`，避免展示字段阻断任务启动。原生工具重建任务记录时，状态合并器保留这两个描述字段，避免查询后名称消失。图装配仅向该中间件传递异步规格，同步规格继续交给 `create_deep_agent`，不重复注册异步工具。
+
 阅读顺序：
 
 1. [projectAsyncTaskEvents](../../my-dify-ui/src/utils/event-projection.ts) 将初始状态和实时 `values.async_tasks` 投影成 `async_task`，不混入同步 `subagent` 时间线。
 2. [AgentConversationWorkbench](../../my-dify-ui/src/components/AgentConversationWorkbench.vue) 合并初始清单和已加载任务记录，跨轮去重，刷新无需加载父执行历史。
-3. [WorkbenchAsyncTasks](../../my-dify-ui/src/components/WorkbenchAsyncTasks.vue) 提供顶部入口和默认关闭的侧栏，任务清单支持状态筛选与每次显示 30 条；批量确认真实子 Run 状态，终态停止轮询、隐藏暂停、离开释放请求。“查看详情”先调用轻量结果接口，详情中的执行过程展开后才调用已有快照接口；列表和详情共用同一侧栏，返回或关闭时取消详情请求。
+3. [AgentWorkspace](../../my-dify-ui/src/components/AgentWorkspace.vue) 提供顶部统一工作区入口，在同一面板内切换文件、后台任务和记忆。任务清单支持状态筛选与每次显示 30 条；批量确认真实子 Run 状态，终态停止轮询、隐藏暂停、离开释放请求。“查看详情”先调用轻量结果接口，结果上方的执行过程展开后才调用已有快照接口；列表和详情共用工作区任务页，返回、切换标签或关闭时取消详情请求。文件与记忆组件只在对应标签打开时挂载。
 4. [AgentExecutionQuery](../internal/service/agent/agent_execution_query.py) 的 `get_run_statuses` 只读摘要列，`get_run_result` 读取已保存回答；两者只返回当前账号拥有且未删除会话中的 Run，不扫描事件表。
 
 父图里的任务记录用来发现任务，不作为界面的实时状态来源。这里不自动唤醒父 Agent；模型再次查询任务仍使用自己的工具。
