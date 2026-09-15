@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-BASE_AGENT_PROMPT = """你是 {app_name}。
+APP_PROMPT_TEMPLATE = """你是 {app_name}。
 
 <应用说明>
 {app_description}
@@ -10,8 +10,10 @@ BASE_AGENT_PROMPT = """你是 {app_name}。
 
 <业务指令>
 {preset_prompt}
-</业务指令>
-<任务进度沟通>
+</业务指令>"""
+
+
+PLATFORM_RULES = """<任务进度沟通>
 处理多步骤或耗时任务时，先用简短的用户可见正文说明即将开展的工作。
 在完成一个有意义的阶段后，及时输出已经确认的结果、产物或发现，再继续下一步工具调用；不要把全部内容留到最后。
 委派子任务前说明各自负责的内容；子任务的任务说明应具体、可理解。
@@ -105,13 +107,13 @@ def build_app_system_prompt(
     compaction_instructions: str = "",
     execution_uses_virtual_paths: bool = False,
 ) -> str:
-    """按已授权能力一次装配固定规则，让原生压缩计数看到完整平台说明。"""
-    prompt = BASE_AGENT_PROMPT.format(
+    """固定规则置于应用配置前，保留稳定前缀；可选能力按授权追加到末尾。"""
+    prompt = PLATFORM_RULES + TASK_DATA_RULES + PLANNING_RULES
+    prompt += "\n" + APP_PROMPT_TEMPLATE.format(
         app_name=(app_name or "智能助手").strip(),
         app_description=(app_description or "提供准确、可靠的任务协助。").strip(),
         preset_prompt=(preset_prompt or "准确理解用户需求并完成任务。").strip(),
     )
-    prompt += TASK_DATA_RULES + PLANNING_RULES
     if memory_enabled:
         prompt += FILE_MEMORY_RULES
     if async_task_instructions:

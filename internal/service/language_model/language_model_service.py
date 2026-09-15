@@ -1,6 +1,7 @@
 import hashlib
 import mimetypes
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -28,6 +29,9 @@ from internal.service.common.base_service import BaseService
 from internal.lib.api_key_helper import get_api_key_for_provider
 
 AGENT_MODEL_TYPES = {ModelType.CHAT}
+
+# 由单次装配持有；键包含租户和连接，服务实例不保存查询结果。
+ModelConnectionCache = dict[tuple[UUID | None, str, UUID | None], list[ProviderApiKey]]
 
 
 @inject
@@ -190,8 +194,11 @@ class LanguageModelService(BaseService):
         self,
         model_config: AppModelConfigReq | dict[str, Any],
         account_id: UUID = None,
+        *,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> BaseLanguageModel:
         """校验租户模型配置并加载可执行的大语言模型实例。"""
+        started_at = time.monotonic()
         try:
             config = AppModelConfigReq.model_validate(model_config)
         except ValidationError as exc:
@@ -207,11 +214,12 @@ class LanguageModelService(BaseService):
             else None
         )
         provider = self.language_model_manager.get_provider(provider_name)
-        model_entity = self.get_enabled_model_entity(
-            provider_name,
-            model_name,
-            account_id,
-            provider_connection_id=provider_connection_id,
+        profiles = self._get_provider_profiles(
+            provider_name, account_id, provider_api_key_id=provider_connection_id,
+            connection_cache=connection_cache,
+        )
+        model_entity = self._select_enabled_model(
+            provider_name, model_name, profiles,
         )
         if not model_entity:
             raise ValidateErrorException(
@@ -226,21 +234,10 @@ class LanguageModelService(BaseService):
             parameters = runtime_model_parameters(model_entity, config.parameters)
         except ValueError as exc:
             raise ValidateErrorException(str(exc)) from exc
-        api_key = None
+        # 模型白名单和密钥使用同次租户查询结果，避免再次读取连接。
         provider_api_key_id = model_entity.attributes.get("provider_api_key_id")
-        if provider_api_key_id:
-            profile = (
-                self.db.session.query(ProviderApiKey)
-                .filter(
-                    ProviderApiKey.id == provider_api_key_id,
-                    ProviderApiKey.account_id == account_id,
-                    ProviderApiKey.provider_name == provider_name,
-                    ProviderApiKey.is_active.is_(True),
-                )
-                .first()
-            )
-            if profile:
-                api_key = profile.api_key
+        profile = next(item for item in profiles if str(item.id) == provider_api_key_id)
+        api_key = profile.api_key
         if not api_key:
             api_key = get_api_key_for_provider(provider_name, account_id)
         parameters[self._get_api_key_param_name(provider_name)] = api_key
@@ -264,7 +261,13 @@ class LanguageModelService(BaseService):
             discovered_profile["max_input_tokens"] = model_entity.context_window
         if model_entity.max_output_tokens:
             discovered_profile["max_output_tokens"] = model_entity.max_output_tokens
-        return model_class(
+        resolved_parameters = resolve_model_parameters(model_entity, config.parameters)
+        logger.info(
+            "model_load_timing account_id=%s provider=%s model=%s stage=config duration_ms=%.2f",
+            account_id, provider_name, model_name, (time.monotonic() - started_at) * 1000,
+        )
+        started_at = time.monotonic()
+        model = model_class(
             **model_attributes,
             **parameters,
             features=model_entity.features,
@@ -275,9 +278,14 @@ class LanguageModelService(BaseService):
             metadata={**model_entity.metadata, "context_window": model_entity.context_window,
                       "max_input_tokens": model_entity.max_input_tokens,
                       "max_output_tokens": model_entity.max_output_tokens,
-                       "configured_output_tokens": resolve_model_parameters(model_entity, config.parameters).get("max_output_tokens"),
-                       "configured_reasoning_effort": resolve_model_parameters(model_entity, config.parameters).get("reasoning_effort")},
+                       "configured_output_tokens": resolved_parameters.get("max_output_tokens"),
+                       "configured_reasoning_effort": resolved_parameters.get("reasoning_effort")},
         )
+        logger.info(
+            "model_load_timing account_id=%s provider=%s model=%s stage=client duration_ms=%.2f",
+            account_id, provider_name, model_name, (time.monotonic() - started_at) * 1000,
+        )
+        return model
 
     def get_embedding_model_binding(
         self,
@@ -405,6 +413,8 @@ class LanguageModelService(BaseService):
         provider_name: str,
         account_id: UUID | None,
         provider_api_key_id: str | None = None,
+        *,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> list[ModelEntity]:
         """按 API Key 激活顺序读取当前账号可使用的模型。"""
         if not account_id:
@@ -414,6 +424,7 @@ class LanguageModelService(BaseService):
             provider_name,
             account_id,
             provider_api_key_id=provider_api_key_id,
+            connection_cache=connection_cache,
         )
         if not profiles:
             return []
@@ -489,26 +500,29 @@ class LanguageModelService(BaseService):
         model_name: str,
         account_id: UUID | None,
         provider_connection_id: str | None = None,
+        *,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> ModelEntity | None:
         """读取当前账号已激活的指定模型。"""
         if not account_id:
             return None
         profiles = self._get_provider_profiles(
             provider_name, account_id, provider_api_key_id=provider_connection_id,
+            connection_cache=connection_cache,
         )
-        models = [
-                model
-                for model in self._build_enabled_model_entities(
-                    provider_name, profiles, target_model_name=model_name,
-                )
-                if model.model_name == model_name
-                and (
-                    not provider_connection_id
-                    or str(model.attributes.get("provider_api_key_id"))
-                    == str(provider_connection_id)
-                )
-        ]
-        if len(models) > 1 and not provider_connection_id:
+        return self._select_enabled_model(provider_name, model_name, profiles)
+
+    def _select_enabled_model(
+        self,
+        provider_name: str,
+        model_name: str,
+        profiles: list[ProviderApiKey],
+    ) -> ModelEntity | None:
+        """只在已按租户和连接筛选的快照中选模型，不重复查询或发现远程目录。"""
+        models = self._build_enabled_model_entities(
+            provider_name, profiles, target_model_name=model_name,
+        )
+        if len(models) > 1:
             raise ValidateErrorException("存在多个同名模型连接，请在模型设置中重新选择具体连接")
         return models[0] if models else None
 
@@ -516,6 +530,8 @@ class LanguageModelService(BaseService):
         self,
         account_id: UUID,
         model_type: ModelType = ModelType.CHAT,
+        *,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> dict[str, Any]:
         """按账号已激活顺序选择指定用途的默认模型。"""
         providers = sorted(
@@ -525,7 +541,9 @@ class LanguageModelService(BaseService):
         for provider in providers:
             models = [
                 model
-                for model in self.get_enabled_model_entities(provider.name, account_id)
+                for model in self.get_enabled_model_entities(
+                    provider.name, account_id, connection_cache=connection_cache,
+                )
                 if model.model_type == model_type
             ]
             if not models:
@@ -557,13 +575,26 @@ class LanguageModelService(BaseService):
         provider_name: str,
         account_id: UUID | None,
         provider_api_key_id: str | None = None,
+        *,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> list[ProviderApiKey]:
+        """每次装配内复用已授权连接；未提供缓存的其他业务仍实时查询。"""
         connection_uuid = None
         if provider_api_key_id:
             try:
                 connection_uuid = UUID(str(provider_api_key_id))
             except (TypeError, ValueError):
                 return []
+        cache_key = (account_id, provider_name, connection_uuid)
+        if connection_cache is not None:
+            if cache_key in connection_cache:
+                return connection_cache[cache_key]
+            all_connections_key = (account_id, provider_name, None)
+            if connection_uuid and all_connections_key in connection_cache:
+                return [
+                    profile for profile in connection_cache[all_connections_key]
+                    if profile.id == connection_uuid
+                ]
         query = self.db.session.query(ProviderApiKey).filter(
             ProviderApiKey.account_id == account_id,
             ProviderApiKey.provider_name == provider_name,
@@ -571,7 +602,10 @@ class LanguageModelService(BaseService):
         )
         if connection_uuid:
             query = query.filter(ProviderApiKey.id == connection_uuid)
-        return query.order_by(ProviderApiKey.created_at.desc()).all()
+        profiles = query.order_by(ProviderApiKey.created_at.desc()).all()
+        if connection_cache is not None:
+            connection_cache[cache_key] = profiles
+        return profiles
 
     @staticmethod
     def _get_connection_name(profile: ProviderApiKey | None, provider_label: str) -> str:

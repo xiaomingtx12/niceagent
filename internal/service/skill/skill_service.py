@@ -61,6 +61,8 @@ class SkillService:
         bindings: Sequence[SkillBindingReq | Mapping[str, Any]] | None,
     ) -> list[BuiltinSkill]:
         """解析当前应用已启用且版本匹配的运行时 Skill。"""
+        if not bindings:
+            return []
         catalog = self._load_catalog()
         normalized = self._normalize_bindings(bindings or (), catalog)
         return [

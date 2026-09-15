@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -12,6 +13,7 @@ from langchain_core.tools import BaseTool
 from internal.core.mcp.entities import MCPServerConfig, MCPToolCatalog, MCPTransport
 from internal.core.mcp.security import MCPSecretCipher
 from internal.exception import NotFoundException, ValidateErrorException
+from internal.extension.logging_extension import logger
 from internal.model import MCPServer
 
 
@@ -202,6 +204,7 @@ class MCPRuntimeManager:
     def list_langchain_tools(
         self, server: MCPServer | MCPServerConfig, force_refresh: bool = False
     ) -> list[BaseTool]:
+        """按服务配置版本复用目录，仅缓存未命中时记录远程加载耗时。"""
         server_config = self.build_server_config(server)
         cache_key = self._cache_key(server_config)
 
@@ -211,7 +214,12 @@ class MCPRuntimeManager:
         if cache_key in self._tool_cache:
             return self._tool_cache[cache_key]
 
+        started_at = time.monotonic()
         tools = self._run_async(self._load_remote_tools_async(server_config))
+        logger.info(
+            "mcp_tool_catalog_load server_id=%s tool_count=%s duration_ms=%.2f",
+            server_config.id, len(tools), (time.monotonic() - started_at) * 1000,
+        )
         self._tool_cache[cache_key] = tools
         return tools
 

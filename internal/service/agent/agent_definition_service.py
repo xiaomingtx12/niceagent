@@ -12,6 +12,7 @@ from internal.exception import NotFoundException, ValidateErrorException
 from internal.model import App
 from internal.schema.app.app_config_schema import AgentAppConfigReq
 from internal.service.app.app_config_service import AppConfigService
+from internal.service.language_model.language_model_service import ModelConnectionCache
 from pkg.sqlalchemy import SQLAlchemy
 
 
@@ -43,6 +44,7 @@ class AgentDefinitionService:
 
     def load(
         self, *, account_id: UUID, app_id: UUID, invoke_from: InvokeFrom,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> ApplicationAgentDefinition:
         """读取可信入口对应的应用版本；内置助手返回代码定义，不访问 App 表。"""
         # 1.Assistant Agent 不依赖 App 配置，直接返回内置定义。
@@ -61,7 +63,9 @@ class AgentDefinitionService:
         try:
             # 3.Debugger 使用草稿，其余入口使用可执行的发布配置。
             if invoke_from is InvokeFrom.DEBUGGER:
-                app_config = self.app_config_service.get_draft_agent_runtime_config(app)
+                app_config = self.app_config_service.get_draft_agent_runtime_config(
+                    app, connection_cache=connection_cache,
+                )
             else:
                 app_config = self.app_config_service.get_agent_runtime_config(app)
         except (ValidationError, ValidateErrorException) as exc:

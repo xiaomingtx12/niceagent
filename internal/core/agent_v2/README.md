@@ -57,7 +57,7 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 
 沙箱工厂直接返回 Backend，已移除只包装一个 Backend 的 `SandboxProjection` 和无状态转发类。不同沙箱提供者的适配保留在各自文件中。
 
-Core 的 `AgentSkill` 只携带授权包内容，宿主目录归平台 Skill 服务管理。Skill 投影通过 `build_skill_context` 管理临时文件；Memory 在运行时装配处按开关直接创建 Backend，不再包装中间投影对象。运行资源只持有一份 Skill 投影，构图和中间件直接读取其来源字段。Memory 关闭时不会调用 Store 工厂；Skill 路由构建失败仍由构建函数清理已创建的部分资源。
+Core 的 `AgentSkill` 只携带授权包内容，宿主目录归平台 Skill 服务管理。Skill 投影通过 `build_skill_context` 管理临时文件；Memory 在运行时装配处按开关直接创建 Backend，不再包装中间投影对象。运行资源只持有一份 Skill 投影，构图和中间件直接读取其来源字段。会话归档始终获取共享 Store，Memory 开关仅决定是否挂载长期记忆路由；Skill 路由构建失败仍由构建函数清理已创建的部分资源。
 
 ## 与服务层的分工
 
@@ -120,4 +120,33 @@ v3 的 `custom` 通道由每个图中唯一的 `ContextWindowMiddleware` 注册 
 
 固定业务、规划模式解释、记忆及 Shell 路径规则在构图前装配。异步工具说明复用原生中间件生成的文本并提前加入 system，关闭重复追加；Skills 授权元数据在刷新后稳定排序，保留原生目录格式。
 
+平台 system 按“固定进度与文件规则 → 固定任务数据与规划规则 → 应用名称、说明和业务指令 → 可选能力规则”排列。固定前缀不包含应用变量、本轮选项或时间戳；修改应用配置不会改写前面的固定内容。拼接方式本身不决定缓存命中，实际还取决于供应商请求中的工具定义、框架追加内容及缓存门槛。此次顺序调整会改变原请求前缀，上线后需要重新建立相应缓存，不代表已有缓存能够直接沿用。
+
 AgentExecutor 只为新 HumanMessage 加入一次本轮自动/显式规划选项，保留身份和媒体；恢复只传 Command(resume)。事件与状态公开前移除内部选项，业务原文不改变。ask_user 答案通过原生 ToolMessage 留在对应位置，已删除前置汇总中间件、运行上下文字段和近期表单查询；公开 input_history 与 Submission 继续保留。
+
+## 装配耗时与复用边界
+
+模型加载从同次租户查询的连接记录中取得启用模型与密钥，避免额外查询密钥。`AgentFactory._resolve_agent_config` 创建局部 `ModelConnectionCache`，显式传给草稿配置解析、模型选择、主模型和同步子 Agent 加载；键包括租户、提供方和连接 ID。未指定连接时取得的完整提供方结果，可供本轮后续按 ID 筛选使用；某个连接的局部结果不能代替全部连接查询，仍保留同名模型歧义检查。仅复用数据库连接配置记录，不共享新建的模型实例或不同参数；入口选择权限和模型启用规则仍按原流程检查。每次新装配、恢复都会新建空字典，其他业务不传该参数时沿用实时查询。
+
+草稿运行通过 `_process_and_validate_tools(batch_lookup=True)` 批量校验工具。API 工具与提供方联查一次，MCP 工具与启用服务联查一次；输出仍保留原顺序、名称、ID 和展示字段，避免本次性能修改改变等待表单的定义指纹。重复记录使用平台 `ValidateErrorException`；失效工具仍过滤。没有知识库或工作流引用时跳过相应空查询。管理页面的草稿读取、保存和发布路径不启用这一批量分支。
+
+普通工具实例装配中，MCP 服务和 API 工具各最多一次批量查询，API 请求头随工具连接查询取得；同一 MCP 服务目录只解析一次，最终工具仍按绑定顺序排列。草稿校验与工具实例装配目前各有自己的批量查询，没有把 ORM 工具记录跨服务长期缓存。
+
+没有 Skill 绑定时跳过目录加载。已有 Catalog 的不可变文件映射直接传入 Core；本轮内文件列表完全一致的 Skill 授权范围复用同一临时目录，不同授权集合保持隔离。临时目录仍在本轮结束后清理，下一轮重新创建，没有引入跨轮文件缓存。
+
+`agent_assembly_timing` 按应用和会话记录阶段耗时：
+
+| stage | 范围 |
+| --- | --- |
+| `config / model / tools / subagents / skills` | 应用配置、模型加载、工具准备、子 Agent 定义、Skill 解析 |
+| `input / attachment_download / workspace_store` | 消息构造、COS 附件下载、本轮文件仓储绑定 |
+| `runtime` | Core 运行资源装配合计 |
+| `runtime.workspace / runtime.skills` | 工作目录创建、Skill 临时文件写入 |
+| `runtime.store / runtime.checkpointer` | 获取共享持久化资源，首次访问可能包含连接和 setup |
+| `runtime.sandbox` | Sandbox Backend 构造；远程 Provider 的实际延迟初始化不计入此阶段 |
+| `attachments / graph` | 已下载附件写入工作副本、主图及子图构建 |
+| `total` | 上述整个装配过程，不含后续模型推理 |
+
+`runtime.*` 已包含在 `runtime` 中，不应重复相加。模型加载另有 `model_load_timing`，区分配置解析与 SDK 客户端构造；MCP 目录缓存未命中时记录 `mcp_tool_catalog_load`。日志只记录标识、数量和耗时，不记录密钥、请求头或文件正文。
+
+本轮只做静态检查，未运行测试或性能请求；优化收益需对比同一配置在重启后首次请求和后续请求的日志，不能从减少查询次数推算实际提速秒数。

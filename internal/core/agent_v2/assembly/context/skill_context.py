@@ -25,21 +25,26 @@ class SkillProjection:
     _directory: TemporaryDirectory | None = field(default=None, init=False, repr=False)
 
     def prepare(self, packages: Mapping[str, list[tuple[str, bytes]]]) -> None:
-        """为每个授权范围提供独立目录根，运行资源统一持有整份投影。"""
+        """仅内容完全相同的只读授权范围共享目录，生命周期仍限制在本轮。"""
         if not packages:
             return
-        # 1.一份投影只创建一个临时目录，每个路由使用独立子目录防止越界读取。
+        # 1.不同授权集合保持目录隔离；相同集合避免为每个子 Agent 重复写文件。
         self._directory = TemporaryDirectory(prefix="nice-agent-skills-")
+        roots: dict[tuple[tuple[str, bytes], ...], Path] = {}
         try:
             for index, (prefix, files) in enumerate(packages.items()):
-                root = (Path(self._directory.name) / str(index)).resolve()
-                root.mkdir()
-                for path, content in files:
-                    target = (root / path.lstrip("/")).resolve()
-                    if not target.is_relative_to(root) or target == root:
-                        raise ValueError(f"invalid Skill projection path: {path}")
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(content)
+                package_key = tuple(files)
+                root = roots.get(package_key)
+                if root is None:
+                    root = (Path(self._directory.name) / str(index)).resolve()
+                    root.mkdir()
+                    for path, content in files:
+                        target = (root / path.lstrip("/")).resolve()
+                        if not target.is_relative_to(root) or target == root:
+                            raise ValueError(f"invalid Skill projection path: {path}")
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(content)
+                    roots[package_key] = root
                 # 2.Backend 仅提供文件能力，模型写入由 FilesystemPermission 拒绝。
                 self.routes[prefix] = FilesystemBackend(root_dir=root, virtual_mode=True)
                 self.files.extend((f"{prefix.rstrip('/')}{path}", content) for path, content in files)

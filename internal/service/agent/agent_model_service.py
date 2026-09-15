@@ -15,7 +15,7 @@ from internal.schema.agent.agent_model_schema import (
     AgentProtocolModelSettingsResp,
 )
 from internal.schema.app.app_config_schema import AppModelConfigReq
-from internal.service.language_model.language_model_service import LanguageModelService
+from internal.service.language_model.language_model_service import LanguageModelService, ModelConnectionCache
 from .agent_definition_service import AgentDefinitionService, ApplicationAgentDefinition
 
 _MODEL_SELECTABLE_SOURCES = frozenset({
@@ -147,6 +147,7 @@ class AgentModelService:
         self, *, account_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
         default_config: AppModelConfigReq | None, selection: AgentModelSelection | None,
         owner_account_id: UUID,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> tuple[AppModelConfigReq | None, ModelEntity | None]:
         """保留应用默认参数；只有切换到其他模型或连接时才采用新模型默认值。"""
         # 1.公开入口不能借用账号的其他模型连接。
@@ -163,6 +164,7 @@ class AgentModelService:
         model = self.language_model_service.get_enabled_model_entity(
             selection.provider, selection.model, owner_account_id,
             provider_connection_id=str(selection.provider_connection_id),
+            connection_cache=connection_cache,
         )
         if model is None or model.model_type != ModelType.CHAT:
             raise ValidateErrorException("所选模型未激活或不是对话模型")

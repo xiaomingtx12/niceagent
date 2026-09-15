@@ -61,7 +61,7 @@ from .agent_model_service import AgentModelService
 from .agent_definition_service import AgentDefinitionService
 from internal.service.app.app_config_service import AppConfigService
 from .assistant_agent_service import AssistantAgentService
-from internal.service.language_model.language_model_service import LanguageModelService
+from internal.service.language_model.language_model_service import LanguageModelService, ModelConnectionCache
 from internal.service.dataset.retrieval_service import RetrievalService
 from internal.service.skill.skill_service import SkillService
 
@@ -93,6 +93,7 @@ class AgentFactory:
         # 1.读取平台配置并转换为 Agent 输入消息。
         build_started_at = time.monotonic()
         agent_config, context = self._resolve_agent_config(req)
+        phase_started_at = time.monotonic()
         input_message = cast(BaseLanguageModel, agent_config.model).convert_to_human_message(
             req.query,
             req.image_urls,
@@ -106,13 +107,18 @@ class AgentFactory:
                 "run_id": str(observer.run_id),
             }
         )
+        self._log_build_timing(req, "input", phase_started_at)
 
         # 2.平台准备附件数据和授权存储对象，框架 Store、Checkpoint 和 Backend 由 Core 装配。
         try:
+            phase_started_at = time.monotonic()
             input_files = self.agent_attachment_service.load_files(req.attachments)
+            self._log_build_timing(req, "attachment_download", phase_started_at)
+            phase_started_at = time.monotonic()
             workspace_store = self._build_workspace_store(
                 context,
             )
+            self._log_build_timing(req, "workspace_store", phase_started_at)
             # build 从入口接管本轮存储；不再把资源工厂和附件写入回调传入 Core。
             agent = AgentRuntimeAssembler(
                 config=self.config,
@@ -171,8 +177,11 @@ class AgentFactory:
         """一次配置读取直接生成 Core 所需定义与可信上下文，不再构造中间能力快照。"""
         # 1.读取草稿或发布配置，并校验本次请求选择的 Skill。
         phase_started_at = time.monotonic()
+        # 查询快照只活到本次装配结束，恢复执行也会重新创建并校验授权。
+        connection_cache: ModelConnectionCache = {}
         definition = self.definition_service.load(
             account_id=req.account_id, app_id=req.app_id, invoke_from=req.invoke_from,
+            connection_cache=connection_cache,
         )
         app_config = definition.config
         account_id = definition.account_id
@@ -193,7 +202,9 @@ class AgentFactory:
             if account is None:
                 raise NotFoundException("账号不存在")
             model_config = AppModelConfigReq.model_validate(
-                self.language_model_service.get_default_model_config(account_id)
+                self.language_model_service.get_default_model_config(
+                    account_id, connection_cache=connection_cache,
+                )
             )
         else:
             if app_config.model_config_data is None:
@@ -204,9 +215,12 @@ class AgentFactory:
                 account_id=req.account_id, created_by=req.created_by,
                 invoke_from=req.invoke_from, default_config=model_config,
                 selection=req.model_selection, owner_account_id=account_id,
+                connection_cache=connection_cache,
             )
         model_config = self.model_service.with_reasoning_override(model_config, req.reasoning_effort)
-        model = self.language_model_service.load_language_model(model_config, account_id=account_id)
+        model = self.language_model_service.load_language_model(
+            model_config, account_id=account_id, connection_cache=connection_cache,
+        )
         self._log_build_timing(req, "model", phase_started_at)
 
         # 3.把应用配置中的普通工具、知识库和工作流转换为运行时工具。
@@ -229,10 +243,12 @@ class AgentFactory:
             parent_app_id=req.app_id,
             parent_model=cast(BaseChatModel, model),
             parent_tools=tools,
+            connection_cache=connection_cache,
         )
         self._log_build_timing(req, "subagents", phase_started_at)
 
         # 5.授权 Skill 和运行上下文在同一份应用配置上解析，直接生成最终 Core 输入。
+        phase_started_at = time.monotonic()
         context = AgentRunContext(
             account_id=req.account_id,
             app_id=req.app_id,
@@ -254,13 +270,14 @@ class AgentFactory:
                 AgentSkill(
                     name=skill.name,
                     skill_md=skill.skill_md,
-                    package_files=dict(skill.package_files),
+                    package_files=skill.package_files,
                 )
                 for skill in skills
             ),
             selected_skills=selected_skills,
             subagents=tuple(subagents),
         )
+        self._log_build_timing(req, "skills", phase_started_at)
         return agent_config, context
 
     def _build_configured_tools(
@@ -309,6 +326,7 @@ class AgentFactory:
         parent_app_id: UUID,
         parent_model: BaseChatModel,
         parent_tools: Sequence[BaseTool],
+        connection_cache: ModelConnectionCache,
     ) -> list[SubAgentDefinition]:
         """平台解析模型来源及工具授权，Core 仅接收本轮可执行的同步或异步定义。"""
         published_apps = self._load_published_apps(subagents, account_id=account_id)
@@ -330,11 +348,13 @@ class AgentFactory:
                 target = published_apps[config.published_app_id]
                 resolved.append(self._prepare_sync_published_subagent(
                     config, target, published_configs[target.id], account_id=account_id,
+                    connection_cache=connection_cache,
                 ))
             else:
                 resolved.append(self._prepare_sync_custom_subagent(
                     config, account_id=account_id,
                     parent_model=parent_model, available_tools=available_tools,
+                    connection_cache=connection_cache,
                 ))
         return resolved
 
@@ -345,6 +365,7 @@ class AgentFactory:
         account_id: UUID,
         parent_model: BaseChatModel,
         available_tools: Mapping[str, BaseTool],
+        connection_cache: ModelConnectionCache,
     ) -> SyncSubAgentDefinition:
         """跟随模式直接绑定本轮父模型；工具仅从父应用已授权能力中选择。"""
         missing = sorted(set(config.tools) - set(available_tools))
@@ -352,7 +373,9 @@ class AgentFactory:
             raise ValidateErrorException(
                 f"subagent {config.name!r} 引用了未授权工具: {', '.join(missing)}"
             )
-        model = self._load_subagent_model(config, account_id=account_id)
+        model = self._load_subagent_model(
+            config, account_id=account_id, connection_cache=connection_cache,
+        )
         return SyncSubAgentDefinition(
             name=config.name,
             description=config.description,
@@ -369,6 +392,7 @@ class AgentFactory:
         target_config: AgentAppConfigReq,
         *,
         account_id: UUID,
+        connection_cache: ModelConnectionCache,
     ) -> SyncSubAgentDefinition:
         """同步发布引用使用目标应用的发布模型和能力，不继承父应用模型。"""
         if target_config.model_config_data is None:
@@ -378,6 +402,7 @@ class AgentFactory:
         )
         model = self.language_model_service.load_language_model(
             target_config.model_config_data, account_id=account_id,
+            connection_cache=connection_cache,
         )
         return SyncSubAgentDefinition(
             name=config.name,
@@ -481,6 +506,7 @@ class AgentFactory:
         subagent: SubAgentConfig,
         *,
         account_id: UUID,
+        connection_cache: ModelConnectionCache,
     ) -> BaseChatModel | None:
         """解析自定义 SubAgent 的可选模型覆盖。"""
         # 1.跟随模式不加载独立模型，由本次装配绑定父模型。
@@ -498,6 +524,7 @@ class AgentFactory:
                     parameters={},
                 ),
                 account_id=account_id,
+                connection_cache=connection_cache,
             ),
         )
 

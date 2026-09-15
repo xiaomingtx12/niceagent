@@ -92,15 +92,21 @@ class AgentRuntimeAssembler:
         workspace_store = self.workspace_store
         try:
             # 1.创建空的本轮副本；持久化访问仅绑定依赖，不查询或下载文件。
+            started_at = time.monotonic()
             workspace = WorkspaceProjection()
+            self._log_stage(context, "runtime.workspace", started_at)
             # 2.装配 Skill 与 Memory 路由，并立即纳入失败清理范围。
+            started_at = time.monotonic()
             skills = build_skill_context(
                 skills=definition.skills,
                 selected_skill_names=definition.selected_skills,
                 subagents=definition.subagents,
             )
-            # Memory 没有投影资源，仅在启用时获取共享 Store 并直接建立路由。
+            self._log_stage(context, "runtime.skills", started_at)
+            # 归档和可选长期记忆共享 Store；首次访问可能包含连接及表初始化。
+            started_at = time.monotonic()
             store: BaseStore | None = get_configured_store()
+            self._log_stage(context, "runtime.store", started_at)
             memory_routes: dict[str, BackendProtocol] = {}
             if store is None:
                 raise RuntimeError("会话历史归档需要配置 Agent Store")
@@ -120,6 +126,7 @@ class AgentRuntimeAssembler:
                 )
             owned_backends.extend(memory_routes.values())
             # 3.Sandbox 只借用 Workspace；运行资源分别持有两者的释放责任。
+            started_at = time.monotonic()
             sandbox = build_sandbox_backend(
                 settings=self.config,
                 workspace=workspace,
@@ -133,6 +140,7 @@ class AgentRuntimeAssembler:
             )
             if sandbox is not None:
                 owned_backends.append(sandbox)
+            self._log_stage(context, "runtime.sandbox", started_at)
             # 4.就地选择工作副本的数据源，路由一次构造，不先添加再过滤 Workspace。
             if sandbox is None:
                 backend = CompositeBackend(
@@ -150,8 +158,11 @@ class AgentRuntimeAssembler:
             # 临时文件和存储会话分别由资源对象释放，Backend 不持有业务 Session。
             owned_backends = [backend]
             # 5.获取持久化能力并冻结本轮权限与上下文，交给执行器接管。
+            started_at = time.monotonic()
+            checkpointer = get_configured_checkpointer()
+            self._log_stage(context, "runtime.checkpointer", started_at)
             return AgentRuntimeResources(
-                checkpointer=get_configured_checkpointer(),
+                checkpointer=checkpointer,
                 backend=backend,
                 workspace=workspace,
                 workspace_store=workspace_store,

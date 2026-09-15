@@ -7,6 +7,7 @@ from uuid import UUID
 from injector import inject
 from langchain_core.tools import BaseTool
 from pydantic import ValidationError
+from sqlalchemy import tuple_
 
 from internal.entity.subagent_config import (
     SubAgentConfig,
@@ -26,6 +27,7 @@ from internal.core.language_model.parameters import validate_model_parameters
 from internal.model import (
     App,
     ApiTool,
+    ApiToolProvider,
     MCPServer,
     MCPTool,
     Dataset,
@@ -49,7 +51,7 @@ from internal.core.workflow.entities.workflow_entity import WorkflowConfig
 from internal.entity.app_entity import AppConfigType, AppStatus, DEFAULT_APP_CONFIG
 from internal.entity.workflow_entity import WorkflowStatus
 from internal.service.skill.skill_service import SkillService
-from internal.service.language_model.language_model_service import LanguageModelService
+from internal.service.language_model.language_model_service import LanguageModelService, ModelConnectionCache
 
 
 @inject
@@ -564,7 +566,9 @@ class AppConfigService(BaseService):
             app_config,
         )
 
-    def get_draft_agent_runtime_config(self, app: App) -> AgentAppConfigReq:
+    def get_draft_agent_runtime_config(
+        self, app: App, *, connection_cache: ModelConnectionCache | None = None,
+    ) -> AgentAppConfigReq:
         """只投影草稿的有效能力，不创建草稿或提交调用方的会话事务。"""
         draft = (
             self.db.session.query(AppConfigVersion)
@@ -582,16 +586,17 @@ class AppConfigService(BaseService):
             )
         model_config = self._process_and_validate_model_config(
             draft.model_config, account_id=app.account_id,
+            connection_cache=connection_cache,
         )
         tools, _ = self._process_and_validate_tools(
-            draft.tools, account_id=app.account_id,
+            draft.tools, account_id=app.account_id, batch_lookup=True,
         )
         datasets, _ = self._process_and_validate_datasets(
             draft.datasets, account_id=app.account_id,
-        )
+        ) if draft.datasets else ([], [])
         workflows, _ = self._process_and_validate_workflows(
             draft.workflows, account_id=app.account_id,
-        )
+        ) if draft.workflows else ([], [])
         payload = self._process_and_transformer_app_config(
             model_config, tools, workflows, datasets, draft,
         )
@@ -713,7 +718,49 @@ class AppConfigService(BaseService):
         account_id: UUID,
     ) -> list[BaseTool]:
         """根据工具配置列表构造可调用的 LangChain 工具。"""
-        # 1.遍历工具配置列表。
+        # 1.按租户批量读取绑定记录，避免每个工具分别查询服务、工具及请求头。
+        server_ids = {
+            UUID(str(tool["provider"]["id"])) for tool in tools_config
+            if tool["type"] == "mcp_tool"
+        }
+        api_keys = {
+            (UUID(str(tool["provider"]["id"])), tool["tool"]["name"])
+            for tool in tools_config
+            if tool["type"] not in {"builtin_tool", "mcp_tool"}
+        }
+        servers = {}
+        if server_ids:
+            servers = {
+                server.id: server
+                for server in self.db.session.query(MCPServer).filter(
+                    MCPServer.id.in_(server_ids),
+                    MCPServer.account_id == account_id,
+                    MCPServer.enabled.is_(True),
+                ).all()
+            }
+        api_records = {}
+        if api_keys:
+            rows = (
+                self.db.session.query(ApiTool, ApiToolProvider.headers)
+                .join(ApiToolProvider, ApiToolProvider.id == ApiTool.provider_id)
+                .filter(
+                    ApiTool.account_id == account_id,
+                    ApiToolProvider.account_id == account_id,
+                    # 提供方和名称必须成对匹配，避免分别 IN 时选中未绑定的组合。
+                    tuple_(ApiTool.provider_id, ApiTool.name).in_(api_keys),
+                )
+                .all()
+            )
+            for api_tool, headers in rows:
+                key = (api_tool.provider_id, api_tool.name)
+                if key in api_records:
+                    raise ValidateErrorException(
+                        f"同一提供方存在重复 API 工具名称：{api_tool.name}，请先修正工具配置"
+                    )
+                api_records[key] = (api_tool, headers)
+
+        # 工具列表仍按绑定顺序生成；同一 MCP 服务在本次装配只解析一次目录。
+        mcp_catalogs: dict[UUID, list[BaseTool]] = {}
         tools = []
         for tool in tools_config:
             # 2.按工具类型加载对应实例。
@@ -726,37 +773,27 @@ class AppConfigService(BaseService):
                     continue
                 tools.append(builtin_tool(**tool["tool"]["params"]))
             elif tool["type"] == "mcp_tool":
-                server = (
-                    self.db.session.query(MCPServer)
-                    .filter(
-                        MCPServer.id == tool["provider"]["id"],
-                        MCPServer.account_id == account_id,
+                server = servers.get(UUID(str(tool["provider"]["id"])))
+                if server is None:
+                    continue
+                if server.id not in mcp_catalogs:
+                    mcp_catalogs[server.id] = self.mcp_runtime_manager.list_langchain_tools(
+                        server,
                     )
-                    .one_or_none()
+                selected = next(
+                    (item for item in mcp_catalogs[server.id] if item.name == tool["tool"]["name"]),
+                    None,
                 )
-                if not server or not server.enabled:
-                    continue
-                try:
-                    tools.append(
-                        self.mcp_runtime_manager.get_langchain_tool(
-                            server, tool["tool"]["name"]
-                        )
-                    )
-                except NotFoundException:
-                    continue
+                if selected is not None:
+                    tools.append(selected)
             else:
-                # 4.查询 API 工具记录并创建工具实例。
-                api_tool = (
-                    self.db.session.query(ApiTool)
-                    .filter(
-                        ApiTool.provider_id == tool["provider"]["id"],
-                        ApiTool.name == tool["tool"]["name"],
-                        ApiTool.account_id == account_id,
-                    )
-                    .one_or_none()
+                # 4.从本次授权快照创建 API 工具实例。
+                record = api_records.get(
+                    (UUID(str(tool["provider"]["id"])), tool["tool"]["name"])
                 )
-                if not api_tool:
+                if record is None:
                     continue
+                api_tool, headers = record
                 tools.append(
                     self.api_provider_manager.get_tool(
                         ToolEntity(
@@ -765,7 +802,7 @@ class AppConfigService(BaseService):
                             url=api_tool.url,
                             method=api_tool.method,
                             description=api_tool.description,
-                            headers=api_tool.provider.headers,
+                            headers=headers,
                             parameters=api_tool.parameters,
                         )
                     )
@@ -850,8 +887,14 @@ class AppConfigService(BaseService):
         *,
         account_id: UUID,
         request_base_url: str = "",
+        batch_lookup: bool = False,
     ) -> tuple[list[dict], list[dict]]:
         """处理并校验原始工具配置，返回展示数据和有效配置。"""
+        # 草稿运行批量读取，但保留原输出字段，避免改变等待表单的定义指纹。
+        api_records, mcp_records = (
+            self._load_draft_tool_records(origin_tools, account_id=account_id)
+            if batch_lookup else ({}, {})
+        )
         # 1.遍历工具列表并移除已删除的工具。
         validate_tools = []
         tools = []
@@ -905,23 +948,31 @@ class AppConfigService(BaseService):
                 )
             elif tool["type"] == "api_tool":
                 # 7.查询 API 工具记录并确认其存在。
-                tool_record = (
-                    self.db.session.query(ApiTool)
-                    .filter(
-                        ApiTool.provider_id == tool["provider_id"],
-                        ApiTool.name == tool["tool_id"],
-                        ApiTool.account_id == account_id,
+                if batch_lookup:
+                    record = api_records.get(
+                        (UUID(str(tool["provider_id"])), tool["tool_id"])
                     )
-                    .one_or_none()
-                )
-                if not tool_record:
-                    continue
+                    if record is None:
+                        continue
+                    tool_record, provider = record
+                else:
+                    tool_record = (
+                        self.db.session.query(ApiTool)
+                        .filter(
+                            ApiTool.provider_id == tool["provider_id"],
+                            ApiTool.name == tool["tool_id"],
+                            ApiTool.account_id == account_id,
+                        )
+                        .one_or_none()
+                    )
+                    if not tool_record:
+                        continue
+                    provider = tool_record.provider
 
                 # 8.保存校验后的 API 工具配置。
                 validate_tools.append(tool)
 
                 # 9.组装 API 工具展示信息。
-                provider = tool_record.provider
                 tools.append(
                     {
                         "type": "api_tool",
@@ -942,28 +993,36 @@ class AppConfigService(BaseService):
                     }
                 )
             elif tool["type"] == "mcp_tool":
-                server = (
-                    self.db.session.query(MCPServer)
-                    .filter(
-                        MCPServer.id == tool["provider_id"],
-                        MCPServer.account_id == account_id,
+                if batch_lookup:
+                    record = mcp_records.get(
+                        (UUID(str(tool["provider_id"])), tool["tool_id"])
                     )
-                    .one_or_none()
-                )
-                if not server or not server.enabled:
-                    continue
+                    if record is None:
+                        continue
+                    server, tool_record = record
+                else:
+                    server = (
+                        self.db.session.query(MCPServer)
+                        .filter(
+                            MCPServer.id == tool["provider_id"],
+                            MCPServer.account_id == account_id,
+                        )
+                        .one_or_none()
+                    )
+                    if not server or not server.enabled:
+                        continue
 
-                tool_record = (
-                    self.db.session.query(MCPTool)
-                    .filter(
-                        MCPTool.server_id == server.id,
-                        MCPTool.name == tool["tool_id"],
-                        MCPTool.account_id == account_id,
+                    tool_record = (
+                        self.db.session.query(MCPTool)
+                        .filter(
+                            MCPTool.server_id == server.id,
+                            MCPTool.name == tool["tool_id"],
+                            MCPTool.account_id == account_id,
+                        )
+                        .one_or_none()
                     )
-                    .one_or_none()
-                )
-                if not tool_record:
-                    continue
+                    if not tool_record:
+                        continue
 
                 validate_tools.append({**tool, "params": {}})
                 tools.append(
@@ -987,6 +1046,58 @@ class AppConfigService(BaseService):
                 )
 
         return tools, validate_tools
+
+    def _load_draft_tool_records(
+        self, bindings: list[dict], *, account_id: UUID,
+    ) -> tuple[
+        dict[tuple[UUID, str], tuple[ApiTool, ApiToolProvider]],
+        dict[tuple[UUID, str], tuple[MCPServer, MCPTool]],
+    ]:
+        """只供草稿运行使用，按租户批量校验工具和提供方，保持原有有效引用规则。"""
+        api_keys = {
+            (UUID(str(item["provider_id"])), item["tool_id"])
+            for item in bindings if item["type"] == "api_tool"
+        }
+        mcp_keys = {
+            (UUID(str(item["provider_id"])), item["tool_id"])
+            for item in bindings if item["type"] == "mcp_tool"
+        }
+        api_records = {}
+        if api_keys:
+            rows = (
+                self.db.session.query(ApiTool, ApiToolProvider)
+                .join(ApiToolProvider, ApiToolProvider.id == ApiTool.provider_id)
+                .filter(
+                    ApiTool.account_id == account_id,
+                    ApiToolProvider.account_id == account_id,
+                    tuple_(ApiTool.provider_id, ApiTool.name).in_(api_keys),
+                )
+                .all()
+            )
+            for tool, provider in rows:
+                key = (tool.provider_id, tool.name)
+                if key in api_records:
+                    raise ValidateErrorException(f"同一提供方存在重复 API 工具名称：{tool.name}")
+                api_records[key] = (tool, provider)
+        mcp_records = {}
+        if mcp_keys:
+            rows = (
+                self.db.session.query(MCPServer, MCPTool)
+                .join(MCPTool, MCPTool.server_id == MCPServer.id)
+                .filter(
+                    MCPServer.account_id == account_id,
+                    MCPTool.account_id == account_id,
+                    MCPServer.enabled.is_(True),
+                    tuple_(MCPTool.server_id, MCPTool.name).in_(mcp_keys),
+                )
+                .all()
+            )
+            for server, tool in rows:
+                key = (server.id, tool.name)
+                if key in mcp_records:
+                    raise ValidateErrorException(f"同一服务存在重复 MCP 工具名称：{tool.name}")
+                mcp_records[key] = (server, tool)
+        return api_records, mcp_records
 
     def _process_and_validate_datasets(
         self,
@@ -1042,12 +1153,15 @@ class AppConfigService(BaseService):
         origin_model_config: dict[str, Any],
         *,
         account_id: UUID | None = None,
+        connection_cache: ModelConnectionCache | None = None,
     ) -> dict[str, Any]:
         """处理并校验模型配置，返回当前账号可用的标准结构。"""
 
         def default_active_model_config() -> dict[str, Any]:
             """返回当前账号可用的默认激活模型配置。"""
-            return self.language_model_service.get_default_model_config(account_id)
+            return self.language_model_service.get_default_model_config(
+                account_id, connection_cache=connection_cache,
+            )
 
         # 新建应用时 DEFAULT_APP_CONFIG 中的 model_config 为空对象。
         # 空对象表示“尚未选择模型”，不是一个待解析的 AppModelConfigReq；
@@ -1081,6 +1195,7 @@ class AppConfigService(BaseService):
             model_entity = self.language_model_service.get_enabled_model_entity(
                 model_config["provider"], model_config["model"], account_id,
                 provider_connection_id=model_config["provider_connection_id"],
+                connection_cache=connection_cache,
             )
         except ValidateErrorException:
             # 历史无连接 ID 的同名模型仍可打开配置页修复，运行和保存不会绕过校验。
