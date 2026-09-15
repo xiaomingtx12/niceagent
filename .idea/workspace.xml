@@ -6,22 +6,13 @@
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/Agent-会话与执行表定案.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-会话与执行表定案.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/summary_progress.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/observability/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/observability/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/agent/agent_run_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/agent/agent_run_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/router/agent_routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/agent_routes.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/agent/agent_protocol_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/agent/agent_protocol_schema.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/app/http/module.py" beforeDir="false" afterPath="$PROJECT_DIR$/app/http/module.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/Agent-业务文档.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-业务文档.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_events.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_run_events.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_events.py" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_query.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_run_query.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_run_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/event_projector.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/event_projector.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/agent/live_event_stream.py" beforeDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
@@ -480,7 +471,7 @@
       <workItem from="1789202141468" duration="23248000" />
       <workItem from="1789283550417" duration="30110000" />
       <workItem from="1789363735129" duration="11652000" />
-      <workItem from="1789452244130" duration="26985000" />
+      <workItem from="1789452244130" duration="29045000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
