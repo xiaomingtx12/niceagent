@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from deepagents import create_deep_agent
-from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT
+from deepagents.middleware.async_subagents import AsyncSubAgent
+from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
 from langgraph.graph.state import CompiledStateGraph
 
 from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
@@ -20,6 +23,7 @@ from internal.core.agent_v2.entity.run_context import AgentRunContext
 from internal.core.agent_v2.entity.agent_config import AgentConfig
 from internal.core.agent_v2.assembly.graph.platform_middleware import build_platform_middleware
 from internal.core.agent_v2.middleware.shell_execution_middleware import ShellExecutionMiddleware
+from internal.core.agent_v2.middleware.named_async_subagent_middleware import NamedAsyncSubAgentMiddleware
 
 
 def build_deep_agent(
@@ -47,11 +51,16 @@ def build_deep_agent(
         definition.subagents,
         skill_sources_by_agent=runtime.skill_projection.subagent_sources,
     )
+    # 异步规格交给平台扩展中间件，避免 create_deep_agent 再注册一套同名工具。
+    async_specs = [cast(AsyncSubAgent, spec) for spec in subagent_specs if "graph_id" in spec]
+    sync_specs = [cast(SubAgent, spec) for spec in subagent_specs if "graph_id" not in spec]
+    if async_specs:
+        middleware.insert(0, NamedAsyncSubAgentMiddleware(async_subagents=async_specs))
 
     # 框架默认通用子 Agent 不继承主 Agent 中间件，却会继承父工具（含 execute）；
     # 这里统一显式声明，按平台策略在执行入口关闭子 Agent 的共享 Shell。
-    if not any(spec["name"] == GENERAL_PURPOSE_SUBAGENT["name"] for spec in subagent_specs):
-        subagent_specs.insert(0, {
+    if not any(spec["name"] == GENERAL_PURPOSE_SUBAGENT["name"] for spec in sync_specs):
+        sync_specs.insert(0, {
             **GENERAL_PURPOSE_SUBAGENT,
             "skills": list(runtime.skill_projection.sources),
             "middleware": [ShellExecutionMiddleware(
@@ -66,7 +75,7 @@ def build_deep_agent(
         tools=agent_tools,
         system_prompt=system_prompt,
         middleware=middleware,
-        subagents=subagent_specs,
+        subagents=sync_specs,
         skills=list(runtime.skill_projection.sources) or None,
         # 记忆由刷新中间件装配，不能同时启用官方默认中间件，
         # 否则会在同一请求链中重复注入记忆提示词。
