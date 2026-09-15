@@ -114,7 +114,7 @@ Observer 只保留活动模型的 ID/名称、活动工具 ID 及累计统计；
 
 v3 的 `custom` 通道由每个图中唯一的 `ContextWindowMiddleware` 注册 `CustomTransformer`。记忆、模型进度和摘要通知仅向共享 writer 发布数据，不在各自中间件重复声明 transformer；框架合并注册列表时不会去重，重复声明会导致流初始化失败。
 
-本轮新增 `assembly/configuration/context_budget.py`：按可信容量与输出预留复制模型 profile，原生自动和主动压缩共用预算。`middleware/conversation_compaction.py` 复用框架主动工具，补齐媒体、重复调用与摘要失败保护。
+`assembly/configuration/context_budget.py` 按配置容量与输出预留复制模型 profile，原生自动和主动压缩共用预算。缺少窗口时沿用平台默认 400000 token；现有默认输入上限 272000 和输出上限 128000 token 参与预算，界面标明默认窗口。圆环显示压缩器计数与自动压缩阈值的比例，模型窗口占比在详情单独展示。`middleware/conversation_compaction.py` 复用框架主动工具，补齐媒体、重复调用与摘要失败保护。
 
 `backends/conversation_history.py` 为 `/conversation_history/`、`/large_tool_results/` 提供作用域隔离、原子追加与有限容量；模型只读。`persistence/conversation_summary.py` 集中读取框架已提交摘要，执行器仅首尾核对并通知最新有效提交。各会话入口的 `/summary` 按需读取正文；具体阈值、限额及观测边界见升级方案第 12.1 节。
 
@@ -123,6 +123,10 @@ v3 的 `custom` 通道由每个图中唯一的 `ContextWindowMiddleware` 注册 
 平台 system 按“固定进度与文件规则 → 固定任务数据与规划规则 → 应用名称、说明和业务指令 → 可选能力规则”排列。固定前缀不包含应用变量、本轮选项或时间戳；修改应用配置不会改写前面的固定内容。拼接方式本身不决定缓存命中，实际还取决于供应商请求中的工具定义、框架追加内容及缓存门槛。此次顺序调整会改变原请求前缀，上线后需要重新建立相应缓存，不代表已有缓存能够直接沿用。
 
 AgentExecutor 只为新 HumanMessage 加入一次本轮自动/显式规划选项，保留身份和媒体；恢复只传 Command(resume)。事件与状态公开前移除内部选项，业务原文不改变。ask_user 答案通过原生 ToolMessage 留在对应位置，已删除前置汇总中间件、运行上下文字段和近期表单查询；公开 input_history 与 Submission 继续保留。
+
+显式规划只通过固定规划提示词和本轮输入选项表达，沿用框架原生 `write_todos` 与 `todos` 状态。平台不增加强制规划中间件、私有规划标记或指定工具参数；提示词引导不作为确定性的执行保证。
+
+前端在流式执行时间线展示 `write_todos` 工具调用及其输入、结果和失败，不额外展示结构化计划卡片。当前计划清单沿用对话输入框上方的计划区域，历史变更通过工具调用记录查看。
 
 ## 装配耗时与复用边界
 

@@ -98,10 +98,17 @@ class ModelProgressCallback(BaseCallbackHandler):
 
     def _start(self, run_id: UUID, metadata: Mapping[str, Any] | None) -> None:
         """在首个 Token 之前捕获 writer；无图上下文的调用不公开。"""
+        # 日志先于 writer 获取，便于区分模型尚未开始与进度通知缺失。
+        logger.info(
+            "agent_model_timing conversation_id=%s model_run_id=%s phase=started summarization=%s",
+            (metadata or {}).get("conversation_id"), run_id,
+            bool(metadata and metadata.get("lc_source") == "summarization"),
+        )
         # 1.在模型所属图内捕获 writer，结束回调不再依赖当时的上下文。
         try:
             writer = get_stream_writer()
         except RuntimeError:
+            logger.warning("模型进度缺少图上下文 model_run_id=%s", run_id)
             return
         call_id = str(run_id)
         with self._lock:
@@ -151,6 +158,11 @@ class ModelProgressCallback(BaseCallbackHandler):
             payload.update(
                 input_tokens=usage.get("input_tokens"),
                 output_tokens=usage.get("output_tokens"),
+            )
+        if phase not in {ModelProgressPhase.SUMMARIZING, ModelProgressPhase.STARTED}:
+            logger.info(
+                "agent_model_timing model_run_id=%s phase=%s duration_ms=%s first_token_ms=%s",
+                call_id, phase.value, payload["duration_ms"], call.first_token_ms,
             )
         try:
             call.writer(payload)

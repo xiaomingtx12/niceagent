@@ -1,4 +1,6 @@
-"""将可信容量转换为本次运行的框架输入预算，保留原始上限供界面解释。"""
+"""将配置容量或平台默认窗口转换为框架输入预算，保留来源供界面解释。"""
+
+from internal.core.language_model.entities.model_entity import DEFAULT_CONTEXT_WINDOW
 
 
 def positive_int(value):
@@ -13,11 +15,10 @@ def with_context_budget(model):
         return model
     profile = dict(model.profile or {})
     window = positive_int(metadata.get("context_window"))
+    if window is None:
+        window = DEFAULT_CONTEXT_WINDOW
+        metadata["context_window_source"] = "default"
     input_limit = positive_int(metadata.get("max_input_tokens")) if "max_input_tokens" in metadata else positive_int(profile.get("max_input_tokens"))
-    if metadata.get("context_window_source") == "default":
-        window = None
-    if metadata.get("max_input_tokens_source") == "gpt5_preset":
-        input_limit = None
     metadata.update(context_window=window, max_input_tokens=input_limit)
     reserve = positive_int(metadata.get("configured_output_tokens")) or positive_int(getattr(model, "max_tokens", None))
     limits = [value for value in (input_limit, window - reserve if window and reserve else None) if value is not None]

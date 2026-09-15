@@ -23,6 +23,7 @@ class ContextWindowResp(BaseModel):
     status: Literal["running", "completed", "failed"]
     model: str = Field(max_length=256)
     context_limit: int | None = Field(default=None, gt=0)
+    context_limit_is_default: bool = False
     limit_kind: Literal["context", "input"]
     output_reserve: int | None = Field(default=None, gt=0)
     estimated_input_tokens: int = Field(ge=0)

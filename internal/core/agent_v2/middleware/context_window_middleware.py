@@ -22,6 +22,7 @@ from internal.core.agent_v2.execution.message_text import extract_text
 from internal.core.agent_v2.assembly.configuration.context_budget import positive_int, request_input_budget
 from internal.core.agent_v2.observability.token_usage import normalize_usage
 from internal.core.agent_v2.persistence.conversation_summary import validate_summary_message
+from internal.core.language_model.entities.model_entity import DEFAULT_CONTEXT_WINDOW
 
 
 class ContextWindowMiddleware(AgentMiddleware[AgentState, AgentRunContext, Any]):
@@ -59,7 +60,7 @@ class ContextWindowMiddleware(AgentMiddleware[AgentState, AgentRunContext, Any])
 
 
 def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
-    """输出固定分类的计数；未知窗口容量或输出上限保持 null，不猜测模型配置。"""
+    """窗口缺省采用平台默认值并标明来源；输出预留仍按实际请求配置读取。"""
     system = extract_text(request.system_message.content) if request.system_message else ""
     memory_blocks = re.findall(r"<长期记忆规则>.*?</长期记忆规则>", system, re.DOTALL)
     memory = "\n".join(memory_blocks)
@@ -102,6 +103,8 @@ def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
     metadata = getattr(request.model, "metadata", None) or {}
     profile = getattr(request.model, "profile", None) or {}
     window = positive_int(metadata.get("context_window"))
+    default_window = window is None or metadata.get("context_window_source") == "default"
+    window = window or DEFAULT_CONTEXT_WINDOW
     input_limit = positive_int(metadata.get("max_input_tokens")) if "max_input_tokens" in metadata else positive_int(profile.get("max_input_tokens"))
     settings = request.model_settings or {}
     reserved = next((value for value in (
@@ -118,7 +121,8 @@ def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
     return {
         "type": "context_window", "call_id": str(uuid4()), "status": "running",
         "model": str(getattr(request.model, "model_name", None) or getattr(request.model, "model", None) or request.model.__class__.__name__),
-        "context_limit": window or input_limit, "limit_kind": "context" if window else "input",
+        "context_limit": window, "limit_kind": "context",
+        "context_limit_is_default": default_window,
         "max_input_tokens": input_limit,
         "output_reserve": reserved, "estimated_input_tokens": sum(section["tokens"] for section in sections.values()),
         "actual_input_tokens": None, "sections": list(sections.values()), "has_multimodal": multimodal,
