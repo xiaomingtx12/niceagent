@@ -4,7 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="" />
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/internal_agent_protocol/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/internal_agent_protocol/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/internal_agent_protocol/service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/internal_agent_protocol/service.py" afterDir="false" />
+    </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -462,7 +466,7 @@
       <workItem from="1789202141468" duration="23248000" />
       <workItem from="1789283550417" duration="30110000" />
       <workItem from="1789363735129" duration="11652000" />
-      <workItem from="1789452244130" duration="37614000" />
+      <workItem from="1789452244130" duration="39658000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
