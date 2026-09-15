@@ -413,7 +413,9 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
 
 ### 1.4 获取工作台模型设置
 
-- **接口说明**：该接口用于读取当前应用在当前入口下可用的模型目录、当前选中的模型与推理等级。**只有创建者入口（调试页、Creator 任务）会返回可切换的模型目录**，WebApp、辅助 Agent 与开放 API 入口返回空目录，仅暴露当前生效的模型标识。
+- **接口说明**：该接口只读取当前会话生效的模型、历史覆盖与推理等级，不查询账号模型目录。调试页、Creator 任务、辅助 Agent 的所有者可切换模型；WebApp 与开放 API 不允许切换，由 `can_select_model` 明确返回。
+
+- **模型目录**：三个可切换入口共用已有的 `授权`+`GET:/language-models?model_type=chat`，不携带应用或会话 ID。响应沿用普通接口的 `{code, message, data}` 包装，`data` 按连接分组，包含 `provider_name`、`connection_id`、`connection_name` 和 `models`；各模型的 `parameters` 提供推理等级和默认值。目录只读取登录账号自身的已激活连接，不授予跨应用切换权限。前端与会话设置独立加载，复用现有账号隔离的 30 秒缓存及并发请求；连接新增、修改或删除后使缓存失效。目录失败不影响当前模型设置的显示。
 
 - **接口信息**：`授权`+`GET:/apps/:app_id/conversations/:conversation_id/model-settings`（其余四个入口替换路径前缀即可）
 
@@ -427,14 +429,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
     - `provider -> str`：应用配置中的模型提供方；未配置时为空字符串。
     - `selected_model -> dict | null`：当前生效的模型引用，结构为 `{provider, model, provider_connection_id}`。
     - `model_override -> dict | null`：当前会话通过 `run.start` 临时切换的模型引用；没有切换时为 `null`。
-    - `available_models -> list[dict]`：可切换的模型目录，类型为字典列表，非创建者入口为空数组。
-      - `provider -> str`：模型提供方标识。
-      - `model -> str`：模型标识。
-      - `provider_connection_id -> str`：模型连接 id。
-      - `label -> str`：模型展示名称。
-      - `connection_name -> str`：模型连接的展示名称。
-      - `reasoning_levels -> list[str]`：该模型支持的推理等级。
-      - `default_reasoning_effort -> str | null`：默认推理等级。
+    - `can_select_model -> bool`：当前入口、调用账号和应用所有者是否允许切换模型；前端只在为 `true` 时展示账号目录，提交时服务端仍重新校验连接权限。
     - `reasoning_levels -> list[str]`：当前模型的可用推理等级。
     - `default_reasoning_effort -> str | null`：当前模型的默认推理等级。
     - `selected_reasoning_effort -> str | null`：当前会话已选择的推理等级。
@@ -457,17 +452,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
           "provider_connection_id": "1550b71a-1444-47ed-a59d-c2f080fbae94"
       },
       "model_override": null,
-      "available_models": [
-          {
-              "provider": "openai",
-              "model": "gpt-4o-mini",
-              "provider_connection_id": "1550b71a-1444-47ed-a59d-c2f080fbae94",
-              "label": "GPT-4o mini",
-              "connection_name": "默认 OpenAI 连接",
-              "reasoning_levels": [],
-              "default_reasoning_effort": null
-          }
-      ],
+      "can_select_model": true,
       "reasoning_levels": [],
       "default_reasoning_effort": null,
       "selected_reasoning_effort": null

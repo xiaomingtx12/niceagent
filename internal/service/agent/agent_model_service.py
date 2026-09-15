@@ -13,7 +13,6 @@ from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.schema.agent.agent_model_schema import (
     AgentProtocolModelSettingsResp,
-    AgentProtocolModelChoiceResp,
 )
 from internal.schema.app.app_config_schema import AppModelConfigReq
 from internal.service.language_model.language_model_service import LanguageModelService
@@ -79,7 +78,10 @@ class AgentModelService:
 
                 # 4.没有显式选择时，仅为允许切换模型的创建者补全当前连接。
                 selected_model = selection
-                can_select_model = invoke_from in _MODEL_SELECTABLE_SOURCES and created_by == owner_account_id
+                can_select_model = (
+                    invoke_from in _MODEL_SELECTABLE_SOURCES
+                    and account_id == created_by == owner_account_id
+                )
                 connection_id = config.provider_connection_id or model.attributes.get("provider_api_key_id")
                 needs_default_selection = selected_model is None and can_select_model
                 if needs_default_selection and connection_id:
@@ -95,10 +97,7 @@ class AgentModelService:
                     provider=config.provider,
                     selected_model=selected_model,
                     model_override=selection,
-                    available_models=self._model_choices(
-                        account_id=account_id, created_by=created_by,
-                        invoke_from=invoke_from,
-                    ),
+                    can_select_model=can_select_model,
                     reasoning_levels=reasoning_levels,
                     default_reasoning_effort=default,
                     selected_reasoning_effort=(
@@ -192,41 +191,6 @@ class AgentModelService:
             account_id=account_id, app_id=app_id, invoke_from=invoke_from,
         )
         return definition.config.model_config_data, definition.account_id
-
-    def _model_choices(
-        self, *, account_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
-    ) -> list[AgentProtocolModelChoiceResp]:
-        """目录按可信账号和创建者身份过滤，不向 WebApp 或开放 API 暴露。"""
-        if invoke_from not in _MODEL_SELECTABLE_SOURCES:
-            return []
-        if created_by != account_id:
-            return []
-
-        # 1.按账号一次读取模型目录，每个连接保留自己的模型与参数选项。
-        choices = []
-        groups = self.language_model_service.get_language_models(account_id, {ModelType.CHAT})
-        for group in groups:
-            for model in group["models"]:
-                parameter = None
-                for item in model.get("parameters", []):
-                    if item["name"] == "reasoning_effort":
-                        parameter = item
-                        break
-                reasoning_levels = []
-                default_effort = None
-                if parameter:
-                    reasoning_levels = [option["value"] for option in parameter.get("options", [])]
-                    default_effort = parameter.get("default")
-                choices.append(AgentProtocolModelChoiceResp(
-                    provider=group["provider_name"],
-                    model=model["model_name"],
-                    provider_connection_id=group["connection_id"],
-                    label=model.get("label") or model["model_name"],
-                    connection_name=group["connection_name"],
-                    reasoning_levels=reasoning_levels,
-                    default_reasoning_effort=default_effort,
-                ))
-        return choices
 
     def _get_model_entity(self, config: AppModelConfigReq, account_id: UUID) -> ModelEntity | None:
         """查询展示和参数校验共用的模型定义，连接权限仍由模型服务校验。"""

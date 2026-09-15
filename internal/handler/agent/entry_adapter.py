@@ -95,7 +95,7 @@ def respond_state(query_service: AgentExecutionQuery, caller: AgentExecutionCall
 
 
 def respond_model_settings(query_service: AgentExecutionQuery, caller: AgentExecutionCaller) -> Response:
-    """返回模型选项；可见范围由查询服务按账号与创建者身份判断。"""
+    """返回会话模型设置与切换权限；账号模型目录由独立接口读取。"""
     result = query_service.get_model_settings(
         app_id=caller.app_id, conversation_id=caller.conversation_id,
         invoke_from=caller.invoke_from, account_id=caller.account_id,

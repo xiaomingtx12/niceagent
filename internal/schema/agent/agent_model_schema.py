@@ -4,28 +4,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from internal.entity.agent_execution_entity import AgentModelSelection
 
 
-class AgentProtocolModelChoiceResp(BaseModel):
-    """工作台模型目录仅公开标识、名称和推理等级。"""
-
-    provider: str
-    model: str
-    provider_connection_id: str
-    label: str
-    connection_name: str
-    reasoning_levels: list[str] = Field(default_factory=list)
-    default_reasoning_effort: str | None = None
-
-
-
 class AgentProtocolModelSettingsResp(BaseModel):
-    """只有创建者入口公开可切换的模型目录。"""
+    """会话设置仅返回生效模型与切换权限，账号目录由语言模型接口提供。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
     model: str = ""
     provider: str = ""
     selected_model: AgentModelSelection | None = None
     model_override: AgentModelSelection | None = None
-    available_models: list[AgentProtocolModelChoiceResp] = Field(default_factory=list)
+    can_select_model: bool = False
     reasoning_levels: list[str] = Field(default_factory=list)
     default_reasoning_effort: str | None = None
     selected_reasoning_effort: str | None = None
