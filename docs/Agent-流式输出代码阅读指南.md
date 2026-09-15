@@ -171,6 +171,16 @@ emit(event)
 
 同文件中的 `RunExecutionProjector` 管理各 Run 的事件集合、去重和展示投影。[recoverySeedEvents](../../my-dify-ui/src/services/workbench-recovery.ts) 为 SDK 重建接收后续增量所需的消息上下文。[createAgentWorkbenchAdapter](../../my-dify-ui/src/services/agent-workbench.ts) 将订阅、恢复材料和 SDK 连接起来。
 
+### 6.4 流式展示如何避免阻塞点击
+
+[buildWorkbenchTimeline](../../my-dify-ui/src/utils/workbench-timeline.ts) 先按 namespace 建立归属索引，再把事件分组为各父节点的活动、展示块和步骤。[WorkbenchExecutionTimeline](../../my-dify-ui/src/components/WorkbenchExecutionTimeline.vue) 将同一份索引传给嵌套时间线。子组件只读取自己的分组，正文增加时不再为每条事件反复扫描、排序整轮记录；同路径的归属候选仍按事件顺序选择，未绑定子图的委派不能认领兄弟活动。
+
+[StreamingMarkdown](../../my-dify-ui/src/components/StreamingMarkdown.vue) 把正文交给 [markdown-renderer](../../my-dify-ui/src/utils/markdown-renderer.ts) 管理的共享 Worker。[markdown.worker](../../my-dify-ui/src/utils/markdown.worker.ts) 仍解析全文，以保留跨段引用、列表和未闭合 Markdown 的语义，但返回段落、列表项、表格单元格等组成的块树。Vue 复用未改变的 DOM，只有叶子 HTML 变化时才重写相应内容，不再每次替换整篇回答。
+
+每个 Markdown 组件最多排队一份最新正文；更新更快时覆盖尚未开始的旧任务，不堆积逐 Token 的解析队列。已开始的解析可以先显示当前正文的前缀，正文被替换或清空后丢弃不匹配的旧结果。最后一个组件卸载时释放 Worker；线程不可用时显示经过 Vue 文本转义的原文，不回退到主线程全文解析。
+
+2026-09-16 的本地开发模式浏览器诊断中，12 个子 Agent 展开、1000 条过程记录时，正文更新引起的点击等待从约 140–220ms 降至 6–12ms；2000 条记录从约 470–710ms 降至 9–13ms。约 15 万字符表格 Markdown 的更新期间，包含 Worker 回传和 DOM 更新的最大事件循环延迟约为 58ms。数据来自独立组件的模拟输入，不代表线上请求或整页性能承诺；超大内容的首次创建仍有 DOM 成本。
+
 ## 7. 第二遍再读分支
 
 第一遍读完上面的正常输出和刷新恢复流程即可。第二遍带着具体问题追分支：
