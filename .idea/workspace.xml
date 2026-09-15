@@ -6,14 +6,13 @@
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/Agent-记忆与上下文管理改造升级方案.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-记忆与上下文管理改造升级方案.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/context/skill_context.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/context/skill_context.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/runtime_assembler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/runtime_assembler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/mcp/runtime/mcp_runtime_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/mcp/runtime/mcp_runtime_manager.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_factory.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app/app_config_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app/app_config_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/language_model/language_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/language_model/language_model_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/skill/skill_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/skill/skill_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/configuration/agent_system_prompt.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/configuration/agent_system_prompt.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/platform_middleware.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/assembly/graph/platform_middleware.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/model_progress.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/model_progress.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
@@ -472,7 +471,7 @@
       <workItem from="1789202141468" duration="23248000" />
       <workItem from="1789283550417" duration="30110000" />
       <workItem from="1789363735129" duration="11652000" />
-      <workItem from="1789452244130" duration="51146000" />
+      <workItem from="1789452244130" duration="53594000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
