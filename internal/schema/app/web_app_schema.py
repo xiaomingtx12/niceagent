@@ -65,7 +65,6 @@ class GetConversationsResp(Schema):
 
     id = fields.UUID(dump_default="")
     name = fields.String(dump_default="")
-    summary = fields.String(dump_default="")
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
@@ -73,6 +72,5 @@ class GetConversationsResp(Schema):
         return {
             "id": data.id,
             "name": data.name,
-            "summary": data.summary,
             "created_at": datetime_to_timestamp(data.created_at),
         }

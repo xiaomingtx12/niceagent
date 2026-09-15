@@ -17,7 +17,7 @@ from internal.exception import ForbiddenException, NotFoundException, FailExcept
 from internal.extension.dashscope_audio_extension import DashScopeRecognitionCallback
 from internal.extension.logging_extension import logger
 from internal.lib.api_key_helper import get_api_key_for_provider
-from internal.model import Account, Message, App, AppConfig, AppConfigVersion
+from internal.model import Account, ConversationTurn, App, AppConfig, AppConfigVersion
 from pkg.sqlalchemy import SQLAlchemy
 from internal.service.common.base_service import BaseService
 from internal.service.app.web_app_service import WebAppService
@@ -85,7 +85,7 @@ class AudioService(BaseService):
     def message_to_audio(self, message_id: UUID | str, account: Account) -> Generator:
         """使用Edge-TTS将消息转换成流式输出语音"""
         # 1.根据传递的消息id获取有效消息
-        message = self.get(Message, self._normalize_message_id(message_id))
+        message = self.get(ConversationTurn, self._normalize_message_id(message_id))
         if (
             not message
             or message.is_deleted

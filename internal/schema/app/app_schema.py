@@ -17,7 +17,7 @@ from wtforms.validators import (
 
 from internal.entity.app_entity import AppStatus
 from internal.lib.helper import datetime_to_timestamp
-from internal.model import App, Message
+from internal.model import App, ConversationTurn
 from internal.model.app import AppConfigVersion
 from internal.schema import ListField
 from pkg.paginator import PaginatorReq
@@ -256,7 +256,7 @@ class GetDebugConversationMessagesWithPageResp(Schema):
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
-    def process_data(self, data: Message, **kwargs):
+    def process_data(self, data: ConversationTurn, **kwargs):
         return {
             "id": data.id,
             "conversation_id": data.conversation_id,

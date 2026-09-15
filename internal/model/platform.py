@@ -67,7 +67,7 @@ class WechatMessage(db.Model):
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))  # 记录id
     wechat_end_user_id = Column(UUID, nullable=False)  # 关联的微信终端用户id
-    message_id = Column(UUID, nullable=False)  # 关联的消息id
+    turn_id = Column(UUID, nullable=False)  # 关联 ConversationTurn.id，协议消息 ID 由渠道管理
     is_pushed = Column(Boolean, nullable=False, server_default=text("false"))  # 是否推送，默认为false表示未推送
     updated_at = Column(
         DateTime,

@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
-_PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history", "input_recovery")
+_PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
 
 
 def adapt_graph_state(value: Mapping[str, Any]) -> dict[str, Any]:

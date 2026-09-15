@@ -13,7 +13,7 @@ from sqlalchemy import and_, desc, func, or_, select
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException
-from internal.model import Account, AgentRun, App, Conversation, EndUser
+from internal.model import Account, AgentExecution, App, Conversation, EndUser
 from pkg.sqlalchemy import SQLAlchemy
 
 from .agent_conversation_cleanup_service import AgentConversationCleanupService
@@ -130,12 +130,7 @@ class CreatorTaskService:
             query = query.filter(App.id == app_id)
         if search.strip():
             keyword = f"%{search.strip()}%"
-            query = query.filter(
-                or_(
-                    Conversation.name.ilike(keyword),
-                    Conversation.summary.ilike(keyword),
-                )
-            )
+            query = query.filter(Conversation.name.ilike(keyword))
         if before:
             cursor = self.db.session.get(Conversation, before)
             if cursor is not None:
@@ -285,7 +280,6 @@ class CreatorTaskService:
         return {
             "id": str(conversation.id),
             "name": conversation.name or "新的会话",
-            "summary": conversation.summary or "",
             "is_pinned": bool(conversation.is_pinned),
             "updated_at": self._timestamp(conversation.updated_at),
             "created_at": self._timestamp(conversation.created_at),
@@ -303,10 +297,10 @@ class CreatorTaskService:
         if not conversation_ids:
             return {}
         rows = (
-            self.db.session.query(AgentRun.conversation_id, AgentRun.status)
-            .filter(AgentRun.conversation_id.in_(conversation_ids))
-            .distinct(AgentRun.conversation_id)
-            .order_by(AgentRun.conversation_id, AgentRun.created_at.desc(), AgentRun.id.desc())
+            self.db.session.query(AgentExecution.conversation_id, AgentExecution.status)
+            .filter(AgentExecution.conversation_id.in_(conversation_ids))
+            .distinct(AgentExecution.conversation_id)
+            .order_by(AgentExecution.conversation_id, AgentExecution.created_at.desc(), AgentExecution.id.desc())
             .all()
         )
         return {row.conversation_id: row.status for row in rows}

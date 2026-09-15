@@ -161,6 +161,8 @@ class AgentExecutor:
                     "callbacks": [self._observer, interrupt_tracker, summary_progress],
                 },
             )
+            # 新消息走普通输入：LangGraph 丢弃旧调度，DeepAgents 补齐被取消的工具回执。
+            # 只有已接受的表单提交才走 resume；不能将停止后的下一轮当成旧中断恢复。
             with self._graph.stream_events(
                 Command(resume=dict(resume)) if resume is not None else {"messages": [message]},
                 config=config, context=self._resources.runtime_context,

@@ -120,7 +120,7 @@ class AgentEvaluationResp(Schema):
 
     id = fields.UUID()
     app_id = fields.UUID()
-    run_id = fields.UUID()
+    run_id = fields.UUID(attribute="execution_id")
     source_snapshot = fields.Nested(EvaluationSourceResp)
     criteria = fields.List(fields.String())
     judge_config = fields.Dict()

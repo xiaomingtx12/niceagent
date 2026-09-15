@@ -3,7 +3,7 @@ from .agent_run_entity import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_OCCUPYING_STATUSES,
     AGENT_RUN_TERMINAL_STATUSES,
-    AgentRunExecution,
+    AgentExecutionSegment,
     AgentRunInput,
     AgentRunStatus,
 )
@@ -23,7 +23,7 @@ __all__ = [
     "AGENT_RUN_ACTIVE_STATUSES",
     "AGENT_RUN_OCCUPYING_STATUSES",
     "AGENT_RUN_TERMINAL_STATUSES",
-    "AgentRunExecution",
+    "AgentExecutionSegment",
     "AgentRunInput",
     "AgentRunStatus",
 ]

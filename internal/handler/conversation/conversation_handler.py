@@ -7,7 +7,7 @@ from injector import inject
 
 from internal.middleware.rate_limit_middleware import rate_limit
 from internal.schema.conversation.conversation_schema import (
-    ConversationMessageResp,
+    ConversationTurnResp,
     UpdateConversationNameReq,
     UpdateConversationIsPinnedReq,
 )
@@ -26,7 +26,7 @@ class ConversationHandler:
     @rate_limit(config_key="database_intensive")
     @login_required
     def get_messages(self, conversation_id: UUID):
-        """按稳定游标返回当前账号可访问的业务 Message DTO。"""
+        """按稳定游标返回当前账号可访问的业务 ConversationTurn DTO。"""
         # 1.Handler 只解析通用游标参数。
         req = CursorPaginatorReq(request.args)
         if not req.validate():
@@ -43,7 +43,7 @@ class ConversationHandler:
         )
         return success_json(
             {
-                "messages": ConversationMessageResp(many=True).dump(messages),
+                "messages": ConversationTurnResp(many=True).dump(messages),
                 "page": {
                     "has_more": has_more,
                     "next_before": str(next_before) if next_before else None,

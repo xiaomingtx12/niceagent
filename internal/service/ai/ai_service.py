@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.ai_entity import OPTIMIZE_PROMPT_TEMPLATE
 from internal.exception import ForbiddenException
-from internal.model import Account, EndUser, Message
+from internal.model import Account, EndUser, ConversationTurn
 from internal.model import App
 from pkg.sqlalchemy import SQLAlchemy
 from internal.service.common.base_service import BaseService
@@ -35,7 +35,7 @@ class AIService(BaseService):
         """根据传递的消息id+账号生成建议问题列表"""
 
         # 1.查询消息并校验权限信息
-        message = self.get(Message, message_id)
+        message = self.get(ConversationTurn, message_id)
         if not message:
             raise ForbiddenException("该条消息不存在或无权限")
         if message.created_by != account.id:

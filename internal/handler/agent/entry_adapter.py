@@ -50,12 +50,8 @@ def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Respons
             answers={item.interrupt_id: item.response for item in params.responses},
         )
     elif isinstance(params, AgentProtocolInputReopenReq):
-        result = service.reopen_form(
-            account_id=caller.account_id, app_id=caller.app_id,
-            conversation_id=caller.conversation_id, created_by=caller.created_by,
-            end_user_id=caller.end_user_id, invoke_from=caller.invoke_from,
-            run_id=params.run_id, cancellation_sequence=params.cancellation_sequence,
-        )
+        # 旧客户端仍可解析响应，但不能恢复已经结束的 Run。
+        result = RunRejected("本轮已停止，不支持重新填写恢复；请在当前会话发送新消息")
     else:
         result = service.start_run(
             account_id=caller.account_id, app_id=caller.app_id,

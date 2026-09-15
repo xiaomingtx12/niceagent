@@ -21,7 +21,7 @@ from internal.service.common.base_service import BaseService
 from internal.service.agent.agent_conversation_cleanup_service import AgentConversationCleanupService
 from internal.service.language_model.provider_api_key_service import ProviderApiKeyService
 from internal.exception import ForbiddenException, NotFoundException
-from internal.model import App, Conversation, EndUser, Message, Account
+from internal.model import App, Conversation, EndUser, ConversationTurn, Account
 
 
 @inject
@@ -34,11 +34,11 @@ class ConversationService(BaseService):
     provider_api_key_service: ProviderApiKeyService
     agent_cleanup_service: AgentConversationCleanupService | None = None
 
-    def create_agent_message(
+    def create_agent_turn(
         self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
         invoke_from: InvokeFrom, query: str, image_urls: tuple[str, ...],
         attachments: list[dict[str, Any]],
-    ) -> Message:
+    ) -> ConversationTurn:
         """在调用方事务中校验会话并创建一次 Agent 业务消息。"""
         conversation = self.db.session.get(Conversation, conversation_id)
         if (
@@ -54,10 +54,10 @@ class ConversationService(BaseService):
 
         # 服务端预创建的空会话在首条消息提交时获得业务名称。
         has_message = (
-            self.db.session.query(Message.id)
+            self.db.session.query(ConversationTurn.id)
             .filter(
-                Message.conversation_id == conversation.id,
-                Message.is_deleted.is_(False),
+                ConversationTurn.conversation_id == conversation.id,
+                ConversationTurn.is_deleted.is_(False),
             )
             .first()
             is not None
@@ -66,7 +66,7 @@ class ConversationService(BaseService):
             conversation.name = query[:255]
         conversation.updated_at = datetime.now()
 
-        message = Message(
+        message = ConversationTurn(
             id=uuid4(),
             app_id=app_id,
             conversation_id=conversation.id,
@@ -447,26 +447,26 @@ class ConversationService(BaseService):
             raise NotFoundException("该会话不存在或被删除，请核实后重试")
         return conversation
 
-    def get_message_page(
+    def get_turn_page(
         self,
         *,
         conversation_id: UUID,
         before: UUID | None = None,
         page_size: int = 20,
-    ) -> tuple[list[Message], bool, UUID | None]:
+    ) -> tuple[list[ConversationTurn], bool, UUID | None]:
         """按 created_at 与消息 ID 的稳定游标读取一页业务消息。"""
         limit = min(max(page_size, 1), 50)
-        query = self.db.session.query(Message).filter(
-            Message.conversation_id == conversation_id,
-            Message.is_deleted.is_(False),
+        query = self.db.session.query(ConversationTurn).filter(
+            ConversationTurn.conversation_id == conversation_id,
+            ConversationTurn.is_deleted.is_(False),
         )
         if before is not None:
             cursor = (
-                self.db.session.query(Message.id, Message.created_at)
+                self.db.session.query(ConversationTurn.id, ConversationTurn.created_at)
                 .filter(
-                    Message.id == before,
-                    Message.conversation_id == conversation_id,
-                    Message.is_deleted.is_(False),
+                    ConversationTurn.id == before,
+                    ConversationTurn.conversation_id == conversation_id,
+                    ConversationTurn.is_deleted.is_(False),
                 )
                 .one_or_none()
             )
@@ -474,15 +474,15 @@ class ConversationService(BaseService):
                 raise NotFoundException("历史消息游标不存在")
             query = query.filter(
                 or_(
-                    Message.created_at < cursor.created_at,
+                    ConversationTurn.created_at < cursor.created_at,
                     and_(
-                        Message.created_at == cursor.created_at,
-                        Message.id < cursor.id,
+                        ConversationTurn.created_at == cursor.created_at,
+                        ConversationTurn.id < cursor.id,
                     ),
                 )
             )
         descending_rows = (
-            query.order_by(Message.created_at.desc(), Message.id.desc())
+            query.order_by(ConversationTurn.created_at.desc(), ConversationTurn.id.desc())
             .limit(limit + 1)
             .all()
         )
@@ -501,10 +501,10 @@ class ConversationService(BaseService):
         account: Account,
         before: UUID | None = None,
         page_size: int = 20,
-    ) -> tuple[list[Message], bool, UUID | None]:
+    ) -> tuple[list[ConversationTurn], bool, UUID | None]:
         """鉴权后读取当前账号的一页业务消息。"""
         conversation = self.get_conversation(conversation_id, account)
-        return self.get_message_page(
+        return self.get_turn_page(
             conversation_id=conversation.id,
             before=before,
             page_size=page_size,
@@ -531,18 +531,18 @@ class ConversationService(BaseService):
 
     def delete_message(
         self, conversation_id: UUID, message_id: UUID, account: Account
-    ) -> Message:
+    ) -> ConversationTurn:
         """根据会话 ID 和消息 ID 删除指定消息。"""
         # 1.获取会话记录并校验访问权限。
         conversation = self.get_conversation(conversation_id, account)
 
         # 2.消息权限继承会话归属，不比较可能记录 EndUser 的 created_by。
         message = (
-            self.db.session.query(Message)
+            self.db.session.query(ConversationTurn)
             .filter(
-                Message.id == message_id,
-                Message.conversation_id == conversation.id,
-                Message.is_deleted.is_(False),
+                ConversationTurn.id == message_id,
+                ConversationTurn.conversation_id == conversation.id,
+                ConversationTurn.is_deleted.is_(False),
             )
             .one_or_none()
         )

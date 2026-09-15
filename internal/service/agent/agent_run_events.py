@@ -10,7 +10,7 @@ from uuid import UUID
 from internal.core.agent_v2 import (
     AgentEvent,
 )
-from internal.entity import AgentRunExecution
+from internal.entity import AgentExecutionSegment
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_protocol_schema import AgentProtocolEvent
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector, normalize_custom_data
@@ -52,20 +52,20 @@ class AgentRunTracker:
 
     def __init__(self) -> None:
         """条件锁只保护本地注册表，事件正文由数据库保存。"""
-        self._runs: dict[str, AgentRunExecution] = {}
+        self._runs: dict[str, AgentExecutionSegment] = {}
         self._lock = threading.RLock()
 
-    def get(self, conversation_id: UUID) -> AgentRunExecution | None:
+    def get(self, conversation_id: UUID) -> AgentExecutionSegment | None:
         """读取会话的活动 Run，应用与入口归属由调用方自行校验。"""
         with self._lock:
             return self._runs.get(str(conversation_id))
 
-    def register(self, run: AgentRunExecution) -> None:
+    def register(self, run: AgentExecutionSegment) -> None:
         """登记当前会话的新 Run；覆盖式写入依赖会话内至多一个活动 Run。"""
         with self._lock:
             self._runs[str(run.conversation_id)] = run
 
-    def finish(self, run: AgentRunExecution) -> None:
+    def finish(self, run: AgentExecutionSegment) -> None:
         """结束本地 Run，旧 Run 不得移除后继 Run。"""
         with self._lock:
             run.done.set()
@@ -95,9 +95,9 @@ class AgentRunEventBuffer:
 
     def __init__(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         projector: AgentProtocolEventProjector,
-        commit_events: Callable[[AgentRunExecution, list[AgentProtocolEvent]], None],
+        commit_events: Callable[[AgentExecutionSegment, list[AgentProtocolEvent]], None],
         *,
         started_at: float,
         batch_size: int,
@@ -132,7 +132,7 @@ class AgentRunEventBuffer:
         elif channel == "messages":
             is_assistant_start = event_name == "message-start" and data.get("role") in {"ai", "assistant"}
             if is_root and is_assistant_start:
-                data = {**data, "id": f"{self._run.spec.message_id}:assistant"}
+                data = {**data, "id": f"{self._run.spec.turn_id}:assistant"}
 
         # 3.使用与业务事件共用的编号器，再将事件加入待提交批次。
         event = self._projector.create_event(

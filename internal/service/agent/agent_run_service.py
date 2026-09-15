@@ -1,4 +1,4 @@
-"""Agent Run：启动、重启、提交答案、重填、取消，以及 Run 持久化与后台执行。
+"""Agent Run：启动、重启、提交答案、取消，以及 Run 持久化与后台执行。
 
 公开方法在请求线程执行，只编排事务和业务规则；``_submit_execution`` 及其后的
 下划线方法在后台线程执行，写入资格由 Run 的 executor_id 校验保证。
@@ -36,7 +36,7 @@ from internal.entity import (
     AGENT_RUN_ACTIVE_STATUSES,
     AGENT_RUN_OCCUPYING_STATUSES,
     AGENT_RUN_TERMINAL_STATUSES,
-    AgentRunExecution,
+    AgentExecutionSegment,
     AgentRunInput,
     AgentRunStatus,
 )
@@ -55,7 +55,7 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
-from internal.model import AgentRun, AgentRunEvent, AgentRunSubmission, Conversation, Message
+from internal.model import AgentExecution, AgentExecutionEvent, AgentExecutionSubmission, Conversation, ConversationTurn
 from internal.schema.agent.agent_attachment_schema import dump_agent_attachments
 from internal.schema.agent.agent_protocol_schema import (
     AgentProtocolCancelResp,
@@ -147,13 +147,13 @@ class AgentRunService:
         self.attachment_service.resolve(run_input.file_ids, owner_id=account_id)
         # 2.读取当前入口最近一次 Run，只在本入口范围内替换，不跨入口停止别人的任务。
         previous = (
-            self.db.session.query(AgentRun)
+            self.db.session.query(AgentExecution)
             .populate_existing()
             .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == invoke_from.value,
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.invoke_from == invoke_from.value,
             )
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
             .first()
         )
         if previous is not None:
@@ -196,33 +196,42 @@ class AgentRunService:
         """锁定会话与暂停 Run，验证答案并原子认领唯一恢复执行权。"""
         with self._claimed_run() as claimed:
             with self.db.auto_commit():
-                # 1.先锁会话再锁最新 Run，与启动和重新填写保持同一锁顺序，避免互相死锁。
+                # 1.先锁会话再锁最新 Run，与启动保持同一锁顺序，避免互相死锁。
                 self._lock_conversation(app_id=app_id, conversation_id=conversation_id)
+                # 已结束批次的迟到重试也返回原回执，不能误交给后来创建的 Run。
+                batch_id = AgentRunInteraction.input_batch_id(answers)
+                submission = (
+                    self.db.session.query(AgentExecutionSubmission)
+                    .join(AgentExecution, AgentExecution.id == AgentExecutionSubmission.execution_id)
+                    .filter(
+                        AgentExecution.conversation_id == conversation_id,
+                        AgentExecution.app_id == app_id,
+                        AgentExecution.invoke_from == invoke_from.value,
+                        AgentExecutionSubmission.input_batch_id == batch_id,
+                    )
+                    .one_or_none()
+                )
+                if submission is not None:
+                    if submission.answers != answers:
+                        raise ValidateErrorException("该表单已提交，不能重复修改")
+                    return RunAccepted(submission.execution_id, submission.accepted_sequence)
                 row = (
-                    self.db.session.query(AgentRun)
+                    self.db.session.query(AgentExecution)
                     .populate_existing()
                     .filter(
-                        AgentRun.conversation_id == conversation_id,
-                        AgentRun.app_id == app_id,
-                        AgentRun.invoke_from == invoke_from.value,
+                        AgentExecution.conversation_id == conversation_id,
+                        AgentExecution.app_id == app_id,
+                        AgentExecution.invoke_from == invoke_from.value,
                     )
-                    .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                    .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
                     .with_for_update()
                     .first()
                 )
                 if row is None:
                     raise NotFoundException("待回答任务不存在")
-                interaction = AgentRunInteraction(row.status, row.interaction_state)
+                interaction = AgentRunInteraction(row.status, row.pending_inputs, row.input_history)
                 try:
-                    # 2.重试必须先于状态判断：已恢复的任务也返回首次提交结果，而不是报状态错误。
-                    # 历史批次以答案指纹为主键，重放同一批直接返回首次游标。
-                    submission = self.db.session.get(
-                        AgentRunSubmission, (row.id, AgentRunInteraction.input_batch_id(answers)),
-                    )
-                    if submission is not None:
-                        if submission.answers != answers:
-                            raise ValidateErrorException("该表单已提交，不能重复修改")
-                        return RunAccepted(row.id, submission.accepted_sequence)
+                    # 2.新提交只能回答当前等待批次；终态和过期表单不能恢复执行。
                     validated = interaction.validate_answers(answers)
                 except InvalidInputAnswer as exc:
                     return RunRejected(str(exc), {exc.interrupt_id: {exc.field_name: str(exc)}})
@@ -238,18 +247,19 @@ class AgentRunService:
                     account_id=account_id, app_id=app_id,
                     conversation_id=conversation_id, created_by=created_by,
                     end_user_id=end_user_id, invoke_from=invoke_from,
-                    invocation_snapshot=row.invocation_snapshot,
-                    changed_message='应用配置已变更，请恢复原配置后继续填写，或创建新会话',
+                    execution=row,
+                    changed_message='应用配置已变更，请恢复原配置后继续填写，或停止本轮后发送新消息',
                 )
                 sequence = int(row.last_event_sequence or 0)
-                resumed = AgentRunExecution(
+                resumed = AgentExecutionSegment(
                     run_id=row.id, conversation_id=conversation_id, spec=invocation,
                     initial_event_sequence=sequence, last_event_sequence=sequence, resume=validated,
                 )
-                # 4.答案、交互投影和新执行租约在同一事务保存；答案指纹做主键，重放不会重复恢复。
-                row.interaction_state = interaction.after_submission(validated)
-                self.db.session.add(AgentRunSubmission(
-                    run_id=row.id, input_batch_id=AgentRunInteraction.input_batch_id(answers),
+                # 4.答案、问答历史和新执行标识在同一事务保存；中断 ID 集合标识批次，重试不会重复恢复。
+                row.input_history = interaction.after_submission(validated)
+                row.pending_inputs = []
+                self.db.session.add(AgentExecutionSubmission(
+                    execution_id=row.id, input_batch_id=batch_id,
                     answers=deepcopy(dict(answers)), accepted_sequence=sequence,
                 ))
                 row.status = AgentRunStatus.RUNNING.value
@@ -264,89 +274,18 @@ class AgentRunService:
             run_id=resumed.run_id, sequence=int(resumed.initial_event_sequence or 0),
         )
 
-    def reopen_form(
-        self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
-        end_user_id: UUID | None = None, invoke_from: InvokeFrom, run_id: UUID, cancellation_sequence: int,
-    ) -> RunAccepted | RunRejected:
-        """原子恢复最近一次取消的表单；重新填写前不启动图或获取执行租约。"""
-        with self.db.auto_commit():
-            # 1.锁定会话和最新 Run，仅允许重新填写当前入口最近停止的表单。
-            self._lock_conversation(app_id=app_id, conversation_id=conversation_id)
-            row = (
-                self.db.session.query(AgentRun)
-                .populate_existing()
-                .filter(AgentRun.conversation_id == conversation_id)
-                .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-                .with_for_update()
-                .first()
-            )
-            if row is None:
-                raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
-            same_run = row.id == run_id and row.app_id == app_id
-            same_source = row.invoke_from == invoke_from.value
-            if not same_run or not same_source:
-                raise ValidateErrorException("仅支持恢复当前会话最新停止的表单，请刷新后重试")
-            # 2.先核对取消序号和重复请求，再判断当前状态，保证重试仍返回相同结果。
-            interaction = AgentRunInteraction(row.status, row.interaction_state)
-            try:
-                sequence = interaction.reopened_sequence(cancellation_sequence)
-            except ValueError as exc:
-                raise ValidateErrorException(str(exc)) from exc
-            if sequence is not None:
-                return RunAccepted(row.id, sequence)
-            busy = self._check_local_idle(
-                conversation_id=conversation_id, busy_message="任务正在停止，请稍后重试",
-            )
-            if busy is not None:
-                return busy
-            # 3.恢复保留的表单与可信身份，拒绝用变更后的应用配置继续旧任务。
-            self._restore_input_invocation(
-                account_id=account_id, app_id=app_id, conversation_id=conversation_id,
-                created_by=created_by, end_user_id=end_user_id,
-                invoke_from=invoke_from, invocation_snapshot=row.invocation_snapshot,
-                changed_message='应用配置已变更，请恢复原配置后重新填写，或创建新会话',
-            )
-            try:
-                # 4.表单、事件与消息状态在同一事务原子恢复，游标写回交互状态供客户端重放。
-                row.interaction_state = interaction.restored_state()
-                events = self._state_transition_events(row, {
-                    "event": "interrupted", "status": "waiting_input", "reason": "input_reopened",
-                    "message_id": str(row.message_id), "input_message_id": row.input_message_id,
-                })
-                self._append_events(row, events)
-                sequence = row.last_event_sequence
-                row.interaction_state = interaction.after_reopen(
-                    row.interaction_state, cancellation_sequence, sequence,
-                )
-                row.status = AgentRunStatus.WAITING_INPUT.value
-                row.finished_at = None
-                row.executor_id = None
-                # 表单重新待填说明上次取消已被接管，清空标记让冲突提示回到“请先完成当前表单”。
-                row.cancel_requested_at = None
-                # 消息从已停止回到普通状态，前端不会再把它渲染成中断。
-                message = self.db.session.get(Message, row.message_id)
-                if message is not None:
-                    message.status = MessageStatus.NORMAL.value
-            except ValueError as exc:
-                raise ValidateErrorException(str(exc)) from exc
-        # 5.事务提交后再唤醒订阅者，确保它能读到全部表单事件。
-        event_signal.notify()
-        return RunAccepted(
-            run_id=run_id, sequence=sequence,
-        )
-
     def cancel_run(
         self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom, run_id: UUID,
     ) -> AgentProtocolCancelResp:
         """核对应用、会话和调用来源后停止指定 Agent Run。"""
         # 1.校验目标 Run 是否属于本次请求的会话和入口；此校验不能触发失联恢复写入。
         row = (
-            self.db.session.query(AgentRun)
+            self.db.session.query(AgentExecution)
             .filter(
-                AgentRun.id == run_id,
-                AgentRun.app_id == app_id,
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == invoke_from.value,
+                AgentExecution.id == run_id,
+                AgentExecution.app_id == app_id,
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.invoke_from == invoke_from.value,
             )
             .one_or_none()
         )
@@ -375,14 +314,26 @@ class AgentRunService:
 
     def _restore_input_invocation(
         self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
-        end_user_id: UUID | None = None, invoke_from: InvokeFrom, invocation_snapshot: Mapping[str, Any],
+        end_user_id: UUID | None = None, invoke_from: InvokeFrom, execution: AgentExecution,
         changed_message: str,
     ) -> AgentInvocation:
         """恢复原始输入但采用当前鉴权身份，图配置变化时拒绝继续旧任务。"""
-        invocation = AgentInvocation.model_validate(invocation_snapshot)
-        invocation = invocation.model_copy(update={
+        turn = self.db.session.get(ConversationTurn, execution.turn_id)
+        if (turn is None or turn.is_deleted or turn.app_id != app_id
+                or turn.conversation_id != conversation_id or turn.invoke_from != invoke_from.value):
+            raise NotFoundException("待恢复问答不存在或归属不一致")
+        # 问答保存的是公开附件元数据，读取内容需要按文件 ID 重新授权并解析存储键。
+        attachments = self.attachment_service.resolve(
+            tuple(UUID(str(item["id"])) for item in (turn.attachments or [])),
+            owner_id=account_id,
+        )
+        invocation = AgentInvocation.model_validate({
+            **(execution.execution_options or {}),
             "account_id": account_id, "app_id": app_id, "conversation_id": conversation_id,
             "created_by": created_by, "end_user_id": end_user_id, "invoke_from": invoke_from,
+            "turn_id": turn.id, "query": turn.query,
+            "image_urls": turn.image_urls, "attachments": attachments,
+            "input_message_id": execution.input_message_id,
         })
         fingerprint = self.definition_service.load(
             account_id=account_id, app_id=app_id, invoke_from=invoke_from,
@@ -401,9 +352,9 @@ class AgentRunService:
         return None
 
     @contextmanager
-    def _claimed_run(self) -> Iterator[list[AgentRunExecution]]:
+    def _claimed_run(self) -> Iterator[list[AgentExecutionSegment]]:
         """提交前已登记的 Run：异常时反登记；提交后由调用方启动执行。"""
-        claimed: list[AgentRunExecution] = []
+        claimed: list[AgentExecutionSegment] = []
         try:
             yield claimed
         except Exception:
@@ -419,10 +370,10 @@ class AgentRunService:
         if run_input.input_message_id is None:
             return None
         duplicate_run = (
-            self.db.session.query(AgentRun)
+            self.db.session.query(AgentExecution)
             .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.input_message_id == run_input.input_message_id,
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.input_message_id == run_input.input_message_id,
             )
             .one_or_none()
         )
@@ -437,8 +388,8 @@ class AgentRunService:
         # 3.重放起点取本 Run 最早的事件序号，不能把终态游标当作起点；
         # 本进程仍持有该执行时以内存游标为准，避免读到尚未提交的事件序号。
         first_sequence = (
-            self.db.session.query(func.min(AgentRunEvent.sequence))
-            .filter(AgentRunEvent.run_id == duplicate_run.id)
+            self.db.session.query(func.min(AgentExecutionEvent.sequence))
+            .filter(AgentExecutionEvent.execution_id == duplicate_run.id)
             .scalar()
         )
         applied_sequence = (
@@ -460,10 +411,10 @@ class AgentRunService:
         """判断会话是否仍被活动、停止中或待输入的 Run 占用。"""
         # 1.数据库占用（活动/待填）与本地未结束执行任一存在都不能新建 Run。
         active_run = (
-            self.db.session.query(AgentRun)
+            self.db.session.query(AgentExecution)
             .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.status.in_(AGENT_RUN_OCCUPYING_STATUSES),
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.status.in_(AGENT_RUN_OCCUPYING_STATUSES),
             )
             .first()
         )
@@ -488,24 +439,13 @@ class AgentRunService:
                 reason = "当前任务已有正在执行的 Agent"
             return RunRejected(message=reason)
 
-        # 3.没有占用记录时还要看最近一次取消是否留下了可重新填写的表单。
-        # 这里跨入口取整个会话的最新 Run，调用方仍持有会话锁，只读不加行锁。
-        previous = (
-            self.db.session.query(AgentRun)
-            .filter(AgentRun.conversation_id == conversation_id)
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
-            .first()
-        )
-        if previous is None or previous.status != AgentRunStatus.CANCELLED.value:
-            return None
-        reason = AgentRunInteraction(previous.status, previous.interaction_state).start_conflict()
-        return RunRejected(reason) if reason else None
+        return None
 
     def _create_run(
         self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
         end_user_id: UUID | None = None, invoke_from: InvokeFrom, run_input: AgentRunInput,
         user_input_enabled: bool,
-    ) -> tuple[AgentRunExecution, int]:
+    ) -> tuple[AgentExecutionSegment, int]:
         """在当前事务中创建消息、Invocation 和本地 Run。"""
         # 1.先校验模型思考强度与附件归属，任何失败都不留下消息和 Run 记录。
         self.model_service.validate_reasoning_effort(
@@ -517,8 +457,8 @@ class AgentRunService:
             run_input.file_ids,
             owner_id=account_id,
         )
-        # 2.创建用户消息，并把本次调用输入固化成可恢复的 Invocation。
-        message = self.conversation_service.create_agent_message(
+        # 2.创建不可变的本轮输入，内存 Invocation 组合身份、内容和运行选项。
+        message = self.conversation_service.create_agent_turn(
             account_id=account_id, app_id=app_id,
             conversation_id=conversation_id, created_by=created_by,
             invoke_from=invoke_from, query=run_input.query, image_urls=run_input.image_urls,
@@ -527,7 +467,7 @@ class AgentRunService:
         invocation = AgentInvocation(
             account_id=account_id, app_id=app_id, conversation_id=conversation_id,
             created_by=created_by, end_user_id=end_user_id, invoke_from=invoke_from,
-            message_id=message.id,
+            turn_id=message.id,
             query=run_input.query,
             image_urls=run_input.image_urls,
             attachments=attachments,
@@ -550,34 +490,34 @@ class AgentRunService:
             )
         # 4.新 Run 从该入口已持久化的最大序号之后开始编号，保证事件序号跨 Run 单调递增。
         sequence = int(
-            self.db.session.query(func.max(AgentRun.last_event_sequence))
+            self.db.session.query(func.max(AgentExecution.last_event_sequence))
             .filter(
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == invoke_from.value,
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.invoke_from == invoke_from.value,
             )
             .scalar()
             or 0
         )
         # 5.建立本地执行句柄并在调用方事务中写入平台 Run 行，事件序号起点同时固化在两边。
-        run = AgentRunExecution(
+        run = AgentExecutionSegment(
             run_id=uuid4(),
             conversation_id=conversation_id,
             spec=invocation,
             initial_event_sequence=sequence,
             last_event_sequence=sequence,
         )
-        row = AgentRun(
+        row = AgentExecution(
             id=run.run_id,
             app_id=run.spec.app_id,
             conversation_id=run.conversation_id,
             invoke_from=run.spec.invoke_from.value,
-            message_id=run.spec.message_id,
+            turn_id=run.spec.turn_id,
             input_message_id=run.spec.input_message_id,
             status=AgentRunStatus.RUNNING.value,
             last_event_sequence=run.initial_event_sequence,
             created_at=datetime.now(UTC).replace(tzinfo=None),
-            invocation_snapshot=run.spec.model_dump(mode="json"),
-            interaction_state={}, state_snapshot={},
+            execution_options=run.spec.execution_options(),
+            pending_inputs=[], input_history=[], display_state={},
         )
         # 6.由调用方事务 flush，保证后续事件可以按 Run 主键写入。
         self.db.session.add(row)
@@ -604,7 +544,7 @@ class AgentRunService:
 
     def _finalize_run(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         status: AgentRunStatus,
         *,
         message_updates: Mapping[str, Any] | None = None,
@@ -633,10 +573,14 @@ class AgentRunService:
                 row.apply_snapshot(state_snapshot)
             # 与累计用量同事务撤销执行权，暂停后重试也不能重复结算。
             row.executor_id = None
+            row.pending_inputs = (
+                list((state_snapshot or {}).get("pending_inputs", []))
+                if status is AgentRunStatus.WAITING_INPUT else []
+            )
 
             # 3.业务消息和 Run 在同一事务内更新。
             updates = dict(message_updates or {})
-            message = self.db.session.get(Message, row.message_id, populate_existing=True)
+            message = self.db.session.get(ConversationTurn, row.turn_id, populate_existing=True)
             if message is None:
                 raise FailException("Agent 运行对应的消息不存在")
             for field, value in updates.items():
@@ -644,12 +588,17 @@ class AgentRunService:
                     value += getattr(message, field, 0) or 0
                 setattr(message, field, value)
             message.apply_usage(usage, accumulate=True)
+            # 片段回答已写入 Turn，暂停和终态不再保留同一份临时消息投影。
+            row.display_state = {
+                key: value for key, value in (row.display_state or {}).items()
+                if key != "messages"
+            }
             self._append_events(row, events or [])
         return True
 
     def _record_events(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         events: list[AgentProtocolEvent],
     ) -> None:
         """一次事务更新 Run 快照并追加一批需要历史恢复的事件。"""
@@ -693,15 +642,15 @@ class AgentRunService:
         alive = alive_run_ids if alive_run_ids is not None else self.tracker.active_run_ids()
         with self.db.auto_commit():
             # 1.候选集是所有活动状态的行，再按存活集合与业务筛选条件收窄。
-            query = self.db.session.query(AgentRun).filter(
-                AgentRun.status.in_(AGENT_RUN_ACTIVE_STATUSES),
+            query = self.db.session.query(AgentExecution).filter(
+                AgentExecution.status.in_(AGENT_RUN_ACTIVE_STATUSES),
             )
             if alive:
-                query = query.filter(AgentRun.id.notin_(alive))
+                query = query.filter(AgentExecution.id.notin_(alive))
             if conversation_id is not None:
-                query = query.filter(AgentRun.conversation_id == conversation_id)
+                query = query.filter(AgentExecution.conversation_id == conversation_id)
             if run_id is not None:
-                query = query.filter(AgentRun.id == run_id)
+                query = query.filter(AgentExecution.id == run_id)
             # 2.逐行加锁重读，避免与刚刚提交终态的执行线程互相覆盖。
             for row in query.populate_existing().with_for_update().all():
                 # 3.已请求取消的执行按取消收敛，否则说明执行已随进程消失。
@@ -716,6 +665,7 @@ class AgentRunService:
                 row.error_message = "" if cancelled else public_error
                 # 撤销执行权，使迟到的事件和结果无法覆盖收敛后的状态。
                 row.executor_id = None
+                row.pending_inputs = []
                 # 4.补一条生命周期事件并同步消息状态，客户端重连才能看到真实终态。
                 sequence = int(row.last_event_sequence or 0) + 1
                 event = AgentProtocolEvent(
@@ -727,54 +677,54 @@ class AgentRunService:
                         "event": "interrupted" if cancelled else "failed",
                         "status": row.status,
                         "error": public_error,
-                        "message_id": str(row.message_id),
+                        "message_id": str(row.turn_id),
                         "input_message_id": row.input_message_id,
                     }},
                 )
                 self._append_events(row, [event])
-                message = self.db.session.get(Message, row.message_id)
+                message = self.db.session.get(ConversationTurn, row.turn_id)
                 if message is not None:
                     message.status = MessageStatus.STOP.value if cancelled else MessageStatus.ERROR.value
                     message.error = public_error
 
-    def get_run(self, run_id: UUID) -> AgentRun | None:
+    def get_run(self, run_id: UUID) -> AgentExecution | None:
         """只读取最新数据库状态；失联恢复和 Session 生命周期由调用方负责。"""
-        return self.db.session.get(AgentRun, run_id, populate_existing=True)
+        return self.db.session.get(AgentExecution, run_id, populate_existing=True)
 
     def get_run_status(self, run_id: UUID) -> str | None:
         """只读取状态列，避免重复传输和解析运行快照。"""
-        return self.db.session.query(AgentRun.status).filter(AgentRun.id == run_id).scalar()
+        return self.db.session.query(AgentExecution.status).filter(AgentExecution.id == run_id).scalar()
 
     def get_run_metadata(self, *, conversation_id: UUID, invoke_from: InvokeFrom) -> AgentProtocolRunMetadataResp:
         """停止操作只需要运行标识与状态，不读取消息和 JSON 快照。"""
         row = (
-            self.db.session.query(AgentRun.id, AgentRun.status, AgentRun.last_event_sequence)
-            .filter(AgentRun.conversation_id == conversation_id, AgentRun.invoke_from == invoke_from.value)
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            self.db.session.query(AgentExecution.id, AgentExecution.status, AgentExecution.last_event_sequence)
+            .filter(AgentExecution.conversation_id == conversation_id, AgentExecution.invoke_from == invoke_from.value)
+            .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
             .first()
         )
         return AgentProtocolRunMetadataResp(
             run_id=row.id, status=row.status, last_event_sequence=row.last_event_sequence,
         ) if row else AgentProtocolRunMetadataResp()
 
-    def _request_cancel(self, row: AgentRun) -> bool:
-        """运行中的任务先记录取消请求；等待表单的任务直接取消并保留重新填写信息。"""
+    def _request_cancel(self, row: AgentExecution) -> bool:
+        """运行中先请求停止；待填任务直接结束，旧表单不能恢复原 Run。"""
         with self.db.auto_commit():
             # 1.重新读取并锁定目标状态，避免取消请求覆盖已经结束的任务。
             current = (
-                self.db.session.query(AgentRun)
+                self.db.session.query(AgentExecution)
                 .populate_existing()
                 .with_for_update()
                 .filter(
-                    AgentRun.id == row.id,
-                    AgentRun.status.in_(AGENT_RUN_OCCUPYING_STATUSES),
+                    AgentExecution.id == row.id,
+                    AgentExecution.status.in_(AGENT_RUN_OCCUPYING_STATUSES),
                 )
                 .one_or_none()
             )
             if current is None:
                 latest_status = (
-                    self.db.session.query(AgentRun.status)
-                    .filter(AgentRun.id == row.id)
+                    self.db.session.query(AgentExecution.status)
+                    .filter(AgentExecution.id == row.id)
                     .scalar()
                 )
                 if latest_status is not None:
@@ -790,28 +740,25 @@ class AgentRunService:
                 row.cancel_requested_at = current.cancel_requested_at
                 return True
 
-            # 4.等待表单时没有运行线程，直接取消；保留原表单用于重新填写。
+            # 4.待填任务直接结束；后续新输入由 LangGraph 丢弃旧调度并保留消息历史。
             current.status = AgentRunStatus.CANCELLED.value
             current.finished_at = datetime.now(UTC).replace(tzinfo=None)
-            cancellation_sequence = int(current.last_event_sequence or 0) + 2
-            current.interaction_state = AgentRunInteraction(
-                AgentRunStatus.WAITING_INPUT.value, current.interaction_state
-            ).after_cancel(current.id, cancellation_sequence)
+            current.pending_inputs = []
             current.executor_id = None
             # 5.表单清空、消息停止和结束事件必须一次提交，重连才能恢复相同状态。
             events = self._state_transition_events(current, {
                 "event": "interrupted", "status": "cancelled", "reason": "cancel_requested",
-                "message_id": str(current.message_id), "input_message_id": current.input_message_id,
+                "message_id": str(current.turn_id), "input_message_id": current.input_message_id,
             })
             self._append_events(current, events)
-            message = self.db.session.get(Message, current.message_id)
+            message = self.db.session.get(ConversationTurn, current.turn_id)
             if message is not None:
                 message.status = MessageStatus.STOP.value
             row.status = AgentRunStatus.CANCELLED.value
             row.cancel_requested_at = current.cancel_requested_at
             return True
 
-    def _acquire_execution(self, row: AgentRun, run: AgentRunExecution) -> None:
+    def _acquire_execution(self, row: AgentExecution, run: AgentExecutionSegment) -> None:
         """调用方持有创建权或 Run 锁；只分配新执行段，不复用已经结算的执行身份。"""
         if row.executor_id is not None:
             raise ValidateErrorException("当前任务仍有未结束的执行")
@@ -820,15 +767,15 @@ class AgentRunService:
         row.cancel_requested_at = None
 
     def _lock_execution(
-        self, run: AgentRunExecution, *, with_snapshot: bool = False,
-    ) -> AgentRun | None:
+        self, run: AgentExecutionSegment, *, with_snapshot: bool = False,
+    ) -> AgentExecution | None:
         """只锁定并刷新 Run，统一校验执行身份和活动状态。"""
-        columns = [AgentRun.executor_id, AgentRun.status, AgentRun.last_event_sequence,
-                   AgentRun.message_id, AgentRun.finished_at]
+        columns = [AgentExecution.executor_id, AgentExecution.status, AgentExecution.last_event_sequence,
+                   AgentExecution.turn_id, AgentExecution.finished_at]
         if with_snapshot:
-            columns.extend((AgentRun.state_snapshot, AgentRun.interaction_state))
+            columns.extend((AgentExecution.display_state, AgentExecution.pending_inputs, AgentExecution.input_history))
         row = self.db.session.get(
-            AgentRun, run.run_id, options=[load_only(*columns)],
+            AgentExecution, run.run_id, options=[load_only(*columns)],
             populate_existing=True, with_for_update=True,
         )
         if (row is None or row.executor_id != run.executor_id
@@ -836,20 +783,20 @@ class AgentRunService:
             return None
         return row
 
-    def _append_events(self, row: AgentRun, events: list[AgentProtocolEvent]) -> None:
+    def _append_events(self, row: AgentExecution, events: list[AgentProtocolEvent]) -> None:
         """调用方已锁 Run；事件追加与游标更新共用事务，重试不重复插入。"""
         if not events:
             return
         payloads = {
-            event.seq: {"run_id": row.id, "sequence": event.seq, "payload": event.model_dump(mode="json")}
+            event.seq: {"execution_id": row.id, "sequence": event.seq, "payload": event.model_dump(mode="json")}
             for event in events
         }
-        statement = pg_insert(AgentRunEvent).values(list(payloads.values()))
-        self.db.session.execute(statement.on_conflict_do_nothing(index_elements=["run_id", "sequence"]))
+        statement = pg_insert(AgentExecutionEvent).values(list(payloads.values()))
+        self.db.session.execute(statement.on_conflict_do_nothing(index_elements=["execution_id", "sequence"]))
         row.last_event_sequence = max(int(row.last_event_sequence or 0), max(payloads))
 
-    def _state_transition_events(self, row: AgentRun, lifecycle: Mapping[str, Any]) -> list[AgentProtocolEvent]:
-        """取消和重新填写共享公开快照投影，私有恢复信息不会进入事件载荷。"""
+    def _state_transition_events(self, row: AgentExecution, lifecycle: Mapping[str, Any]) -> list[AgentProtocolEvent]:
+        """状态转换只公开展示投影，私有调用参数不会进入事件载荷。"""
         projector = AgentProtocolEventProjector(row.id, start_sequence=int(row.last_event_sequence or 0))
         return projector.create_state_transition(select_public_snapshot(row.public_snapshot), dict(lifecycle))
 
@@ -859,7 +806,7 @@ class AgentRunService:
 
     _persistence_batch_size: ClassVar[int] = 8
 
-    def _submit_execution(self, run: AgentRunExecution) -> None:
+    def _submit_execution(self, run: AgentExecutionSegment) -> None:
         """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。
 
         调用方必须在提交前把 Run 登记进本地跟踪，否则并发请求会把它判成孤儿记录。
@@ -881,7 +828,7 @@ class AgentRunService:
             self._commit_failure(run, exc)
             raise
 
-    def _execute_run(self, run: AgentRunExecution) -> None:
+    def _execute_run(self, run: AgentExecutionSegment) -> None:
         """编排执行、尾批交付和终态保存，本地登记始终由最外层清理。"""
         started_at = time.monotonic()
         observer = PlatformAgentRunObserver(run.run_id)
@@ -945,7 +892,7 @@ class AgentRunService:
 
     def _execute_agent(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         observer: PlatformAgentRunObserver,
         projector: AgentProtocolEventProjector,
         events: AgentRunEventBuffer,
@@ -963,7 +910,7 @@ class AgentRunService:
         events.publish(projector.create_business_event("lifecycle", {
             "event": "running",
             "phase": "preparing",
-            "message_id": str(run.spec.message_id),
+            "message_id": str(run.spec.turn_id),
             "input_message_id": run.spec.input_message_id,
         }))
         if run.resume is not None:
@@ -973,7 +920,6 @@ class AgentRunService:
                 snapshot = row.public_snapshot
             events.publish(projector.create_business_event("values", {
                 "pending_inputs": [],
-                "input_recovery": None,
                 "input_history": snapshot.get("input_history", []),
             }))
 
@@ -988,7 +934,7 @@ class AgentRunService:
         # 4.监控线程和图执行具有相同的存活范围。
         return self._execute_with_cancel_monitor(run, agent, input_message, projector, events)
 
-    def _mark_run_running(self, run: AgentRunExecution) -> bool:
+    def _mark_run_running(self, run: AgentExecutionSegment) -> bool:
         """事务前后都检查取消；数据库取消记录优先于本进程尚未送达的通知。"""
         if run.cancel_requested.is_set():
             return False
@@ -1005,7 +951,7 @@ class AgentRunService:
 
     def _execute_with_cancel_monitor(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         agent: AgentExecutor,
         input_message: Any,
         projector: AgentProtocolEventProjector,
@@ -1022,7 +968,7 @@ class AgentRunService:
         try:
             events.publish(projector.create_business_event("lifecycle", {
                 "event": "running", "phase": "executing",
-                "message_id": str(run.spec.message_id),
+                "message_id": str(run.spec.turn_id),
                 "input_message_id": run.spec.input_message_id,
             }))
             monitor.start()
@@ -1050,7 +996,7 @@ class AgentRunService:
 
     def _commit_result(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         projector: AgentProtocolEventProjector,
         *,
         result: AgentExecutionResult,
@@ -1076,7 +1022,6 @@ class AgentRunService:
         state.update(
             pending_inputs=pending_inputs,
             input_history=list(previous_snapshot.get("input_history", [])),
-            input_recovery=None,
         )
 
         # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
@@ -1110,7 +1055,7 @@ class AgentRunService:
 
     def _prepare_result_status(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         status: AgentRunStatus,
         error: Exception | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -1148,7 +1093,7 @@ class AgentRunService:
         lifecycle: dict[str, Any] = {
             "event": status.value,
             "status": status.value,
-            "message_id": str(run.spec.message_id),
+            "message_id": str(run.spec.turn_id),
             "input_message_id": run.spec.input_message_id,
         }
         if status is AgentRunStatus.WAITING_INPUT:
@@ -1161,7 +1106,7 @@ class AgentRunService:
                 lifecycle["code"] = error_code
         return message_updates, lifecycle
 
-    def _execute_background_run(self, flask_app: Flask, run: AgentRunExecution) -> None:
+    def _execute_background_run(self, flask_app: Flask, run: AgentExecutionSegment) -> None:
         """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
         with flask_app.app_context():
             try:
@@ -1174,7 +1119,7 @@ class AgentRunService:
 
     def _watch_cancel(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         agent: AgentExecutor,
         done: threading.Event,
     ) -> None:
@@ -1188,7 +1133,7 @@ class AgentRunService:
 
     def _commit_failure(
         self,
-        run: AgentRunExecution,
+        run: AgentExecutionSegment,
         exc: Exception,
         *,
         projector: AgentProtocolEventProjector | None = None,

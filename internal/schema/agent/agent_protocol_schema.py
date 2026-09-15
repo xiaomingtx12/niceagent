@@ -155,7 +155,7 @@ class AgentProtocolInputRespondReq(BaseModel):
 
 
 class AgentProtocolInputReopenReq(BaseModel):
-    """用取消事件序号限定恢复批次，防止迟到请求复活后来停止的任务。"""
+    """仅解析旧客户端重开命令以返回明确拒绝，已停止任务不可恢复。"""
 
     model_config = ConfigDict(extra="forbid")
 

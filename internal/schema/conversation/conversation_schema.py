@@ -4,11 +4,11 @@ from wtforms import StringField, BooleanField
 from wtforms.validators import DataRequired, Length
 
 from internal.lib.helper import datetime_to_timestamp
-from internal.model import Message
+from internal.model import ConversationTurn
 
 
-class ConversationMessageResp(Schema):
-    """一条业务 Message DTO，不包含协议角色投影。"""
+class ConversationTurnResp(Schema):
+    """一条业务 ConversationTurn DTO，不包含协议角色投影。"""
 
     id = fields.UUID(dump_default="")
     conversation_id = fields.UUID(dump_default="")
@@ -29,7 +29,7 @@ class ConversationMessageResp(Schema):
     created_at = fields.Integer(dump_default=0)
 
     @pre_dump
-    def process_data(self, data: Message, **kwargs):
+    def process_data(self, data: ConversationTurn, **kwargs):
         return {
             "id": data.id,
             "conversation_id": data.conversation_id,

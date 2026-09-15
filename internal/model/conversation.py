@@ -15,6 +15,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     func,
     Index,
+    ForeignKey,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from internal.extension.database_extension import db
@@ -37,9 +38,6 @@ class Conversation(db.Model):
     name = Column(
         String(255), nullable=False, server_default=text("''::character varying")
     )  # 会话名称
-    summary = Column(
-        Text, nullable=False, server_default=text("''::text")
-    )  # 会话摘要，供任务检索使用
     is_pinned = Column(
         Boolean, nullable=False, server_default=text("false")
     )  # 是否置顶
@@ -47,8 +45,8 @@ class Conversation(db.Model):
         Boolean, nullable=False, server_default=text("false")
     )  # 是否删除
     invoke_from = Column(
-        String(255), nullable=False, server_default=text("''::character varying")
-    )  # 调用来源
+        String(32), nullable=False
+    )  # 会话首次创建入口；后续从其他入口发送问答不会修改它
     created_by = Column(
         UUID,
         nullable=True,
@@ -61,51 +59,39 @@ class Conversation(db.Model):
         DateTime,
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP(0)"),
-        server_onupdate=text("CURRENT_TIMESTAMP(0)"),
+        onupdate=func.current_timestamp(),
     )
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
 
-    @property
-    def is_new(self) -> bool:
-        """只读属性，用于判断该会话是否是第一次创建"""
-        message_count = (
-            db.session.query(func.count(Message.id))
-            .filter(
-                Message.conversation_id == self.id,
-            )
-            .scalar()
-        )
 
-        return False if message_count > 1 else True
-
-
-class Message(db.Model):
+class ConversationTurn(db.Model):
     """一轮用户提问、Agent 回答及累计用量，供历史展示与分析查询。"""
 
-    __tablename__ = "message"
+    __tablename__ = "conversation_turn"
     __table_args__ = (
-        PrimaryKeyConstraint("id", name="pk_message_id"),
+        PrimaryKeyConstraint("id", name="pk_conversation_turn_id"),
         Index(
-            "message_conversation_created_id_idx",
+            "turn_conversation_created_id_idx",
             "conversation_id",
             "created_at",
             "id",
             postgresql_where=text("is_deleted = false"),
         ),
-        Index("message_created_by_idx", "created_by"),
+        Index("turn_created_by_idx", "created_by"),
     )
 
     id = Column(UUID, nullable=False, server_default=text("uuid_generate_v4()"))
 
     # 消息关联的记录
     app_id = Column(UUID, nullable=False)  # 关联应用id
-    conversation_id = Column(UUID, nullable=False)  # 关联会话id
+    conversation_id = Column(
+        UUID, ForeignKey("conversation.id", ondelete="RESTRICT"), nullable=False
+    )  # 归属会话；软删除不级联删除问答历史
     invoke_from = Column(
-        String(255),
+        String(32),
         nullable=False,
-        server_default=text("''::character varying"),
     )  # 调用来源，涵盖service_api、web_app、debugger等
     created_by = Column(
         UUID, nullable=False
@@ -133,8 +119,8 @@ class Message(db.Model):
         Boolean, nullable=False, server_default=text("false")
     )  # 软删除标记
     status = Column(
-        String(255), nullable=False, server_default=text("''::character varying")
-    )  # 消息的状态，涵盖正常、错误、停止
+        String(16), nullable=False, server_default=text("'normal'"),
+    )  # 问答展示结果及无 Execution 的兼容入口状态，不表达运行进度
     error = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 可向用户展示的错误信息，异常堆栈写入日志
@@ -163,7 +149,7 @@ class Message(db.Model):
     )  # 累计工具调用次数
     trace_id = Column(
         String(64), nullable=True
-    )  # 关联运行的追踪标识；工作台链路对应 AgentRun.id
+    )  # 关联运行的追踪标识；工作台链路对应 AgentExecution.id
     token_usage = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 按模型汇总的输入、输出、总 Token 及缓存/推理明细
@@ -176,7 +162,7 @@ class Message(db.Model):
         DateTime,
         nullable=False,
         server_default=text("CURRENT_TIMESTAMP(0)"),
-        server_onupdate=text("CURRENT_TIMESTAMP(0)"),
+        onupdate=func.current_timestamp(),
     )
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")

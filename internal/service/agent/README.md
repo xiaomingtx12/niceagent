@@ -1,8 +1,8 @@
 # Agent 服务阅读入口
 
-从 `agent_run_service.py` 的公共方法开始阅读：类顶部是命令（启动、重启、提交答案、重填、取消），中部是 Run 持久化与查询，底部是后台执行编排。
+从 `agent_run_service.py` 的公共方法开始阅读：类顶部是命令（启动、重启、提交答案、取消），中部是 Run 持久化与查询，底部是后台执行编排。
 
-业务角色、入口差异和生命周期规则见 [Agent 业务文档](../../../docs/Agent-业务文档.md)；表关系、字段、约束与事务映射见 [业务建模自梳理](../../../docs/业务建模自梳理.md)。
+交互规则见 [Agent 最小交互业务约定](../../../docs/Agent-最小交互业务约定.md)；最终表结构及落库前的数据保留要求见 [会话与执行表定案](../../../docs/Agent-会话与执行表定案.md)。其他业务背景见 [Agent 业务文档](../../../docs/Agent-业务文档.md)。
 
 | 文件 | 职责 |
 | --- | --- |
@@ -44,38 +44,38 @@
 - `restart_run`（内部 SDK 更新）：先校验新输入，再取消并有界等待旧执行释放，最后沿用正常启动事务。
 - `submit_answers` 复核答案、身份和配置指纹，提交后才恢复图执行。
 - 前端补充表单在提交失败后保留答案，允许按同批中断 ID 再次提交；Submission 记录本批已接受答案和游标，避免重复恢复。它不保存 Agent 最终回复。
-- `reopen_form` 只恢复已取消表单，不启动图，也不占用执行权。
-- `_request_cancel` 对活动运行请求停止；没有执行线程的待填运行直接原子取消。
+- 已停止 Run 不可重开；旧 `input.reopen` 命令返回明确拒绝，下一条普通消息创建新 Run。
+- `_request_cancel` 对活动运行请求停止；没有执行线程的待填运行直接原子取消并清空待填表单；新输入由 LangGraph 丢弃旧调度，DeepAgents 的工具回执修复保留可用历史。
 - 同一会话的操作先锁会话，再锁 Run；重构时保留各入口原有的 Run 查询范围。
-- `internal/entity/agent_run_interaction.py` 集中维护表单校验、批次身份和取消恢复规则；已提交答案直接查询 `AgentRunSubmission`，不扫描快照数组。
-- `submit_answers` 在调用方事务内保存 Submission、交互投影及 Run 的新执行标识；`reopen_form` 只恢复交互状态。命令方法与这两类字段的写入写在同一处，不再经过单调用点的下划线方法转发。
-- 只有单一调用点的小步骤（≤25 行）直接写在调用方：提交幂等查重、恢复后的答案保存、表单重开、执行启动、待填取消、Run 建行都在命令方法内联。步骤注释连续编号表达顺序，不再为它们保留只转发不判断的方法。
+- `internal/entity/agent_run_interaction.py` 集中维护表单校验、批次身份和已确认问答生成；已提交答案直接查询 `AgentExecutionSubmission`，不扫描快照数组。
+- `submit_answers` 在调用方事务内保存 Submission、`input_history` 及新执行标识，并清空 `pending_inputs`；接受回执和恢复执行由同一事务决定。
+- 只有单一调用点的小步骤（≤25 行）直接写在调用方：提交幂等查重、恢复后的答案保存、执行启动、待填取消、Run 建行都在命令方法内联。步骤注释连续编号表达顺序，不再为它们保留只转发不判断的方法。
 
 ## 修改时的边界
 
 - 应用配置来源由定义服务管理，恢复指纹由调用方 `load(...).fingerprint()` 直接比较，不经单行转发；模型服务统一处理默认来源、覆盖校验、历史选择恢复和失效回退；恢复过程中只读取一次默认配置，失效覆盖不把旧思考强度带入回退模型。查询服务自己读取历史覆盖字段，只把解析委托给模型服务。
 - 只读投影（状态 Run 列表、历史事件分页、续传批次、模型覆盖字段）由查询服务自己查询；写服务只保留喂给写决策的读取与 `get_run_status`。
 - 命令方法与持久化同属 `AgentRunService`：公开方法编排事务和业务规则，下划线方法只做数据库读写，两者不再跨服务转发；锁定查询后不关闭 Session，Session 生命周期由入口负责。
-- 公开面只保留真正被外部调用的成员：五个命令（`start_run` / `restart_run` / `submit_answers` / `reopen_form` / `cancel_run`）加三个只读入口（`get_run` / `get_run_status` / `get_run_metadata`）。执行链路步骤、锁、事件与结算一律下划线，同模块内引用，不改动它们的外部契约。
+- 公开面只保留真正被外部调用的成员：四个命令（`start_run` / `restart_run` / `submit_answers` / `cancel_run`）加三个只读入口（`get_run` / `get_run_status` / `get_run_metadata`）。执行链路步骤、锁、事件与结算一律下划线，同模块内引用，不改动它们的外部契约。
 - 只有单一调用者的查询不再抽成方法：占用检查、幂等查重、事件序号读取、最新 Run 读取都直接写在调用点，靠 `# 1.` 步骤注释和局部变量名表达意图。因此同一段查询不因"加锁/不加锁"分叉成两个方法，也不留布尔开关参数。
 - 装配工厂不依赖 Run 服务：近期答案由 `AgentFactory._load_confirmed_inputs` 自己读取，避免装配层反向依赖持久化层，也避免模块循环导入。
 - `get_run`、`get_run_status`、`get_run_metadata` 是只读入口。Run 归属（应用 + 会话 + 入口 + Run 标识）由各调用点直接过滤：取消与 SSE 订阅只读 `id` 或整行，内部 SDK 读取整行；新增校验条件时必须三处同时改。孤儿收敛只收业务筛选条件，存活集合由 Run 服务从进程内跟踪器自取；需要收敛时命令方法完成归属校验后显式调用 `_settle_orphan_runs`，并负责 Session 生命周期。
-- 执行启动只写运行态，终态统一交给 `_finalize_run`；本地 `AgentRunExecution` 只保留执行身份、游标及线程信号，状态和错误以数据库为准。
-- `AgentRun.is_terminal` 判断任务终态；Run 服务只锁定 Run，校验 executor_id 与活动状态。结算在同一事务中清空执行标识并通过 `Message.apply_usage()` 累计用量，重复结算和旧执行均失去写入资格。模型方法不查询或提交数据库。
-- 提交答案锁定当前应用和入口的最新 Run；重新填写检查整个会话的最新 Run，不能跳过其他入口后来创建的任务。启动占用检查与数据库唯一索引均覆盖整个会话，包括 waiting_input。
-- Run 的调用参数、交互状态和展示投影分别保存；读取公开状态使用 `public_snapshot`，执行快照更新使用 `apply_snapshot()`。取消、恢复与结算共用事件追加方法，事件与游标不能分开提交。
+- 执行启动只写运行态，终态统一交给 `_finalize_run`；本地 `AgentExecutionSegment` 只保留执行身份、游标及线程信号，状态和错误以数据库为准。
+- `AgentExecution.is_terminal` 判断任务终态；Run 服务只锁定 Run，校验 executor_id 与活动状态。结算在同一事务中清空执行标识并通过 `ConversationTurn.apply_usage()` 累计用量，重复结算和旧执行均失去写入资格。模型方法不查询或提交数据库。
+- 提交先在授权会话及入口查已接受批次回执，新答案才锁定最新 Run 校验。启动占用检查与数据库唯一索引均覆盖整个会话，包括 waiting_input。
+- Execution 的 `execution_options`、`pending_inputs`、`input_history` 和 `display_state` 分别保存；`public_snapshot` 组合公开状态，`apply_snapshot()` 只更新展示白名单，不改变表单。取消、恢复与结算共用事件追加方法，事件与游标不能分开提交。
 - 消息、表单、生命周期的协议结构集中在相邻的 `agent_protocol` 目录。
 - 事件只能在提交后通知；执行标识失效的执行实例不能覆盖后续结果。序号查询使用调用方事务，不自行关闭 Session。
 - SSE 信号只维护通知版本；查询服务直接按会话、入口、Run 和游标读取已提交事件，不跨订阅缓存正文。孤儿 Run 由进程内注册表判定，写入口（启动/取消）顺带收敛，读入口只读不写。
 - 助手和普通应用共用类型化模型配置、覆盖规则及加载路径；助手服务只构造专属工具。
 - 已发布子 Agent 的模型由其发布配置决定，自定义跟随子 Agent 绑定本次父模型。
-- SDK 的命令 ID、分派及成功／错误外壳由命令入口 `respond_command` 处理：按已解析参数直接分派 `start_run` / `submit_answers` / `reopen_form`，业务命令返回 `RunAccepted` 或 `RunRejected`。
-- SSE 续传在 `AgentRunQuery._stream_events` 内直接扫描 `agent_run_event`：扫描游标（而非发送内容）待在本地变量里，过滤只影响发送，隐藏事件不阻断续传。
+- SDK 的命令 ID、分派及成功／错误外壳由命令入口 `respond_command` 处理：按已解析参数直接分派 `start_run` / `submit_answers`，业务命令返回 `RunAccepted` 或 `RunRejected`。
+- SSE 续传在 `AgentRunQuery._stream_events` 内直接扫描 `agent_execution_event`：扫描游标（而非发送内容）待在本地变量里，过滤只影响发送，隐藏事件不阻断续传。
 - 公开事件通道词表只在 `agent_protocol_schema.PUBLIC_EVENT_METHODS` 定义一次：DTO 校验的 `Literal`、历史回放过滤和持久化查询都从它派生，新增通道只改这一处。
 
 ## 数据对象的位置
 
-- `internal/entity/agent_invocation.py`：可信调用身份和可恢复输入；保持历史 JSON 字段格式，供业务服务和运行存储使用。
+- `internal/entity/agent_invocation.py`：可信调用身份和可恢复输入；由授权身份、ConversationTurn 原始输入和 AgentExecutionOptions 组装；只将运行选项持久化。
 - `internal/schema/agent/agent_model_schema.py`：工作台模型选项的公开响应。
 - 清理入口直接接收已授权的 UUID 关键字参数；消息清理只接收会话和消息 ID，不构造中间请求对象。
 - `ApplicationAgentDefinition`：一次读取的应用名称、所有者和配置，替代需要记住字段位置的四元组。

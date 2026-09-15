@@ -12,6 +12,7 @@ from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config.config import Config
@@ -47,7 +48,7 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
-from internal.model import Account, AgentRun, App
+from internal.model import Account, AgentExecution, App
 from internal.repository import WorkspaceFileRepository, WorkspaceFileStore
 from internal.repository.agent_workspace_store import AgentWorkspaceStore
 from internal.core.agent_v2.persistence.workspace_store import WorkspaceDeliveryError
@@ -103,7 +104,7 @@ class AgentFactory:
             input_message.id = req.input_message_id
         input_message.additional_kwargs.update(
             {
-                "business_message_id": str(req.message_id),
+                "business_message_id": str(req.turn_id),
                 "run_id": str(observer.run_id),
             }
         )
@@ -268,14 +269,14 @@ class AgentFactory:
     def _load_confirmed_inputs(self, req: AgentInvocation) -> str:
         """只读取同一授权会话入口的近期答案，不从客户端接收也不写长期记忆。"""
         rows = (
-            self.db.session.query(AgentRun.interaction_state["input_history"])
+            self.db.session.query(AgentExecution.input_history)
             .filter(
-                AgentRun.conversation_id == req.conversation_id,
-                AgentRun.app_id == req.app_id,
-                AgentRun.invoke_from == req.invoke_from.value,
-                AgentRun.interaction_state["input_history"].astext.isnot(None),
+                AgentExecution.conversation_id == req.conversation_id,
+                AgentExecution.app_id == req.app_id,
+                AgentExecution.invoke_from == req.invoke_from.value,
+                func.jsonb_array_length(AgentExecution.input_history) > 0,
             )
-            .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
             .limit(8)
             .all()
         )

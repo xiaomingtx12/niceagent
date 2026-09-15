@@ -14,11 +14,11 @@ from internal.exception import FailException, NotFoundException, ValidateErrorEx
 from internal.extension.logging_extension import logger
 from internal.model import (
     Account,
-    AgentRun,
+    AgentExecution,
     App,
     AppConfigVersion,
     Conversation,
-    Message,
+    ConversationTurn,
 )
 from internal.entity.app_entity import AppConfigType
 from internal.model.agent_evaluation import AgentEvaluation
@@ -61,7 +61,7 @@ class AgentEvaluationService(BaseService):
         query = self._source_query(app_id, account)
         total = query.count()
         rows = (
-            query.order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+            query.order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
             .offset((current_page - 1) * page_size)
             .limit(page_size)
             .all()
@@ -78,7 +78,7 @@ class AgentEvaluationService(BaseService):
         self._owned_app(app_id, account.id)
         row = (
             self._source_query(app_id, account)
-            .filter(AgentRun.id == run_id)
+            .filter(AgentExecution.id == run_id)
             .one_or_none()
         )
         if row is None:
@@ -113,7 +113,7 @@ class AgentEvaluationService(BaseService):
                 id=evaluation_id,
                 account_id=account.id,
                 app_id=app_id,
-                run_id=req.run_id,
+                execution_id=req.run_id,
                 source_snapshot=source,
                 criteria=list(req.criteria),
                 judge_config=config,
@@ -347,7 +347,7 @@ class AgentEvaluationService(BaseService):
         if (
             not same_mode
             or not same_options
-            or evaluation.run_id != req.run_id
+            or evaluation.execution_id != req.run_id
             or evaluation.criteria != req.criteria
             or evaluation.judge_config != config
         ):
@@ -428,23 +428,23 @@ class AgentEvaluationService(BaseService):
     def _source_query(self, app_id: UUID, account: Account):
         """仅纳入本人任务/调试会话，兼容尚未写 owner_account_id 的旧记录。"""
         return (
-            self.db.session.query(AgentRun, Message)
+            self.db.session.query(AgentExecution, ConversationTurn)
             .join(
-                Message,
+                ConversationTurn,
                 and_(
-                    Message.id == AgentRun.message_id,
-                    Message.app_id == AgentRun.app_id,
-                    Message.conversation_id == AgentRun.conversation_id,
+                    ConversationTurn.id == AgentExecution.turn_id,
+                    ConversationTurn.app_id == AgentExecution.app_id,
+                    ConversationTurn.conversation_id == AgentExecution.conversation_id,
                 ),
             )
-            .join(Conversation, Conversation.id == AgentRun.conversation_id)
+            .join(Conversation, Conversation.id == AgentExecution.conversation_id)
             .filter(
-                AgentRun.app_id == app_id,
-                AgentRun.status.in_(TERMINAL_STATUSES),
-                AgentRun.invoke_from.in_(("debugger", "creator_task")),
+                AgentExecution.app_id == app_id,
+                AgentExecution.status.in_(TERMINAL_STATUSES),
+                AgentExecution.invoke_from.in_(("debugger", "creator_task")),
                 Conversation.app_id == app_id,
                 Conversation.is_deleted.is_(False),
-                Message.is_deleted.is_(False),
+                ConversationTurn.is_deleted.is_(False),
                 or_(
                     Conversation.owner_account_id == account.id,
                     and_(
@@ -456,7 +456,7 @@ class AgentEvaluationService(BaseService):
         )
 
     @staticmethod
-    def _source(run: AgentRun, message: Message, preview: bool = False) -> dict:
+    def _source(run: AgentExecution, message: ConversationTurn, preview: bool = False) -> dict:
         """明确评分材料范围，不把 Agent 自述当作外部执行证据。"""
         source = {
             "run_id": str(run.id),

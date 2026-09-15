@@ -25,7 +25,7 @@ from internal.exception import (
     NotFoundException,
     ValidateErrorException,
 )
-from internal.model import Account, AgentRun, App, Conversation, EndUser
+from internal.model import Account, AgentExecution, App, Conversation, EndUser
 from internal.schema.agent.agent_protocol_schema import AgentProtocolCommandInputReq
 from internal.schema.agent_protocol.internal_agent_protocol_schema import (
     InternalRunCreateReq,
@@ -144,7 +144,7 @@ class InternalAgentProtocolService:
         metadata = self.run_service.get_run_metadata(
             conversation_id=conversation_id, invoke_from=InvokeFrom.CREATOR_TASK,
         )
-        rows, _, _ = self.conversation_service.get_message_page(conversation_id=conversation_id, page_size=1)
+        rows, _, _ = self.conversation_service.get_turn_page(conversation_id=conversation_id, page_size=1)
         messages = []
         for message in rows:
             messages.append({"type": "human", "id": f"{message.id}:human", "content": message.query})
@@ -172,12 +172,12 @@ class InternalAgentProtocolService:
             app_id=claims.target_app_id, conversation_id=conversation_id, account=account,
         )
         row = (
-            self.db.session.query(AgentRun)
+            self.db.session.query(AgentExecution)
             .filter(
-                AgentRun.id == run_id,
-                AgentRun.app_id == claims.target_app_id,
-                AgentRun.conversation_id == conversation_id,
-                AgentRun.invoke_from == InvokeFrom.CREATOR_TASK.value,
+                AgentExecution.id == run_id,
+                AgentExecution.app_id == claims.target_app_id,
+                AgentExecution.conversation_id == conversation_id,
+                AgentExecution.invoke_from == InvokeFrom.CREATOR_TASK.value,
             )
             .one_or_none()
         )
@@ -268,7 +268,7 @@ class InternalAgentProtocolService:
     @staticmethod
     def _to_run_response(
         *,
-        row: AgentRun | None,
+        row: AgentExecution | None,
         multitask_strategy: str = "reject",
     ) -> InternalRunResp:
         """把平台 Run 映射为 LangGraph SDK 可识别的状态对象。"""

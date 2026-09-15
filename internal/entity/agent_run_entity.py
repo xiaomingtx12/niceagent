@@ -64,7 +64,7 @@ class AgentRunInput(BaseModel):
 
 
 @dataclass
-class AgentRunExecution(Generic[_InvocationReqT]):
+class AgentExecutionSegment(Generic[_InvocationReqT]):
     """当前进程持有的执行片段；Run 身份稳定，每次恢复分配新的 executor_id。"""
 
     run_id: UUID
@@ -82,7 +82,7 @@ __all__ = [
     "AGENT_RUN_ACTIVE_STATUSES",
     "AGENT_RUN_OCCUPYING_STATUSES",
     "AGENT_RUN_TERMINAL_STATUSES",
-    "AgentRunExecution",
+    "AgentExecutionSegment",
     "AgentRunInput",
     "AgentRunStatus",
 ]

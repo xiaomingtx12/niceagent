@@ -24,7 +24,7 @@ from internal.model import (
     App,
     WechatEndUser,
     EndUser,
-    Message,
+    ConversationTurn,
     WechatMessage,
     Conversation,
 )
@@ -148,7 +148,7 @@ class WechatService(BaseService):
                 # 14.检测微信消息是否存在并且未推送消息
                 if wechat_message and wechat_message.is_pushed is False:
                     # 15.查询微信消息关联的Agent消息
-                    message = self.get(Message, wechat_message.message_id)
+                    message = self.get(ConversationTurn, wechat_message.turn_id)
 
                     # 16.当消息记录存在时才执行推送操作
                     if message:
@@ -189,7 +189,7 @@ class WechatService(BaseService):
                     created_by=wechat_end_user.end_user_id,
                 )
             message = self.create(
-                Message,
+                ConversationTurn,
                 **{
                     "app_id": app.id,
                     "conversation_id": conversation.id,
@@ -204,7 +204,7 @@ class WechatService(BaseService):
                 WechatMessage,
                 **{
                     "wechat_end_user_id": wechat_end_user.id,
-                    "message_id": message.id,
+                    "turn_id": message.id,
                     "is_pushed": False,
                 },
             )
@@ -238,12 +238,12 @@ class WechatService(BaseService):
         with flask_app.app_context():
             app = self.get(App, app_id)
             conversation = self.get(Conversation, conversation_id)
-            message = self.get(Message, message_id)
+            message = self.get(ConversationTurn, message_id)
             invocation = AgentInvocation(
                 account_id=app.account_id,
                 app_id=app.id,
                 conversation_id=conversation.id,
-                message_id=message_id,
+                turn_id=message_id,
                 created_by=message.created_by,
                 end_user_id=message.created_by,
                 invoke_from=InvokeFrom.SERVICE_API,
@@ -276,7 +276,7 @@ class WechatService(BaseService):
                 if result.answer:
                     updates["answer"] = result.answer
                 with self.db.auto_commit():
-                    persisted_message = self.db.session.get(Message, message_id)
+                    persisted_message = self.db.session.get(ConversationTurn, message_id)
                     if persisted_message is not None:
                         for field, value in updates.items():
                             setattr(persisted_message, field, value)
@@ -284,7 +284,7 @@ class WechatService(BaseService):
             except Exception as exc:
                 observer.finish()
                 with self.db.auto_commit():
-                    persisted_message = self.db.session.get(Message, message_id)
+                    persisted_message = self.db.session.get(ConversationTurn, message_id)
                     if persisted_message is not None:
                         persisted_message.status = MessageStatus.ERROR
                         persisted_message.error = "Agent 运行失败"

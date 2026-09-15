@@ -7,7 +7,7 @@ from uuid import UUID
 from injector import inject
 from redis import Redis
 
-from internal.model import Account, App, Message
+from internal.model import Account, App, ConversationTurn
 from internal.entity.token_usage import normalize_token_details
 from pkg.sqlalchemy import SQLAlchemy
 from .app_service import AppService
@@ -126,38 +126,38 @@ class AnalysisService(BaseService):
 
     def get_messages_by_time_range(
         self, app: App, start_at: datetime, end_at: datetime
-    ) -> list[Message]:
+    ) -> list[ConversationTurn]:
         """根据传递的时间段获取指定应用的消息会话数据"""
         return (
-            self.db.session.query(Message)
+            self.db.session.query(ConversationTurn)
             .with_entities(
-                Message.id,
-                Message.conversation_id,
-                Message.created_by,
-                Message.latency,
-                Message.total_token_count,
-                Message.input_token_count,
-                Message.output_token_count,
-                Message.cached_token_count,
-                Message.reasoning_token_count,
-                Message.model_call_count,
-                Message.tool_call_count,
-                Message.token_usage,
-                Message.total_price,
-                Message.created_at,
+                ConversationTurn.id,
+                ConversationTurn.conversation_id,
+                ConversationTurn.created_by,
+                ConversationTurn.latency,
+                ConversationTurn.total_token_count,
+                ConversationTurn.input_token_count,
+                ConversationTurn.output_token_count,
+                ConversationTurn.cached_token_count,
+                ConversationTurn.reasoning_token_count,
+                ConversationTurn.model_call_count,
+                ConversationTurn.tool_call_count,
+                ConversationTurn.token_usage,
+                ConversationTurn.total_price,
+                ConversationTurn.created_at,
             )
             .filter(
-                Message.app_id == app.id,
-                Message.created_at >= start_at,
-                Message.created_at < end_at,
-                Message.answer != "",
+                ConversationTurn.app_id == app.id,
+                ConversationTurn.created_at >= start_at,
+                ConversationTurn.created_at < end_at,
+                ConversationTurn.answer != "",
             )
             .all()
         )
 
     @classmethod
     def calculate_overview_indicators_by_messages(
-        cls, messages: list[Message]
+        cls, messages: list[ConversationTurn]
     ) -> dict[str, Any]:
         """仅统计有回复的消息；耗时包含工具等待，吞吐不代表模型生成速度。"""
         message_count = len(messages)
@@ -207,7 +207,7 @@ class AnalysisService(BaseService):
     @classmethod
     def calculate_model_usage_by_messages(
         cls,
-        messages: list[Message],
+        messages: list[ConversationTurn],
     ) -> dict[str, dict[str, int]]:
         """按模型汇总输入、输出、缓存和推理 Token。"""
         usage_by_model: dict[str, dict[str, int]] = {}
@@ -272,12 +272,12 @@ class AnalysisService(BaseService):
         cls,
         end_at: datetime,
         days_ago: int,
-        messages: list[Message],
+        messages: list[ConversationTurn],
     ) -> dict[str, Any]:
         """按日分组一次，复用概览口径，日期区间为左闭右开。"""
         end_at = datetime.combine(end_at, datetime.min.time())
         start_at = end_at - timedelta(days=days_ago)
-        daily_messages: dict[date, list[Message]] = {}
+        daily_messages: dict[date, list[ConversationTurn]] = {}
         for message in messages:
             if start_at <= message.created_at < end_at:
                 daily_messages.setdefault(message.created_at.date(), []).append(message)
@@ -295,7 +295,7 @@ class AnalysisService(BaseService):
         return trends
 
     @staticmethod
-    def _metric(message: Message, field: str) -> int | float:
+    def _metric(message: ConversationTurn, field: str) -> int | float:
         """读取消息统计字段，并兼容历史对象或空值。"""
         value = getattr(message, field, 0)
         return value or 0
