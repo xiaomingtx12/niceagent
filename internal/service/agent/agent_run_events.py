@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from uuid import UUID
 
 from internal.core.agent_v2 import (
@@ -13,14 +15,17 @@ from internal.core.agent_v2 import (
 from internal.entity import AgentExecutionSegment
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_protocol_schema import AgentProtocolEvent
-from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector, normalize_custom_data
+from internal.service.agent_protocol.event_projector import (
+    AgentProtocolEventProjector, is_tool_argument_delta, normalize_custom_data,
+)
 from internal.service.agent_protocol.state_projector import adapt_graph_state
+from .live_event_stream import LiveEventStream
 
 _FRAMEWORK_TERMINAL_EVENTS = frozenset({"completed", "failed", "interrupted", "drained", "cancelled"})
 
 
 class EventSignal:
-    """进程级事件通知版本；订阅端先取版本再查库，事件正文一律来自数据库。"""
+    """进程级通知版本；先取版本再读取内存或数据库，避免漏掉并发发布。"""
 
     def __init__(self) -> None:
         """只维护一个通知版本，不按会话分桶也不保存事件正文。"""
@@ -28,12 +33,12 @@ class EventSignal:
         self._version = 0
 
     def snapshot(self) -> int:
-        """在读取数据库前取得版本，查询期间的提交也会触发下一次读取。"""
+        """在读取事件前取得版本，并发发布也会触发下一次读取。"""
         with self._condition:
             return self._version
 
     def notify(self) -> None:
-        """提交后唤醒本进程所有订阅者；唤醒结果由订阅端按会话自行过滤。"""
+        """实时发布、提交或执行退出后唤醒订阅者；订阅者自行筛选 Run。"""
         with self._condition:
             self._version += 1
             self._condition.notify_all()
@@ -51,8 +56,9 @@ class AgentRunTracker:
     """管理本进程的活动 Run；只做内存登记与取消信号，不读写数据库。"""
 
     def __init__(self) -> None:
-        """条件锁只保护本地注册表，事件正文由数据库保存。"""
+        """锁保护执行片段与实时尾部的关联，持久化由独立写线程负责。"""
         self._runs: dict[str, AgentExecutionSegment] = {}
+        self._streams: dict[str, LiveEventStream] = {}
         self._lock = threading.RLock()
 
     def get(self, conversation_id: UUID) -> AgentExecutionSegment | None:
@@ -63,7 +69,27 @@ class AgentRunTracker:
     def register(self, run: AgentExecutionSegment) -> None:
         """登记当前会话的新 Run；覆盖式写入依赖会话内至多一个活动 Run。"""
         with self._lock:
+            previous = self._runs.get(str(run.conversation_id))
+            if previous is not None:
+                self._streams.pop(str(previous.run_id), None)
             self._runs[str(run.conversation_id)] = run
+            self._streams[str(run.run_id)] = LiveEventStream(run.initial_event_sequence)
+
+    def stream(self, conversation_id: UUID, run_id: UUID) -> LiveEventStream | None:
+        """只返回当前已登记片段的缓冲；HTTP 归属校验仍由查询入口完成。"""
+        with self._lock:
+            run = self._runs.get(str(conversation_id))
+            if run is None or run.run_id != run_id:
+                return None
+            return self._streams.get(str(run_id))
+
+    def publish(self, run: AgentExecutionSegment, events: list[AgentProtocolEvent]) -> None:
+        """拒绝旧片段向恢复后的执行串入事件，先发布再唤醒等待者。"""
+        with self._lock:
+            if self._runs.get(str(run.conversation_id)) is not run:
+                return
+            self._streams[str(run.run_id)].publish(events)
+        event_signal.notify()
 
     def finish(self, run: AgentExecutionSegment) -> None:
         """结束本地 Run，旧 Run 不得移除后继 Run。"""
@@ -72,6 +98,8 @@ class AgentRunTracker:
             conversation_key = str(run.conversation_id)
             if self._runs.get(conversation_key) is run:
                 self._runs.pop(conversation_key, None)
+                self._streams.pop(str(run.run_id), None)
+        event_signal.notify()
 
     def active_run_ids(self) -> set[UUID]:
         """返回本进程仍在执行的 Run 标识，供失联收敛区分存活与孤儿记录。"""
@@ -91,7 +119,10 @@ class AgentRunTracker:
 
 
 class AgentRunEventBuffer:
-    """集中管理流式批次及首字计时，所有通知都发生在数据库提交之后。"""
+    """事件先实时发布，独立线程有界合批保存；结束时等待持久化收尾。"""
+
+    _MAX_PENDING = 512
+    _FLUSH_INTERVAL = 0.25
 
     def __init__(
         self,
@@ -101,19 +132,28 @@ class AgentRunEventBuffer:
         *,
         started_at: float,
         batch_size: int,
+        publish_event: Callable[[AgentProtocolEvent], None],
+        worker_context: Callable[[], AbstractContextManager] = nullcontext,
     ) -> None:
-        """缓冲只由本次执行的事件回调使用，不拥有 Agent、数据库 Session 或持久化实现。"""
+        """写线程由执行片段独占，数据库上下文由 Service 注入，禁止跨线程共用 Session。"""
         self._run = run
         self._projector = projector
         self._commit_events = commit_events
         self._started_at = started_at
         self._batch_size = batch_size
-        self._pending: list[AgentProtocolEvent] = []
-        self._last_flush_at = time.monotonic()
+        self._publish_event = publish_event
+        self._pending: deque[AgentProtocolEvent] = deque()
+        self._condition = threading.Condition()
+        self._closing = False
+        self._error: Exception | None = None
         self._first_text_published = False
+        self._worker = threading.Thread(
+            target=self._write_batches, args=(worker_context,), name="agent-event-writer", daemon=True,
+        )
+        self._worker.start()
 
     def receive(self, agent_event: AgentEvent) -> None:
-        """按事件到达顺序缓冲，首字和阶段边界立即提交。"""
+        """按顺序公开展示事件，写库不阻塞正常的事件接收和交付。"""
         # 1.根终态由业务事务发布，不能提前用框架完成事件结束前端订阅。
         data = agent_event.data
         channel = agent_event.channel
@@ -130,17 +170,19 @@ class AgentRunEventBuffer:
         elif channel == "values":
             data = adapt_graph_state(data)
         elif channel == "messages":
+            if is_tool_argument_delta(data):
+                return
             is_assistant_start = event_name == "message-start" and data.get("role") in {"ai", "assistant"}
             if is_root and is_assistant_start:
                 data = {**data, "id": f"{self._run.spec.turn_id}:assistant"}
 
-        # 3.使用与业务事件共用的编号器，再将事件加入待提交批次。
+        # 3.使用与业务事件共用的编号器，登记待写队列并立即发布。
         event = self._projector.create_event(
             channel, data, namespace=agent_event.namespace, timestamp=agent_event.timestamp,
             node=agent_event.node, source="agent_v2", source_sequence=agent_event.sequence,
             model_run_id=agent_event.model_run_id,
         )
-        self._pending.append(event)
+        self.publish(event)
         event_name = data.get("event")
 
         # 4.首字计时只认文本增量，推理、工具和空文本不计入。
@@ -152,47 +194,84 @@ class AgentRunEventBuffer:
             and bool(delta.get("text"))
         )
 
-        # 5.首字、阶段边界和错误立即提交；普通分片按数量或到达时的 30ms 窗口合批。
-        flush_now = (
-            first_text
-            or event.method != "messages"
-            or event_name in {"content-block-finish", "message-finish", "error"}
-            or len(self._pending) >= self._batch_size
-            or time.monotonic() - self._last_flush_at >= 0.03
-        )
-        if not flush_now:
-            return
-
-        # 6.先落库再计时；只有首字成功交付后才记录首字耗时。
-        self._flush()
+        # 5.首字计时对应内存发布，不再把数据库耗时算成模型首字交付。
         if not first_text:
             return
         self._first_text_published = True
-        duration_ms = (self._last_flush_at - self._started_at) * 1000
+        duration_ms = (time.monotonic() - self._started_at) * 1000
         logger.info(
             "agent_delivery_timing run_id=%s stage=first_text duration_ms=%.2f",
             self._run.run_id, duration_ms,
         )
 
     def finish(self) -> None:
-        """刷新 Core 已交付的尾批；失败时保留批次供上层处理原始错误。"""
-        self._flush()
+        """停止接收并等待尾批；失败必须上报，调用方不能发布成功终态。"""
+        # 1.先回收写线程，确保下面的补写不会与后台提交并发。
+        self.close()
+        if self._error is not None:
+            # 2.按原顺序补写失败批及尾部；再次失败直接交给业务层结算为失败。
+            while self._pending:
+                batch = list(self._pending)[:self._batch_size]
+                self._commit_events(self._run, batch)
+                self._run.last_event_sequence = batch[-1].seq
+                for _ in batch:
+                    self._pending.popleft()
+            # 3.全部补写成功后才清除错误并通知订阅者。
+            self._error = None
+            event_signal.notify()
+
+    def close(self) -> None:
+        """所有退出路径都回收写线程；旧线程不能在本轮结算后继续写库。"""
+        with self._condition:
+            self._closing = True
+            self._condition.notify_all()
+        self._worker.join()
 
     def publish(self, event: AgentProtocolEvent) -> None:
-        """直接发布已投影的单个事件；落库、游标与通知走与批量刷新同一条路。"""
-        self._pending.append(event)
-        self._flush()
+        """先登记待保存事件再实时交付；仅在写入持续落后时用背压限制内存。"""
+        with self._condition:
+            # 1.待写队列包含正在提交的批次，背压不能只计算尚未取出的事件。
+            self._condition.wait_for(
+                lambda: len(self._pending) < self._MAX_PENDING or self._error or self._closing,
+            )
+            if self._error is not None:
+                raise self._error
+            if self._closing:
+                raise RuntimeError("Agent event writer is closed")
+            # 2.登记和实时发布在同一锁内完成，写线程不能抢先提交未发布的事件。
+            self._pending.append(event)
+            self._publish_event(event)
+            self._condition.notify_all()
 
-    def _flush(self) -> None:
-        """提交失败不推进游标；提交成功后才推进游标并唤醒订阅者。"""
-        if not self._pending:
-            return
-        # 先提交数据库，成功后推进游标并唤醒订阅者。
-        self._commit_events(self._run, self._pending)
-        self._run.last_event_sequence = self._pending[-1].seq
-        event_signal.notify()
-        self._pending.clear()
-        self._last_flush_at = time.monotonic()
+    def _write_batches(self, worker_context: Callable[[], AbstractContextManager]) -> None:
+        """空闲时也按截止时间提交小批次；提交失败保留队列并唤醒生产者。"""
+        try:
+            with worker_context():
+                while True:
+                    with self._condition:
+                        # 1.等待首条事件，再按数量或时间组成批次；关闭时立即处理尾批。
+                        self._condition.wait_for(lambda: self._pending or self._closing)
+                        if not self._pending:
+                            return
+                        self._condition.wait_for(
+                            lambda: len(self._pending) >= self._batch_size or self._closing,
+                            timeout=self._FLUSH_INTERVAL,
+                        )
+                        batch = list(self._pending)[:self._batch_size]
+                    # 2.数据库提交在锁外执行，期间生产者仍可实时发布后续事件。
+                    self._commit_events(self._run, batch)
+                    with self._condition:
+                        # 3.只有提交成功才移除队列前缀并推进已保存水位。
+                        self._run.last_event_sequence = batch[-1].seq
+                        for _ in batch:
+                            self._pending.popleft()
+                        self._condition.notify_all()
+                    event_signal.notify()
+        except Exception as exc:
+            # 4.保留失败批，唤醒生产者停止接收；finish() 在本线程退出后负责补写。
+            with self._condition:
+                self._error = exc
+                self._condition.notify_all()
 
 
 __all__ = ["AgentRunEventBuffer", "AgentRunTracker", "EventSignal", "event_signal"]

@@ -804,7 +804,8 @@ class AgentRunService:
     _run_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=_RUN_WORKERS, thread_name_prefix="agent-run")
     _run_slots: ClassVar[threading.BoundedSemaphore] = threading.BoundedSemaphore(_RUN_WORKERS)
 
-    _persistence_batch_size: ClassVar[int] = 8
+    # 实时交付不等落库；独立写线程按上限或 250ms 合批，收尾时排空。
+    _persistence_batch_size: ClassVar[int] = 128
 
     def _submit_execution(self, run: AgentExecutionSegment) -> None:
         """事务提交后投递到有界执行池，避免每个 Run 无限创建线程。
@@ -839,6 +840,8 @@ class AgentRunService:
         events = AgentRunEventBuffer(
             run, projector, self._record_events,
             started_at=started_at, batch_size=self._persistence_batch_size,
+            publish_event=lambda event: self.tracker.publish(run, [event]),
+            worker_context=current_app._get_current_object().app_context,
         )
         result: AgentExecutionResult | None = None
         try:
@@ -887,7 +890,8 @@ class AgentRunService:
                 latency=max(0.0, time.monotonic() - started_at),
             )
         finally:
-            # 5.即使结果保存失败，也必须释放当前进程的运行登记。
+            # 5.先回收写线程，再释放运行登记；旧线程不能在下一次恢复后继续提交。
+            events.close()
             self.tracker.finish(run)
 
     def _execute_agent(
@@ -1046,6 +1050,7 @@ class AgentRunService:
         try:
             if events:
                 run.last_event_sequence = events[-1].seq
+                self.tracker.publish(run, events)
                 event_signal.notify()
         except Exception:
             logger.exception(

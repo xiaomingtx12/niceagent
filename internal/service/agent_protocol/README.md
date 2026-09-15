@@ -4,20 +4,21 @@
 
 ## 先看整条链路
 
-启动命令和事件订阅是两个 HTTP 请求：`/commands` 创建 Run 并交给后台执行，返回 Run ID；`/stream` 根据 Run ID 和游标读取已落库事件，通过 SSE 持续发送。
+启动命令和事件订阅是两个 HTTP 请求：`/commands` 创建 Run 并交给后台执行，返回 Run ID；`/stream` 根据 Run ID 和游标恢复已保存历史，再从内存尾部持续发送实时事件。
 
 ```text
 后台执行：AgentExecutor → normalizer.accept → events.receive（筛选并适配载荷）
                                              → event_projector.create_event（共用编号与协议外壳）
-                                             → 缓冲并调用 _record_events → AgentRunEvent 表
+                                             → 内存尾部 → 通知实时订阅者
+                                             → 独立写线程合批调用 _record_events → 事件表
 
-HTTP 订阅：AgentRunQuery._stream_events → 读取 AgentRunEvent 表
+HTTP 订阅：AgentRunQuery._stream_events → 已保存历史接内存尾部
                                       → sse_response 编码 → 浏览器
 ```
 
 本目录只保留多处共用的协议处理：`event_projector.py` 提供事件编号、协议外壳、终态批次和历史解析，`state_projector.py` 提供图状态适配与公开快照筛选。只有一个调用方的业务步骤直接写在调用函数内，包括事件接收转换、聊天历史与待填写任务构造、执行结果状态和生命周期映射。
 
-`AgentRunEventBuffer` 在数据库提交后唤醒订阅者，通知本身不携带正文。订阅者仍从数据库读取，断线重连才能凭游标续传。图结束时先由 Service 保存回答、状态和终态事件，再通知前端运行已结束。
+`AgentRunEventBuffer` 发布内存事件后立即唤醒订阅者，批量写入独立进行。刷新和断线重连共用“已保存前缀 + 内存尾部”，按同一序号衔接，已经发送的实时事件落库后不重复发送。图结束时先排空写队列，由 Service 保存回答、状态和终态事件，再通知前端运行已结束；服务异常退出允许丢失尚未保存的尾部。
 
 ## 阅读顺序
 
@@ -59,7 +60,7 @@ LangGraph 原始流
   → AgentEvent
   → 工作台投影：业务 ID、公开通道与持久化序号
   → AgentProtocolEvent
-  → 批量提交、通知与 SSE
+  → 实时发布与 SSE；并行批量保存，收尾时等待保存完成
 ```
 
 `AgentRunEventBuffer.receive` 对一个 Core 事件最多创建一个公开事件，过滤、载荷适配和缓冲在同一函数内完成。共用的 `create_event` 只分配序号并构造协议外壳。Core 保留框架的正常消息结束和错误事件；前端依据模型错误、子图终态和已提交的业务终态收尾尚未完成的展示记录。

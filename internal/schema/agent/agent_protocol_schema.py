@@ -255,6 +255,7 @@ class AgentProtocolEventStreamReq(BaseModel):
 
     run_id: UUID
     since: StrictInt = Field(default=0, ge=0)
+    recovery: Literal["snapshot"] | None = None
     channels: list[
         Literal[
             "messages",
@@ -415,7 +416,19 @@ class AgentProtocolRunEventsResp(BaseModel):
     next_page: int | None = None
 
 
+class AgentProtocolRecoverySnapshotResp(BaseModel):
+    """连接级展示快照；sequence 对应同一已提交水位，不占用持久化事件序号。"""
+
+    type: Literal["workbench.snapshot"] = "workbench.snapshot"
+    run_id: UUID
+    sequence: int = Field(ge=0)
+    run: AgentProtocolRunSummaryResp
+    values: dict[str, Any]
+    events: list[AgentProtocolEvent]
+
+
 __all__ = [
+    "AgentProtocolRecoverySnapshotResp",
     "PUBLIC_EVENT_METHODS",
     "AgentProtocolRunEventsResp",
     "AgentProtocolCommandReq",

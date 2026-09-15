@@ -21,6 +21,12 @@ class AgentRunHandler:
     query_service: AgentRunQuery
 
     @login_required
+    def snapshot(self, run_id: UUID) -> Response:
+        """按已有会话所有权返回合并后的完整执行过程。"""
+        result = self.query_service.get_recovery_snapshot(run_id=run_id, account=current_user)
+        return json_response(result.model_dump(mode="json"))
+
+    @login_required
     def events(self, run_id: UUID) -> Response:
         """分页参数在入口校验，运行详情只能由所属账号读取。"""
         page = PaginatorReq(request.args)

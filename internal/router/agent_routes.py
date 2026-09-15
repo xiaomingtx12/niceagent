@@ -91,6 +91,10 @@ def register_creator_task_agent_routes(blueprint: Blueprint, handler: CreatorTas
 def register_agent_run_routes(blueprint: Blueprint, handler: AgentRunHandler) -> None:
     """Run 查询独立于入口类型，保留历史路由标识。"""
     blueprint.add_url_rule(
+        "/agent-runs/<uuid:run_id>/snapshot", methods=["GET"],
+        endpoint="run_snapshot", view_func=handler.snapshot,
+    )
+    blueprint.add_url_rule(
         "/agent-runs/<uuid:run_id>/events", methods=["GET"],
         endpoint="run_events", view_func=handler.events,
     )

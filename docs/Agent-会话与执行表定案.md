@@ -104,6 +104,7 @@ Event：`execution_id UUID`、`sequence INTEGER`、`payload JSONB 对象`、`cre
 - 删除笼统 `interaction_state`，保留直接读写的待填和历史列；删除取消重开状态。
 - `invocation_snapshot` 收敛为 `execution_options`：删除重复的账号、应用、会话、本轮 ID、query、图片、附件和客户端消息 ID。
 - `state_snapshot` 改为 `display_state`，只保存展示白名单和当前轮消息；片段结算后清除临时消息投影，回答从 Turn 读取，执行内部状态由 checkpoint 保存。
+- SSE 的 `workbench.snapshot` 是按已提交事件水位临时计算的展示响应，不新增同名列或表；阶段正文由事件合并取得，当前状态和回答从 Execution/Turn 读取。完整恢复约定见 [最小交互业务约定 §6.1](Agent-最小交互业务约定.md#61-sse-断线恢复约定)。
 - 删除没有调用者且将“零轮/一轮”混为新会话的 `Conversation.is_new`；首轮判断继续由创建服务查询未删除问答。
 - 去掉来源和展示状态的空字符串默认值，修正仅声明 `server_onupdate` 却不会自动更新时间的问题，使用 ORM `onupdate`。
 - 保留 app_id 和 Execution.conversation_id：分别服务于直接统计/过滤和会话占用唯一约束。普通外键只保证存在，归属一致性由创建服务负责。
