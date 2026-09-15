@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 AGENT_MEMORY_NAMESPACE_ROOT = ("mydify", "agent-memory")
 AGENT_MEMORY_VIRTUAL_ROOT = "/memories/"
-AGENT_MEMORY_INDEX = "/memories/.index.md"
 AGENT_MEMORY_CATEGORIES = {
     "preferences": "用户偏好",
     "background": "背景信息",
@@ -128,14 +127,6 @@ def memory_virtual_path_to_store_key(path: str) -> str:
     return f"/{normalized[len(AGENT_MEMORY_VIRTUAL_ROOT):]}"
 
 
-def memory_writable_path_to_store_key(path: str) -> str:
-    """所有文件修改入口共用只读索引规则，先规范路径以阻止别名绕过。"""
-    normalized = normalize_agent_memory_path(path)
-    if normalized == AGENT_MEMORY_INDEX:
-        raise AgentMemoryPathError("记忆索引由系统生成，请编辑分类下的记忆文件")
-    return f"/{normalized[len(AGENT_MEMORY_VIRTUAL_ROOT):]}"
-
-
 def memory_store_key_to_virtual_path(key: str) -> str:
     """把 StoreBackend 的相对 key 恢复为 Agent 虚拟路径。"""
     normalized = (key or "").strip().replace("\\", "/")
@@ -202,7 +193,6 @@ __all__ = [
     "DEFAULT_AGENT_MEMORY_LIMITS",
     "memory_store_key_to_virtual_path",
     "memory_virtual_path_to_store_key",
-    "memory_writable_path_to_store_key",
     "normalize_agent_memory_path",
     "validate_agent_memory_content",
     "validate_agent_memory_scope",

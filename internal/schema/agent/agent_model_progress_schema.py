@@ -15,3 +15,4 @@ class AgentModelProgressResp(BaseModel):
     started_at: int = Field(gt=0)
     ended_at: int | None = Field(default=None, gt=0)
     duration_ms: int = Field(ge=0)
+    first_token_ms: int | None = Field(default=None, ge=0)

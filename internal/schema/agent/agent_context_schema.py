@@ -32,6 +32,14 @@ class ContextWindowResp(BaseModel):
     compaction_input_tokens: int | None = Field(default=None, ge=0)
     sections: list[ContextSectionResp] = Field(max_length=7)
     has_multimodal: bool = False
+    input_budget: int | None = Field(default=None, gt=0)
+    safety_tokens: int | None = Field(default=None, gt=0)
+    cache_read_tokens: int | None = Field(default=None, ge=0)
+    cache_creation_tokens: int | None = Field(default=None, ge=0)
+    cache_read_ratio: float | None = Field(default=None, ge=0, le=1)
+    duration_ms: int | None = Field(default=None, ge=0)
+    system_fingerprint: str | None = Field(default=None, max_length=64)
+    tools_fingerprint: str | None = Field(default=None, max_length=64)
 
 
 class ContextCompactionResp(BaseModel):
@@ -41,11 +49,13 @@ class ContextCompactionResp(BaseModel):
     type: Literal["context_compaction"]
     compaction_id: str = Field(min_length=1, max_length=64)
     phase: Literal["preparing", "summarizing", "completed", "failed", "cancelled"]
-    scope: Literal["compression", "summary_generation"] = "compression"
-    reason: Literal["threshold", "overflow"] | None = None
-    started_at: int = Field(gt=0)
+    scope: Literal["compression", "summary_generation", "checkpoint"] = "compression"
+    reason: Literal["threshold", "overflow", "manual", "automatic"] | None = None
+    summary_id: str | None = Field(default=None, max_length=64)
+    first_token_ms: int | None = Field(default=None, ge=0)
+    started_at: int | None = Field(default=None, gt=0)
     ended_at: int | None = Field(default=None, gt=0)
-    duration_ms: int = Field(ge=0)
+    duration_ms: int | None = Field(default=None, ge=0)
     before_tokens: int | None = Field(default=None, ge=0)
     after_tokens: int | None = Field(default=None, ge=0)
     summarized_messages: int | None = Field(default=None, ge=0)
@@ -53,3 +63,15 @@ class ContextCompactionResp(BaseModel):
     history_saved: bool | None = None
     input_tokens: int | None = Field(default=None, ge=0)
     output_tokens: int | None = Field(default=None, ge=0)
+
+
+class ConversationSummaryResp(BaseModel):
+    """按需返回当前有效摘要，空会话或未压缩时 summary_id/content 均为空。"""
+
+    model_config = ConfigDict(extra="ignore")
+    summary_id: str | None = None
+    content: str | None = None
+    created_at: str | None = None
+    status: Literal["persisted", "none"] = "none"
+    history_saved: bool | None = None
+    reason: Literal["manual", "automatic"] | None = None

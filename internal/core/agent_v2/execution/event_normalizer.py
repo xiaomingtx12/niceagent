@@ -4,12 +4,13 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from langchain_core.language_models._compat_bridge import message_to_events
-from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage, ToolMessage
 from langgraph.stream import ProtocolEvent
 
 from ..entity.agent_event import AgentEvent
 from ..entity.stream_event import CORE_EVENT_CHANNELS, EventChannel
 from .json_serialization import to_json_value
+from .model_input import public_input_message
 
 class AgentEventNormalizer:
     """单次执行的协议适配器，只保存交付序号，不缓存正文或推断消息终态。"""
@@ -41,6 +42,15 @@ class AgentEventNormalizer:
             namespace = tuple(data.get("namespace") or ())
         return [self._emit(channel, data, namespace=namespace, timestamp=timestamp)]
 
+    def committed_summary(self, summary: Mapping[str, Any]) -> AgentEvent:
+        """只有执行器确认 checkpoint 已提交后调用；沿用本流的交付序号。"""
+        return self._emit(EventChannel.CUSTOM, {
+            "type": "context_compaction", "scope": "checkpoint", "phase": "completed",
+            "compaction_id": summary["summary_id"], "summary_id": summary["summary_id"],
+            "reason": summary["reason"], "history_saved": summary["history_saved"],
+            "started_at": None, "ended_at": None, "duration_ms": None,
+        }, namespace=(), timestamp=None)
+
     def _normalize_messages(
         self, data: tuple[Any, Mapping[str, Any]], *, namespace: tuple[str, ...], timestamp: Any,
     ) -> list[AgentEvent]:
@@ -54,6 +64,11 @@ class AgentEventNormalizer:
             message_events = [payload]
         elif isinstance(payload, BaseMessage) and not isinstance(payload, (AIMessageChunk, ToolMessage)):
             # 按当前 SDK 规则转换节点、缓存返回的完整消息；chunk 和工具消息不重复回放。
+            if isinstance(payload, HumanMessage):
+                payload = payload.model_copy(update=public_input_message({
+                    "type": "human", "content": payload.content,
+                    "additional_kwargs": payload.additional_kwargs,
+                }))
             message_events = message_to_events(payload, message_id=payload.id)
         else:
             return []

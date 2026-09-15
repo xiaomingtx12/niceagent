@@ -11,6 +11,8 @@ def build_filesystem_permissions(
 ) -> list[FilesystemPermission]:
     """构建所有运行模式共用的文件工具权限。"""
     permissions = [
+        FilesystemPermission(operations=["write"], paths=["/conversation_history", "/conversation_history/**", "/large_tool_results", "/large_tool_results/**"], mode="deny"),
+        FilesystemPermission(operations=["read"], paths=["/conversation_history", "/conversation_history/**", "/large_tool_results", "/large_tool_results/**"], mode="allow"),
         FilesystemPermission(
             operations=["write"],
             paths=[

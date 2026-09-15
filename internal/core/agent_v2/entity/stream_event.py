@@ -61,6 +61,7 @@ class CustomEventType(StrEnum):
     CONTEXT_WINDOW = "context_window"
     CONTEXT_COMPACTION = "context_compaction"
     MODEL_PROGRESS = "model_progress"
+    MEMORY_FILE_UPDATE = "memory_file_update"
 
 
 class ModelProgressPhase(StrEnum):

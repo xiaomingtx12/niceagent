@@ -254,6 +254,9 @@ def close_postgres_saver() -> None:
 
 def delete_agent_checkpoint(conversation_id: str) -> None:
     """删除会话的全部 checkpoint；禁用持久化时无需清理。"""
+    from internal.core.agent_v2.backends.conversation_history import delete_conversation_history
+    from internal.core.agent_v2.persistence.langgraph_store_provider import get_configured_store
+    delete_conversation_history(get_configured_store(), conversation_id)
     checkpointer = get_configured_checkpointer()
     if checkpointer is False:
         return

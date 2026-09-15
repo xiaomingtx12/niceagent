@@ -100,6 +100,14 @@ def respond_model_settings(query_service: AgentExecutionQuery, caller: AgentExec
     return json_response(result.model_dump(mode="json"))
 
 
+def respond_summary(query_service: AgentExecutionQuery, caller: AgentExecutionCaller) -> Response:
+    """使用与 state 相同的授权结果；摘要正文不进入 state、snapshot 或 SSE。"""
+    result = query_service.get_summary(conversation_id=caller.conversation_id)
+    response = json_response(result.model_dump(mode="json"))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def respond_cancel(service: AgentExecutionService, caller: AgentExecutionCaller, run_id: UUID) -> Response:
     """取消指定 Run 并返回真实状态；等待表单的任务会被直接取消。"""
     result = service.cancel_run(
@@ -115,5 +123,6 @@ __all__ = [
     "respond_command",
     "respond_model_settings",
     "respond_state",
+    "respond_summary",
     "respond_stream",
 ]

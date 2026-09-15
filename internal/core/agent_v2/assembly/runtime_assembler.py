@@ -8,11 +8,11 @@ from dataclasses import dataclass
 
 from deepagents.backends import CompositeBackend, StateBackend
 from deepagents.backends.protocol import BackendProtocol
+from internal.core.agent_v2.backends.conversation_history import ConversationHistoryBackend, history_namespace
 from langgraph.store.base import BaseStore
 
 from config.config import Config
 from internal.core.agent_v2.backends.memory.agent_memory_backend import AgentMemoryBackend, memory_namespace_from_runtime
-from internal.core.agent_v2.entity.agent_memory import AGENT_MEMORY_INDEX
 from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources, close_runtime_backends
 from internal.core.agent_v2.assembly.context.sandbox_context import (
     build_filesystem_permissions,
@@ -100,10 +100,19 @@ class AgentRuntimeAssembler:
                 subagents=definition.subagents,
             )
             # Memory 没有投影资源，仅在启用时获取共享 Store 并直接建立路由。
-            store: BaseStore | None = None
+            store: BaseStore | None = get_configured_store()
             memory_routes: dict[str, BackendProtocol] = {}
+            if store is None:
+                raise RuntimeError("会话历史归档需要配置 Agent Store")
+            history_routes = {
+                "/conversation_history/": ConversationHistoryBackend(
+                    store=store, namespace=lambda rt: (*history_namespace(rt), "history"), file_format="v2",
+                ),
+                "/large_tool_results/": ConversationHistoryBackend(
+                    store=store, namespace=lambda rt: (*history_namespace(rt), "tool-results"), file_format="v2",
+                ),
+            }
             if context.memory_enabled:
-                store = get_configured_store()
                 if store is None:
                     raise RuntimeError("长期记忆 Store 未配置，Agent 运行时拒绝在无记忆模式下启动")
                 memory_routes["/memories/"] = AgentMemoryBackend(
@@ -128,15 +137,15 @@ class AgentRuntimeAssembler:
             if sandbox is None:
                 backend = CompositeBackend(
                     default=StateBackend(),
-                    routes={"/workspace/": workspace.backend, **skills.routes, **memory_routes},
-                    artifacts_root="/workspace",
+                    routes={"/workspace/": workspace.backend, **skills.routes, **memory_routes, **history_routes},
+                    artifacts_root="/",
                 )
             else:
                 # DeepAgents 0.6 的执行权限编译要求显式根路由；较长 Skill/Memory 前缀优先。
                 backend = CompositeBackend(
                     default=sandbox,
-                    routes={**skills.routes, **memory_routes, "/": sandbox},
-                    artifacts_root="/workspace",
+                    routes={**skills.routes, **memory_routes, **history_routes, "/": sandbox},
+                    artifacts_root="/",
                 )
             # 临时文件和存储会话分别由资源对象释放，Backend 不持有业务 Session。
             owned_backends = [backend]
@@ -152,7 +161,6 @@ class AgentRuntimeAssembler:
                 ),
                 permissions=build_filesystem_permissions(memory_enabled=context.memory_enabled),
                 skill_projection=skills,
-                memory_sources=[AGENT_MEMORY_INDEX] if context.memory_enabled else [],
                 store=store,
                 runtime_context=context,
             )

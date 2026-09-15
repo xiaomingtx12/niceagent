@@ -17,7 +17,7 @@ class ReloadingSkillsMiddleware(SkillsMiddleware):
         fresh_state = dict(state)
         fresh_state.pop("skills_metadata", None)
         fresh_state.pop("skills_load_errors", None)
-        return {"skills_load_errors": [], **(super().before_agent(fresh_state, runtime, config) or {})}
+        return _ordered_update(super().before_agent(fresh_state, runtime, config) or {})
 
     async def abefore_agent(
         self, state: SkillsState, runtime: Runtime[Any], config: RunnableConfig
@@ -26,4 +26,15 @@ class ReloadingSkillsMiddleware(SkillsMiddleware):
         fresh_state = dict(state)
         fresh_state.pop("skills_metadata", None)
         fresh_state.pop("skills_load_errors", None)
-        return {"skills_load_errors": [], **(await super().abefore_agent(fresh_state, runtime, config) or {})}
+        return _ordered_update(await super().abefore_agent(fresh_state, runtime, config) or {})
+
+
+def _ordered_update(update: SkillsStateUpdate) -> SkillsStateUpdate:
+    """目录按名称和路径稳定排列，文件枚举顺序不应改变同一授权集合的提示词。"""
+    return {
+        **update,
+        "skills_load_errors": sorted(update.get("skills_load_errors", [])),
+        "skills_metadata": sorted(
+            update.get("skills_metadata", []), key=lambda skill: (skill["name"], skill["path"]),
+        ),
+    }

@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from copy import deepcopy
 from typing import Any
 
+from internal.core.agent_v2.execution.model_input import public_input_message
+
 _PUBLIC_STATE_KEYS = ("todos", "files", "async_tasks", "pending_inputs", "input_history")
 
 
@@ -26,6 +28,7 @@ def adapt_graph_state(value: Mapping[str, Any]) -> dict[str, Any]:
             # 用户消息开始新回合，同时重置回答位置，避免跨回合合并。
             role = message.get("type") or message.get("role")
             if role in {"human", "user"}:
+                message = public_input_message(message)
                 extra = message.get("additional_kwargs") or {}
                 business_message_id = extra.get("business_message_id")
                 turn_run_id = extra.get("run_id")

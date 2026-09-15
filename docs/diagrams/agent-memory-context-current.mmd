@@ -1,0 +1,26 @@
+flowchart TD
+    U["用户对话与记忆编辑"] --> G["Agent 图：create_deep_agent"]
+    U --> H["记忆管理 Handler 与 Service"]
+    P["构图阶段：平台固定规则与框架说明"] --> Q["模型请求"]
+    I["新输入：本轮选项与用户内容"] --> G
+    M["AgentMemoryMiddleware：删除工具"]
+    G --> Q
+    Q --> D{"任务是否需要历史记忆"}
+    D -->|需要| F["原生文件工具：按需定位和读取"]
+    D -->|不需要| A["直接处理当前任务"]
+    F --> C["CompositeBackend：/memories/ 路由"]
+    C --> B["AgentMemoryBackend"]
+    H --> R["AgentMemoryRepository"]
+    B --> S["LangGraph Store：记忆文件"]
+    R --> S
+    F --> T["工具结果进入会话消息"]
+    T --> Q
+    G --> K["原生自动压缩 / 主动 compact_conversation"]
+    K --> AR["归档 Store：会话与子图隔离，只读回查"]
+    K --> CP["Checkpoint：保存有效摘要"]
+    CP --> UI["片段结束确认 / 按需 GET summary"]
+    K --> Q
+    B --> E["实际变更提交后发布事件"]
+    M -->|删除工具| R
+    M -->|删除成功| E
+    E --> W["工作台更新通知"]

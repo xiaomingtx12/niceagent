@@ -7,6 +7,10 @@ from typing import cast
 from deepagents import create_deep_agent
 from deepagents.middleware.async_subagents import AsyncSubAgent
 from deepagents.middleware.subagents import GENERAL_PURPOSE_SUBAGENT, SubAgent
+from deepagents.middleware.summarization import SUMMARIZATION_SYSTEM_PROMPT
+from internal.core.agent_v2.assembly.configuration.context_budget import with_context_budget
+from internal.core.agent_v2.middleware.conversation_compaction import ConversationCompactionMiddleware
+from internal.core.agent_v2.middleware.context_window_middleware import ContextWindowMiddleware
 from langgraph.graph.state import CompiledStateGraph
 
 from internal.core.agent_v2.assembly.configuration.agent_system_prompt import (
@@ -34,16 +38,12 @@ def build_deep_agent(
     """把已校验的应用配置和已解析依赖编译成 Deep Agents 图。"""
     # 1.在 Core 内生成提示词和已授权工具，隔离调用方与图装配细节。
     agent_tools = validate_agent_tools(definition.tools)
+    model = with_context_budget(definition.model)
     # 显式交付与普通文件操作分离，工具成功回执意味着文件已经保存到持久化来源。
     agent_tools.extend(runtime.file_delivery.tools())
-    system_prompt = build_app_system_prompt(
-        app_name=definition.name,
-        app_description=definition.description,
-        preset_prompt=definition.preset_prompt,
-        memory_enabled=runtime.runtime_context.memory_enabled,
-        user_input_enabled=bool(runtime.runtime_context.user_input_enabled and runtime.checkpointer),
-    )
     middleware = build_platform_middleware(runtime=runtime)
+    if runtime.checkpointer:
+        middleware.append(ConversationCompactionMiddleware(model, runtime.backend))
 
     # 2.将已授权的同步、异步 SubAgent 配置转换为原生规格。
     # 持久化记录仅作业务适配，其余运行时能力由 DeepAgents 负责。
@@ -54,8 +54,24 @@ def build_deep_agent(
     # 异步规格交给平台扩展中间件，避免 create_deep_agent 再注册一套同名工具。
     async_specs = [cast(AsyncSubAgent, spec) for spec in subagent_specs if "graph_id" in spec]
     sync_specs = [cast(SubAgent, spec) for spec in subagent_specs if "graph_id" not in spec]
+    async_task_instructions = ""
     if async_specs:
-        middleware.insert(0, NamedAsyncSubAgentMiddleware(async_subagents=async_specs))
+        async_middleware = NamedAsyncSubAgentMiddleware(async_subagents=async_specs)
+        # 原生说明只生成一次，提前纳入 system 供压缩计数；不再由包装器重复追加。
+        async_task_instructions = async_middleware.system_prompt or ""
+        async_middleware.system_prompt = None
+        middleware.insert(0, async_middleware)
+
+    system_prompt = build_app_system_prompt(
+        app_name=definition.name,
+        app_description=definition.description,
+        preset_prompt=definition.preset_prompt,
+        memory_enabled=runtime.runtime_context.memory_enabled,
+        async_task_instructions=async_task_instructions,
+        compaction_instructions=SUMMARIZATION_SYSTEM_PROMPT if runtime.checkpointer else "",
+        execution_uses_virtual_paths=runtime.execution_uses_virtual_paths,
+        user_input_enabled=bool(runtime.runtime_context.user_input_enabled and runtime.checkpointer),
+    )
 
     # 框架默认通用子 Agent 不继承主 Agent 中间件，却会继承父工具（含 execute）；
     # 这里统一显式声明，按平台策略在执行入口关闭子 Agent 的共享 Shell。
@@ -63,22 +79,18 @@ def build_deep_agent(
         sync_specs.insert(0, {
             **GENERAL_PURPOSE_SUBAGENT,
             "skills": list(runtime.skill_projection.sources),
-            "middleware": [ShellExecutionMiddleware(
-                allow_execution=False,
-                virtual_paths=runtime.execution_uses_virtual_paths,
-            )],
+            "middleware": [ShellExecutionMiddleware(), ContextWindowMiddleware()],
         })
 
     # 3.把模型、工具、权限、持久化和上下文边界编译成运行图。
     return create_deep_agent(
-        model=definition.model,
+        model=model,
         tools=agent_tools,
         system_prompt=system_prompt,
         middleware=middleware,
         subagents=sync_specs,
         skills=list(runtime.skill_projection.sources) or None,
-        # 记忆由刷新中间件装配，不能同时启用官方默认中间件，
-        # 否则会在同一请求链中重复注入记忆提示词。
+        # 长期记忆通过 Store 文件工具按需读取，不启用自动文件注入。
         memory=None,
         permissions=list(runtime.permissions),
         backend=runtime.backend,

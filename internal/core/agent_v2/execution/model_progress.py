@@ -28,6 +28,7 @@ class _ModelCall:
     started_at: datetime
     started_monotonic: float
     summarization: bool
+    first_token_ms: int | None = None
     publish_lock: RLock = field(default_factory=RLock)
 
 
@@ -67,6 +68,15 @@ class ModelProgressCallback(BaseCallbackHandler):
             public_usage = usage.to_dict() if usage and usage.present else None
             with call.publish_lock:
                 self._publish(str(run_id), call, ModelProgressPhase.COMPLETED, usage=public_usage)
+
+    def on_llm_new_token(self, token: str, *, run_id: UUID, chunk: Any = None, **kwargs: Any) -> None:
+        """仅记录首次非空内容的延迟，不为每个 Token 发送额外事件。"""
+        if not token and not getattr(getattr(chunk, "message", None), "content", None):
+            return
+        with self._lock:
+            call = self._calls.get(str(run_id))
+            if call is not None and call.first_token_ms is None:
+                call.first_token_ms = max(0, int((monotonic() - call.started_monotonic) * 1000))
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         """消费调用状态后发布终态，重复结束不会再次通知。"""
@@ -131,6 +141,7 @@ class ModelProgressCallback(BaseCallbackHandler):
                 else None
             ),
             "duration_ms": max(0, int((monotonic() - call.started_monotonic) * 1000)),
+            "first_token_ms": call.first_token_ms,
         }
         if call.summarization:
             payload.update(type=CustomEventType.CONTEXT_COMPACTION.value, scope="summary_generation", compaction_id=call_id)

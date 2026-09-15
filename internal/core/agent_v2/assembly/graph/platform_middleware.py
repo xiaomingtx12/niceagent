@@ -15,20 +15,16 @@ from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResou
 from internal.core.agent_v2.middleware.context_window_middleware import (
     ContextWindowMiddleware,
 )
-from internal.core.agent_v2.middleware.reloading_memory_middleware import (
-    ReloadingMemoryMiddleware,
+from internal.core.agent_v2.middleware.agent_memory_middleware import (
+    AgentMemoryMiddleware,
 )
 from internal.core.agent_v2.middleware.reloading_skills_middleware import (
     ReloadingSkillsMiddleware,
-)
-from internal.core.agent_v2.middleware.runtime_context_middleware import (
-    RuntimeContextMiddleware,
 )
 from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
 from internal.core.agent_v2.middleware.user_input_middleware import UserInputMiddleware
-from internal.core.agent_v2.middleware.shell_execution_middleware import ShellExecutionMiddleware
 
 _RETRYABLE_MODEL_STATUS_CODES = frozenset({408, 409, 429})
 _RETRYABLE_READ_ONLY_TOOLS = ("ls", "read_file", "glob", "grep")
@@ -41,7 +37,7 @@ def build_platform_middleware(
     runtime: AgentRuntimeResources,
 ) -> list[AgentMiddleware]:
     """按稳定顺序构造 MyDify 扩展的 DeepAgents 中间件。"""
-    # 1.基础设施层：先刷新授权 Skill，再校验工具并注入运行时上下文。
+    # 1.基础设施层：刷新授权 Skill，再校验工具消息。
     middleware: list[AgentMiddleware] = [
         ReloadingSkillsMiddleware(
             backend=runtime.backend,
@@ -49,8 +45,6 @@ def build_platform_middleware(
             system_prompt=None,
         ),
         ToolCallValidationMiddleware(),
-        ShellExecutionMiddleware(virtual_paths=runtime.execution_uses_virtual_paths),
-        RuntimeContextMiddleware(),
         # 2.运行策略层：模型重试、只读工具重试和调用限制保持固定顺序。
         ModelRetryMiddleware(
             max_retries=2,
@@ -74,13 +68,9 @@ def build_platform_middleware(
             exit_behavior="continue",
         ),
     ]
-    # 3.上下文增强层：记忆必须先刷新，窗口观测才能看到实际注入内容。
-    if runtime.memory_sources:
-        middleware.append(
-            ReloadingMemoryMiddleware(
-                backend=runtime.backend, sources=list(runtime.memory_sources)
-            )
-        )
+    # 3.记忆工具与上下文观测；固定记忆规则已在构图时加入 system。
+    if runtime.runtime_context.memory_enabled:
+        middleware.append(AgentMemoryMiddleware())
     middleware.append(ContextWindowMiddleware())
     # 4.交互能力层：只有启用持久化时才允许恢复用户输入状态。
     if runtime.runtime_context.user_input_enabled and runtime.checkpointer:

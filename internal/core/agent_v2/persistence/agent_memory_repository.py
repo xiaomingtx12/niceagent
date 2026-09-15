@@ -20,7 +20,6 @@ from internal.core.agent_v2.entity.agent_memory import (
     validate_agent_memory_scope,
     memory_store_key_to_virtual_path,
     memory_virtual_path_to_store_key,
-    memory_writable_path_to_store_key,
 )
 from .memory_file_transaction import memory_file_transaction
 from internal.core.agent_v2.persistence.langgraph_store_provider import (
@@ -87,11 +86,12 @@ class AgentMemoryRepository:
         original_path: str | None = None,
         expected_sha256: str | None = None,
     ) -> AgentMemoryFile:
-        """新增、覆盖或重命名用户文件，系统索引不能成为源或目标。"""
-        key = memory_writable_path_to_store_key(path)
-        old_key = memory_writable_path_to_store_key(original_path or path)
+        """新增、覆盖或重命名用户文件；并发检查先于无变化判断。"""
+        key = memory_virtual_path_to_store_key(path)
+        old_key = memory_virtual_path_to_store_key(original_path or path)
 
         def operation(base_store: BaseStore) -> AgentMemoryFile:
+            """持锁检查冲突和变化，避免无效保存修改时间或覆盖并发编辑。"""
             with memory_file_transaction(base_store, identity.namespace) as store:
                 existing = store.get(identity.namespace, old_key)
                 self._check_expected(existing, expected_sha256)
@@ -99,6 +99,12 @@ class AgentMemoryRepository:
                     raise AgentMemoryConflict("该分类中已有同名记忆，请换一个名称")
                 if old_key != key and existing is None:
                     raise AgentMemoryConflict("原记忆已被删除，请刷新列表")
+                if (
+                    old_key == key
+                    and existing is not None
+                    and existing.value.get("content") == content
+                ):
+                    return self._item_to_entity(existing)
                 size = validate_agent_memory_content(content)
                 rows = self._search_all(store, identity.namespace)
                 validate_agent_memory_scope(
@@ -140,10 +146,11 @@ class AgentMemoryRepository:
         *,
         expected_sha256: str | None = None,
     ) -> bool:
-        """删除用户文件并返回目标是否存在；系统索引不属于可删除文件。"""
-        key = memory_writable_path_to_store_key(path)
+        """删除成功返回 True，不存在时返回 False；保留可选内容冲突校验。"""
+        key = memory_virtual_path_to_store_key(path)
 
         def operation(base_store: BaseStore) -> bool:
+            """事务提交后返回删除事实，供调用方决定是否通知。"""
             with memory_file_transaction(base_store, identity.namespace) as store:
                 item = store.get(identity.namespace, key)
                 if item is None:
@@ -174,8 +181,9 @@ class AgentMemoryRepository:
                     break
                 offset += _STORE_PAGE_SIZE
             for namespace in namespaces:
-                for item in self._search_all(store, namespace):
-                    store.delete(namespace, item.key)
+                with memory_file_transaction(store, namespace) as transaction:
+                    for item in self._search_all(transaction, namespace):
+                        transaction.delete(namespace, item.key)
 
         self._execute(operation)
 

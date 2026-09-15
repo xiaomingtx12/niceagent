@@ -12,12 +12,14 @@ from internal.core.agent_v2.entity.stream_event import CustomEventType, EventCha
 from internal.schema.agent.agent_protocol_schema import PUBLIC_EVENT_METHODS, AgentProtocolEvent
 from internal.schema.agent.agent_context_schema import ContextCompactionResp, ContextWindowResp
 from internal.schema.agent.agent_model_progress_schema import AgentModelProgressResp
+from internal.schema.agent.agent_memory_schema import AgentMemoryUpdateResp
 from .state_projector import adapt_graph_state
 
 _CUSTOM_SCHEMAS = {
     CustomEventType.CONTEXT_WINDOW: ContextWindowResp,
     CustomEventType.CONTEXT_COMPACTION: ContextCompactionResp,
     CustomEventType.MODEL_PROGRESS: AgentModelProgressResp,
+    CustomEventType.MEMORY_FILE_UPDATE: AgentMemoryUpdateResp,
 }
 
 

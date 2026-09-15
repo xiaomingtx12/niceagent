@@ -8,7 +8,7 @@ from .execution.agent_executor import AgentExecutor
 from .assembly.runtime_assembler import AgentRuntimeAssembler
 
 from .observability.run_observer import PlatformAgentRunObserver
-from .entity.user_input import PendingUserInput, build_confirmed_input_context
+from .entity.user_input import PendingUserInput
 from .entity.workspace_quota import AgentWorkspaceLimits
 from .middleware.tool_call_validation_middleware import AgentMessageError
 from .persistence.postgres_connection import AGENT_PERSISTENCE_ERRORS
@@ -27,7 +27,6 @@ __all__ = [
     "AgentRuntimeAssembler",
     "PlatformAgentRunObserver",
     "PendingUserInput",
-    "build_confirmed_input_context",
     "AgentWorkspaceLimits",
     "AgentMessageError",
     "AGENT_PERSISTENCE_ERRORS",

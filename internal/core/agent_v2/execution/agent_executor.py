@@ -21,6 +21,8 @@ from internal.core.agent_v2.execution.json_serialization import to_json_value
 from internal.core.agent_v2.execution.message_text import extract_final_answer
 from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources
 from internal.core.agent_v2.execution.model_progress import ModelProgressCallback
+from internal.core.agent_v2.execution.model_input import build_model_input
+from internal.core.agent_v2.persistence.conversation_summary import read_conversation_summary
 from internal.core.agent_v2.execution.user_input_interrupt_tracker import UserInputInterruptTracker
 from internal.core.agent_v2.observability.run_observer import PlatformAgentRunObserver
 from internal.extension.logging_extension import logger
@@ -153,7 +155,17 @@ class AgentExecutor:
         normalizer = AgentEventNormalizer()
         model_progress = ModelProgressCallback()
         interrupt_tracker = UserInputInterruptTracker()
+        previous_summary = None
+        summary_observation_ready = False
         try:
+            # 每片段只在首尾读取；不在每个 Token 或模型循环查询 checkpoint。
+            try:
+                previous_summary = read_conversation_summary(
+                    self._resources.checkpointer, self._resources.runtime_context.conversation_id,
+                )
+                summary_observation_ready = True
+            except Exception:
+                logger.exception("读取执行前摘要状态失败，跳过本片段完成通知")
             # 1.每次执行独立绑定统计、中断和进度回调，避免跨片段保留模型调用状态。
             config = merge_configs(
                 self._resources.runtime_context.conversation.to_config(),
@@ -164,8 +176,15 @@ class AgentExecutor:
             )
             # 2.新消息走普通输入：LangGraph 丢弃旧调度，DeepAgents 补齐被取消的工具回执。
             # 只有已接受的表单提交才走 resume；不能将停止后的下一轮当成旧中断恢复。
+            if resume is not None:
+                graph_input = Command(resume=dict(resume))
+            else:
+                assert message is not None
+                graph_input = {"messages": [build_model_input(
+                    message, planning_enabled=self._resources.runtime_context.planning_enabled,
+                )]}
             with self._graph.stream_events(
-                Command(resume=dict(resume)) if resume is not None else {"messages": [message]},
+                graph_input,
                 config=config, context=self._resources.runtime_context,
                 version="v3", control=control,
             ) as stream:
@@ -204,6 +223,21 @@ class AgentExecutor:
         except Exception as exc:
             error = exc
         finally:
+            if summary_observation_ready and on_event is not None:
+                try:
+                    summary = read_conversation_summary(
+                        self._resources.checkpointer, self._resources.runtime_context.conversation_id,
+                    )
+                except Exception:
+                    logger.exception("确认已提交摘要失败，未发布压缩完成通知")
+                else:
+                    if summary and summary["summary_id"] != (previous_summary or {}).get("summary_id"):
+                        try:
+                            on_event(normalizer.committed_summary(summary))
+                        except Exception as exc:
+                            logger.exception("压缩完成事件交付失败")
+                            if error is None:
+                                error = exc
             # 6.无论完成、暂停还是失败，都释放回调持有的子图 writer。
             try:
                 model_progress.close()

@@ -52,3 +52,9 @@ graph.stream_events(version="v3")            框架原始流（GraphRunStream，
 - 正文提取复用 `message_text`，出口序列化复用 `json_serialization.to_json_value`；模型响应拆包只供 `ContextWindowMiddleware` 内部读取用量。
 - v3 流式协议仍是 beta：框架升级若改变消息载荷形态（例如 chunk 重新出现），先查 `event_normalizer` 的消息分支与 `langgraph.pregel._messages` 的 handler 选择逻辑，不要直接加兜底代码。
 - 框架消息的摘要调用带 `lc_source=summarization` 元数据，`_normalize_messages` 依赖它过滤内部压缩正文，删除该过滤会让摘要泄漏为用户回答。
+
+## 模型输入与公开消息
+
+`model_input.py` 在新输入副本中加入一次本轮规划模式，原始 ID、用户正文和媒体保留；不将动态选项追加到 system。AgentExecutor 的恢复分支只使用 Command(resume)，不会再插入该输入。模型循环与压缩使用已有消息历史。
+
+内部 `platform_input_options` 标记记录选项与原正文形态。完整消息事件转换和 Service 的图状态投影共用 public_input_message，只有标记和首块一致时才移除内部块，不解析或删除用户正文中的同名标签。公开气泡显示原文，模型 checkpoint 保留内部任务选项。

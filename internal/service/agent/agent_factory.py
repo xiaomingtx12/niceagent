@@ -12,7 +12,6 @@ from injector import inject
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage
 from langchain_core.tools import BaseTool
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from config.config import Config
@@ -27,7 +26,6 @@ from internal.core.agent_v2 import (
     SyncSubAgentDefinition,
     PlatformAgentRunObserver,
     AgentWorkspaceLimits,
-    build_confirmed_input_context,
 )
 from internal.core.language_model.entities.model_entity import (
     BaseLanguageModel,
@@ -48,7 +46,7 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.extension.logging_extension import logger
-from internal.model import Account, AgentExecution, App
+from internal.model import Account, App
 from internal.repository import WorkspaceFileRepository, WorkspaceFileStore
 from internal.repository.agent_workspace_store import AgentWorkspaceStore
 from internal.core.agent_v2.persistence.workspace_store import WorkspaceDeliveryError
@@ -244,7 +242,6 @@ class AgentFactory:
             memory_enabled=app_config.long_term_memory.enable,
             planning_enabled=req.planning_enabled,
             user_input_enabled=req.user_input_enabled and app_config.user_input.enable,
-            confirmed_user_inputs=self._load_confirmed_inputs(req),
         )
         skills = self.skill_service.resolve_enabled_skills(app_config.skills)
         agent_config = AgentConfig(
@@ -265,24 +262,6 @@ class AgentFactory:
             subagents=tuple(subagents),
         )
         return agent_config, context
-
-    def _load_confirmed_inputs(self, req: AgentInvocation) -> str:
-        """只读取同一授权会话入口的近期答案，不从客户端接收也不写长期记忆。"""
-        rows = (
-            self.db.session.query(AgentExecution.input_history)
-            .filter(
-                AgentExecution.conversation_id == req.conversation_id,
-                AgentExecution.app_id == req.app_id,
-                AgentExecution.invoke_from == req.invoke_from.value,
-                func.jsonb_array_length(AgentExecution.input_history) > 0,
-            )
-            .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
-            .limit(8)
-            .all()
-        )
-        return build_confirmed_input_context(
-            [history for (history,) in rows if isinstance(history, list)]
-        )
 
     def _build_configured_tools(
         self,

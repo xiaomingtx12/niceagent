@@ -14,6 +14,7 @@ from internal.handler.agent.entry_adapter import (
     respond_command,
     respond_model_settings,
     respond_state,
+    respond_summary,
     respond_stream,
 )
 from internal.service import AgentExecutionService, AppService
@@ -48,6 +49,11 @@ class DebugAgentHandler:
     def model_settings(self, app_id: UUID, conversation_id: UUID) -> Response:
         """模型选项使用当前账号和实际创建者身份判断可见范围。"""
         return respond_model_settings(self.query_service, self._caller(app_id, conversation_id))
+
+    @login_required
+    def summary(self, app_id: UUID, conversation_id: UUID) -> Response:
+        """按需读取已授权会话当前根图的有效摘要。"""
+        return respond_summary(self.query_service, self._caller(app_id, conversation_id))
 
     @login_required
     def cancel_run(self, app_id: UUID, conversation_id: UUID, run_id: UUID) -> Response:

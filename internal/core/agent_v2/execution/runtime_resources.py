@@ -31,7 +31,6 @@ class AgentRuntimeResources:
     file_delivery: WorkspaceDelivery
     skill_projection: SkillProjection
     permissions: list[FilesystemPermission]
-    memory_sources: list[str]
     runtime_context: AgentRunContext
     store: BaseStore | None = None
     _close_attempted: bool = field(default=False, init=False, repr=False, compare=False)

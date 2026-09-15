@@ -1,5 +1,7 @@
 # Agent 流式输出代码阅读指南
 
+上下文压缩新增阅读路径：`conversation_compaction.py`（主动工具）→ `conversation_history.py`（受控归档）→ `conversation_summary.py`（根图已提交状态）→ `AgentExecutor` 片段首尾确认 → `AgentEventNormalizer.committed_summary` → 原有 custom 投影。摘要模型结束仍由 `model_progress.py` 单独观察，两种事实不混用。前端 `ContextWindowInspector.vue` 按需调用会话 `/summary`，正文不参与 Token 流式更新。
+
 沿着“一次回答如何产生、显示、保存、恢复”阅读。先掌握主流程，再读取消、表单和异常分支。
 
 整套代码主要处理三件事：
@@ -199,6 +201,24 @@ emit(event)
 4. [AgentExecutionQuery](../internal/service/agent/agent_execution_query.py) 的 `get_run_statuses` 只读摘要列，`get_run_result` 读取已保存回答；两者只返回当前账号拥有且未删除会话中的 Run，不扫描事件表。
 
 父图里的任务记录用来发现任务，不作为界面的实时状态来源。这里不自动唤醒父 Agent；模型再次查询任务仍使用自己的工具。
+
+### 6.6 按需记忆与更新展示
+
+[AgentMemoryMiddleware](../internal/core/agent_v2/middleware/agent_memory_middleware.py) 仅提供 delete_memory_file 工具，不加载记忆；固定使用规则由构图阶段加入系统提示。构图时 memory=None，原生文件工具仍通过 CompositeBackend 的 /memories/ 路由访问 [AgentMemoryBackend](../internal/core/agent_v2/backends/memory/agent_memory_backend.py)。从 ls/glob/grep 定位文件，再由 read_file 按需读取；已知路径可直接读取。没有自动目录、偏好注入或版本查询。
+
+Backend 的实际写入、编辑或上传提交后，由 [publish_memory_update](../internal/core/agent_v2/execution/memory_updates.py) 发布 custom 事件；删除工具收到 Repository 的删除成功结果后发布同类事件。无变化编辑、相同内容上传、失败写入和删除不存在文件不发成功通知。管理页面通过 HTTP 响应确认，内容相同且未重命名时不更新时间。配额、事务锁与 expected_sha256 并发保护保留。
+
+[AgentProtocolEventProjector](../internal/service/agent_protocol/event_projector.py) 用 [AgentMemoryUpdateResp](../internal/schema/agent/agent_memory_schema.py) 校验 type/path/action，身份沿用外层协议 event_id。前端 RunExecutionProjector 投影为 memory 记录，[MemoryUpdateNotice](../../my-dify-ui/src/components/MemoryUpdateNotice.vue) 按文件合并通知并提供内容入口，面板按新事件合并刷新。工具调用仍留在执行过程，不重复展示通知行，也不解析工具返回的自然语言。
+
+其他会话的变更在下一次实际读取文件时可见，打开的面板另有低频补查；这两者都不代表模型每次调用前同步更新。已读取的旧工具消息和摘要可能仍在上下文，删除文件不等于擦除这些历史材料。
+
+### 6.7 本轮规划选项与公开消息
+
+[model_input.py](../internal/core/agent_v2/execution/model_input.py) 是模型输入与公开用户消息的区别所在。AgentExecutor 仅在新输入时调用 build_model_input，复制 HumanMessage 并加一个自动/显式规划选项块，保留 ID、正文和媒体。恢复时只传 Command(resume)，不再次追加。
+
+[AgentEventNormalizer](../internal/core/agent_v2/execution/event_normalizer.py) 在完整用户消息转换成协议事件前移除内部块；[state_projector.py](../internal/service/agent_protocol/state_projector.py) 在状态投影时做相同处理。两处共用 public_input_message，检查服务端标记与首块一致，不按用户正文做字符串替换。checkpoint 留模型输入，公开消息留用户原文。
+
+固定规则统一在 agent_system_prompt.py 装配。原生异步工具说明提前进入 system，原生 TodoList 等中间件继续负责各自工具语义。ask_user 的答案已经随工具返回进入历史，原先每次调用前查询和拼接全部近期答案的 RuntimeContextMiddleware 已删除。
 
 ## 7. 第二遍再读分支
 

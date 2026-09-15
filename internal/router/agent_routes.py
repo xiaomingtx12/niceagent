@@ -16,6 +16,7 @@ from internal.handler import (
 def register_debug_agent_routes(blueprint: Blueprint, handler: DebugAgentHandler) -> None:
     """注册应用调试入口，保留原 URL 和 Flask endpoint。"""
     prefix = "/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(f"{prefix}/summary", methods=["GET"], endpoint="debug_summary", view_func=handler.summary)
     blueprint.add_url_rule(
         f"{prefix}/commands", methods=["POST"],
         endpoint="debug_command", view_func=handler.command,
@@ -41,6 +42,7 @@ def register_debug_agent_routes(blueprint: Blueprint, handler: DebugAgentHandler
 def register_web_app_agent_routes(blueprint: Blueprint, handler: WebAppAgentHandler) -> None:
     """注册发布态 WebApp 入口，保留原 URL 和 Flask endpoint。"""
     prefix = "/web-apps/<string:token>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(f"{prefix}/summary", methods=["GET"], endpoint="web_app_summary", view_func=handler.summary)
     blueprint.add_url_rule(
         f"{prefix}/commands", methods=["POST"],
         endpoint="web_app_command", view_func=handler.command,
@@ -66,6 +68,7 @@ def register_web_app_agent_routes(blueprint: Blueprint, handler: WebAppAgentHand
 def register_creator_task_agent_routes(blueprint: Blueprint, handler: CreatorTaskAgentHandler) -> None:
     """注册 Creator 任务中心入口，保留原 URL 和 Flask endpoint。"""
     prefix = "/tasks/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(f"{prefix}/summary", methods=["GET"], endpoint="creator_task_summary", view_func=handler.summary)
     blueprint.add_url_rule(
         f"{prefix}/commands", methods=["POST"],
         endpoint="creator_task_command", view_func=handler.command,
@@ -120,6 +123,7 @@ def register_assistant_agent_protocol_routes(
         view_func=handler.create_conversation,
     )
     prefix = "/assistant-agent/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(f"{prefix}/summary", methods=["GET"], endpoint="assistant_agent_summary", view_func=handler.summary)
     blueprint.add_url_rule(
         f"{prefix}/model-settings", methods=["GET"],
         endpoint="assistant_agent_model_settings", view_func=handler.model_settings,
@@ -145,6 +149,7 @@ def register_openapi_agent_protocol_routes(
 ) -> None:
     """注册服务 API 的 Agent Protocol 路由。"""
     prefix = "/openapi/apps/<uuid:app_id>/conversations/<uuid:conversation_id>"
+    blueprint.add_url_rule(f"{prefix}/summary", methods=["GET"], endpoint="openapi_agent_summary", view_func=handler.summary)
     blueprint.add_url_rule(
         f"{prefix}/model-settings", methods=["GET"],
         endpoint="openapi_agent_model_settings", view_func=handler.model_settings,

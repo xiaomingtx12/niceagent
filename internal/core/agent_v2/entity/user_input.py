@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, model_validator
@@ -151,40 +150,3 @@ class PendingUserInput(BaseModel):
     interrupt_id: str = Field(min_length=1, max_length=255)
     namespace: list[str] = Field(default_factory=list)
     payload: UserInputForm
-
-
-def build_confirmed_input_context(histories: list[list[dict[str, Any]]]) -> str:
-    """优先保留最近确认记录，按完整字段限制上下文长度，不截断或改写用户答案。"""
-    records: list[str] = []
-    remaining = 11500
-    omitted = 0
-    for history in histories:  # Run 从新到旧提供，表单内部按提交顺序存储。
-        for item in reversed(history):
-            try:
-                form = UserInputForm.model_validate(item["payload"])
-                answers = form.validate_answers(item["answers"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            for field in reversed(form.fields):
-                if field.name not in answers:
-                    continue
-                answer = answers[field.name]
-                selected = answer if isinstance(answer, list) else (
-                    answer.get("selected", []) if isinstance(answer, dict) else [answer]
-                )
-                labels = {
-                    option.value: option.label for option in field.options
-                    if isinstance(option, UserInputOption) and option.value in selected
-                }
-                record = json.dumps({
-                    "form": form.title, "question": field.label, "field": field.name,
-                    "answer": answer, **({"option_labels": labels} if labels else {}),
-                }, ensure_ascii=False, separators=(",", ":"))
-                if len(record) + 2 > remaining or len(records) >= 48:
-                    omitted += 1
-                    continue
-                records.append(record)
-                remaining -= len(record) + 2
-    if not records:
-        return ""
-    return '{"confirmed_answers":[' + ",".join(reversed(records)) + '],"omitted_fields":' + str(omitted) + '}'

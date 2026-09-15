@@ -19,7 +19,9 @@ Core 接收平台已解析的模型、工具和 Skill，通过 DeepAgents 构图
 | Skill 路由和长期记忆路由 | `assembly/context/skill_context.py`、`assembly/runtime_assembler.py` |
 | 文件记忆存取与并发校验 | `persistence/agent_memory_repository.py` |
 | 文件记忆工具适配与配额事务 | `backends/memory/agent_memory_backend.py` |
-| 记忆目录排版与提示词字节预算 | `backends/memory/memory_index.py` |
+| 固定业务、规划与记忆提示词 | `assembly/configuration/agent_system_prompt.py` |
+| 新输入的规划选项与公开用户原文 | `execution/model_input.py` |
+| 记忆删除工具 | `middleware/agent_memory_middleware.py` |
 | 用户提问工具装配与暂停识别 | `middleware/user_input_middleware.py`、`execution/user_input_interrupt_tracker.py` |
 | 模型请求与摘要生成进度通知 | `execution/model_progress.py` |
 | 框架 Checkpoint 与 Store | `persistence/` |
@@ -67,17 +69,17 @@ Core 的 `PendingUserInput` 验证表单字段与答案。平台的 `AgentRunInt
 
 输出审核由图中间件保护状态写入，`AgentEventDelivery` 保护事件公开，两处检查职责不同。开启审核时仍需缓存整轮原生事件；失败和取消立即丢弃缓存；通过审核的事件在 Core 出口转换为 JSON 兼容数据。
 
-长期记忆统一使用 `/memories/` 下的分类 Markdown 文件，StoreBackend 按账号与应用隔离存储。`ReloadingMemoryMiddleware` 每次模型请求刷新只读目录 `.index.md`，文件增改复用原生工具，删除使用 `delete_memory_file`。文件仓储负责存取、容量限制和内容摘要并发校验；列表查询只读，不做旧目录导入，也不维护结构化条目、修订历史或导入标记。
+长期记忆统一使用 `/memories/` 下的分类 Markdown 文件，StoreBackend 按账号与应用隔离存储。`AgentMemoryMiddleware` 只提供删除工具，固定规则在构图时装配，模型调用准备不读取 Store；模型按需使用原生 ls、glob、grep、read_file。文件增改复用原生工具，删除使用 delete_memory_file；没有自动目录、偏好注入和目录版本缓存。
 
-目录排版由 `render_memory_index` 消费文件快照，不访问 Store；目录与偏好正文的 UTF-8 字节预算在该函数所在模块维护。HTTP 管理接口与模型工具共用领域层的可写路径规则，新建、覆盖、重命名源/目标和删除都禁止修改系统索引。模型编辑在同一事务内读取、替换、校验和写回，文件格式转换与时间戳更新复用框架实现。
+文件仓储与 Backend 共用路径、容量及事务规则，管理接口保留内容摘要并发校验。编辑、上传或页面保存遇到相同路径与正文时不更新文件和时间，不发变更通知。模型编辑仍在同一事务内读取、替换、校验和写回。实际变更提交后发布 memory_file_update，身份沿用协议事件标识。其他会话修改在下一次实际读取时可见，既有工具消息不会自动替换。
 
 ## 中间件顺序与职责
 
-`platform_middleware.py` 是平台策略的装配入口。平台链顺序固定为：Skill 授权刷新 → 工具消息校验 → Runtime Context → Review → 模型重试 → 只读工具重试 → 模型调用限制 → 工具调用限制 → 可选 Memory 刷新 → Context Window → 可选 User Input。调整分组不代表可以重排执行顺序。
+`platform_middleware.py` 是平台策略的装配入口。平台链顺序固定为：可选异步工具 → Skill 授权刷新 → 工具消息校验 → 模型重试 → 只读工具重试 → 模型调用限制 → 工具调用限制 → 可选记忆删除工具 → Context Window → 可选 User Input。调整分组不代表可以重排执行顺序。
 
-DeepAgents 在平台链之前提供 Todo、Skills、Filesystem、SubAgent、摘要和工具调用补齐，尾部保留框架缓存及按权限生成的人工审批。平台 `ReloadingSkillsMiddleware(system_prompt=None)` 只刷新本轮授权元数据，官方 Skills 负责提示词，不重复注入；`memory=None` 则避免默认 Memory 与平台刷新逻辑重复。工具调用补齐负责中断后的消息配对，平台校验负责拒绝无效工具调用，不能互相替代。
+DeepAgents 在平台链之前提供 Todo、Skills、Filesystem、SubAgent、摘要和工具调用补齐，尾部保留框架缓存及按权限生成的人工审批。平台 `ReloadingSkillsMiddleware(system_prompt=None)` 只刷新本轮授权元数据，官方 Skills 负责提示词，不重复注入；`memory=None` 则明确关闭自动记忆加载，保留按需文件工具。工具调用补齐负责中断后的消息配对，平台校验负责拒绝无效工具调用，不能互相替代。
 
-`ContextWindowMiddleware` 观测当前模型请求，不负责摘要压缩。User Input 只在本轮允许提问且存在 Checkpointer 时加入主图，其提示词由 `agent_system_prompt.py` 统一构建。自定义子 Agent 显式绑定已授权工具、Skill 和权限；测评专用中间件由测评入口装配。
+`ContextWindowMiddleware` 观测平台装配后的请求，不负责摘要压缩，估算不等于供应商最终序列化 Token。User Input 只在本轮允许提问且存在 Checkpointer 时加入主图，其提示词由 `agent_system_prompt.py` 统一构建。自定义子 Agent 显式绑定已授权工具、Skill 和权限；测评专用中间件由测评入口装配。
 
 ## 观测接口与消费者
 
@@ -107,3 +109,15 @@ Observer 只保留活动模型的 ID/名称、活动工具 ID 及累计统计；
 `AgentEventNormalizer` 只适配框架有序 v3 事件：过滤摘要，使用框架转换器展开完整消息，并保留原生消息边界与模型调用身份。Core 不缓存正文、不推断消息成功结束。消息错误、取消和图终态交由前端已有的事件投影收敛未完成记录，保留已显示文本；运行成功也不会把缺少原生结束事件的消息标成成功。
 
 平台 `AgentRunEventBuffer.receive` 直接筛选 Core 事件并绑定业务消息 ID，`event_projector.py` 为它与业务主动生成的状态和表单共用持久化事件编号。Core 序号与数据库游标独立。图结束事件可在 Core 出口出现，但业务终态必须等平台消息与快照原子提交后才对外发布。
+
+## 上下文的动静分离
+
+v3 的 `custom` 通道由每个图中唯一的 `ContextWindowMiddleware` 注册 `CustomTransformer`。记忆、模型进度和摘要通知仅向共享 writer 发布数据，不在各自中间件重复声明 transformer；框架合并注册列表时不会去重，重复声明会导致流初始化失败。
+
+本轮新增 `assembly/configuration/context_budget.py`：按可信容量与输出预留复制模型 profile，原生自动和主动压缩共用预算。`middleware/conversation_compaction.py` 复用框架主动工具，补齐媒体、重复调用与摘要失败保护。
+
+`backends/conversation_history.py` 为 `/conversation_history/`、`/large_tool_results/` 提供作用域隔离、原子追加与有限容量；模型只读。`persistence/conversation_summary.py` 集中读取框架已提交摘要，执行器仅首尾核对并通知最新有效提交。各会话入口的 `/summary` 按需读取正文；具体阈值、限额及观测边界见升级方案第 12.1 节。
+
+固定业务、规划模式解释、记忆及 Shell 路径规则在构图前装配。异步工具说明复用原生中间件生成的文本并提前加入 system，关闭重复追加；Skills 授权元数据在刷新后稳定排序，保留原生目录格式。
+
+AgentExecutor 只为新 HumanMessage 加入一次本轮自动/显式规划选项，保留身份和媒体；恢复只传 Command(resume)。事件与状态公开前移除内部选项，业务原文不改变。ask_user 答案通过原生 ToolMessage 留在对应位置，已删除前置汇总中间件、运行上下文字段和近期表单查询；公开 input_history 与 Submission 继续保留。

@@ -1,5 +1,19 @@
 # LLMOps 项目 Agent API 文档
 
+## 当前会话上下文摘要（新增）
+
+五个工作台入口的会话前缀均新增 `GET /summary`，使用与 `/state` 相同的会话归属校验：
+
+- `/apps/{app_id}/conversations/{conversation_id}/summary`
+- `/tasks/apps/{app_id}/conversations/{conversation_id}/summary`
+- `/web-apps/{token}/conversations/{conversation_id}/summary`
+- `/assistant-agent/conversations/{conversation_id}/summary`
+- `/openapi/apps/{app_id}/conversations/{conversation_id}/summary`
+
+响应为原始 JSON，`Cache-Control: no-store`。字段：`summary_id`、`content`、`created_at`、`status`（`persisted` 或 `none`）、`history_saved`、`reason`（`manual` 或 `automatic`）。未压缩时正文与身份为空；当前缺少可靠创建时间，`created_at=null`。`history_saved` 表示文本归档结果，不保证所有媒体均成功保存。该接口只读当前根图有效摘要，不返回任意 checkpoint 或历史版本。
+
+现有 `context_compaction` 事件新增 `scope=checkpoint`：仅在执行器确认持久化后发送，含稳定的 `summary_id`，没有摘要正文；时间及压缩前后计数无可靠来源时为 null。`summary_generation` 仍仅表示摘要模型调用。`context_window` 增加 `input_budget`、`safety_tokens`、`cache_read_tokens`、`cache_creation_tokens`、`cache_read_ratio`、`duration_ms`、`system_fingerprint`、`tools_fingerprint`；`model_progress` 结束事件增加 `first_token_ms`。缺失供应商数据保持 null。
+
 > 本文档依据当前代码实现整理（`internal/router`、`internal/handler`、`internal/schema`、`pkg/response`），不引用任何历史设计文档或仓库内 Markdown。
 > 所有路径均为 **根路径**：`my_dify` 与 `openapi` 两个蓝图的 `url_prefix` 都是空串。
 
@@ -2493,7 +2507,7 @@ Workspace 是账号与应用维度**跨会话共享**的文件空间，配额为
 
 ## 08. 长期记忆模块
 
-长期记忆保存在 LangGraph Store 中，隔离身份为 `(账号 id, 应用 id)`，命名空间为 `("mydify", "agent-memory", <account_id>, <app_id>)`。**命名空间不含终端用户维度**，因此同一应用下的所有终端用户共享一份记忆。虚拟根目录为 `/memories/`，分类固定为 `preferences(用户偏好)`、`background(背景信息)`、`experience(经验方法)`；索引文件 `/memories/.index.md` 由系统生成，**只读**。
+长期记忆保存在 LangGraph Store 中，隔离身份为 `(账号 id, 应用 id)`，命名空间为 `("mydify", "agent-memory", <account_id>, <app_id>)`。**命名空间不含终端用户维度**，因此同一应用下的所有终端用户共享一份记忆。虚拟根目录为 `/memories/`，分类固定为 `preferences(用户偏好)`、`background(背景信息)`、`experience(经验方法)`。不再生成系统索引；模型通过文件工具按需访问，不自动注入目录或正文。
 
 配额限制：单文件 64 KiB、文件数 100、总容量 1 MiB。
 
@@ -2531,14 +2545,6 @@ Workspace 是账号与应用维度**跨会话共享**的文件空间，配额为
       "code": "success",
       "data": {
           "items": [
-              {
-                  "path": "/memories/.index.md",
-                  "size_bytes": 420,
-                  "created_at": "2026-09-14T11:23:54",
-                  "updated_at": "2026-09-14T11:24:12",
-                  "content_sha256": "3f2a1c9d4e5b6a7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",
-                  "preview": "- [用户偏好](preferences/style.md)：回答风格偏好"
-              },
               {
                   "path": "/memories/preferences/style.md",
                   "size_bytes": 128,

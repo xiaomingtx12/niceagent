@@ -257,7 +257,7 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 - 提交：`input.respond` 必须**一次覆盖全部待填表单**，`{interrupt_id: {字段: 值}}`；批次的 `input_batch_id` = 中断 ID 集合排序后的 sha256（与答案值和键顺序无关），保证提交幂等；同批次不同答案会被拒绝（`该表单已提交，不能重复修改`）。
 - 恢复：表单在取消时被保留，`input.reopen` 用 `cancellation_sequence` 限定恢复批次；迟到的重复请求返回首次结果（`reopened_sequence`）。
 - **配置指纹**：创建 Run 时计算应用定义指纹（`model_mode` 除外）；提交答案、恢复表单、装配时都会重新计算并比对，不一致则拒绝继续旧任务（`应用配置已变更，请恢复原配置后继续填写，或创建新会话`）。
-- 已确认答案会在后续每次模型调用前作为 `HumanMessage` 重新注入（`RuntimeContextMiddleware`），并明确声明为用户级数据而非系统指令。
+- 已确认答案由 ask_user 恢复后的工具结果进入 checkpoint，不再查询近期表单并在每次模型调用前作为 HumanMessage 前置汇总。
 
 ### 4.7 事件流与断线续传
 
@@ -291,7 +291,7 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
    - 助手 Agent → 内置 4 个 Creator 工具（`create_app`、`workflow_generator`、`app_with_workflow_generator` + 知识库检索）；
    - 其他 → 插件工具 + （有知识库时）检索工具 + （有工作流时）工作流工具。
 6. **SubAgent 准备**（见 §6.3）。
-7. **上下文构造**：`principal_id = end_user_id or created_by`；`memory_enabled = long_term_memory.enable`；`user_input_enabled = invocation.user_input_enabled AND app_config.user_input.enable`；`confirmed_user_inputs` 从已提交表单渲染。
+7. **上下文构造**：`principal_id = end_user_id or created_by`；`memory_enabled = long_term_memory.enable`；`user_input_enabled = invocation.user_input_enabled AND app_config.user_input.enable`；规划开关来自本轮已保存输入，表单答案沿用 checkpoint 工具历史。
 8. **Workspace Store**：使用**独立 Session**（`expire_on_commit=False`）构造带授权范围的 `WorkspaceFileRepository` + `AgentWorkspaceStore`，任一异常即关闭 Session。
 
 ### 5.2 内核装配（`AgentRuntimeAssembler`）
@@ -300,12 +300,12 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 1. 建 **Workspace 投影**：`WorkspaceProjection` 提供 `TemporaryDirectory(prefix="my-dify-workspace-")` 下的虚拟模式文件后端（本轮工作副本）。
 2. 建 **Skill 投影**：`build_skill_context` 在临时目录里按 `/<skill 名>/` 落盘授权 Skill 包，产出路由与沙箱种子文件。
-3. 建 **记忆路由**：`memory_enabled` 时要求 Store 必须存在（否则 `RuntimeError`），把 `/memories/` 路由到 `AgentMemoryBackend`（命名空间由可信上下文解析）。
+3. 建 **持久化文件路由**：Store 提供隔离的 `/conversation_history/`、`/large_tool_results/` 归档路由；仅 `memory_enabled` 时添加 `/memories/` 到 `AgentMemoryBackend`。归档图作用域去掉当前节点身份、保留全部父图身份，保证跨步骤读取一致且并发子图隔离。
 4. 建 **沙箱后端**：按 `AGENT_SANDBOX_PROVIDER` 选择；沙箱名 = `mydify-sandbox-<sha256('mydify:{account}:{app}:{conversation}:{agent_id}')[:32]>`。
 5. 组装 **CompositeBackend**：
    - 无沙箱 → 默认 `StateBackend`，路由 `/workspace/`、Skills、Memory；
    - 有沙箱 → 默认沙箱，路由 Skills、Memory、`/` → 沙箱（DeepAgents 0.6 的权限编译要求显式根路由）。
-6. 产出 `AgentRuntimeResources`：checkpointer、backend、workspace、workspace_store、文件交付、文件权限、Skill 投影、记忆来源（`/memories/.index.md`）、运行上下文。
+6. 产出 `AgentRuntimeResources`：checkpointer、backend、workspace、workspace_store、文件交付、文件权限、Skill 投影、运行上下文。
 7. **附件写入**：`runtime.backend.upload_files(input_files)`，数量不符或任一项报错即 `WorkspaceDeliveryError("附件写入 Agent Workspace 失败")`。
 8. 建图并构造 `AgentExecutor`；任一步失败都会关闭已建资源并重新抛出。
 
@@ -313,26 +313,25 @@ Agent 相关配置存在 `app_config` / `app_config_version` 两张表的 JSONB 
 
 - 工具 = 应用授权工具（经保留名校验） + 三个交付工具：`list_saved_files` / `load_saved_file` / `deliver_file`。
 - 系统提示词 = `BASE_AGENT_PROMPT` 模板（应用说明 / 业务指令 / 任务进度沟通 / 文件路径约束） + 记忆指引 + 提问指引。
-- `memory=None`：长期记忆由 `ReloadingMemoryMiddleware` 自行装配，避免官方 MemoryMiddleware 重复注入。
-- 子 Agent 列表 = 配置顺序；当执行器使用虚拟路径且未显式声明 `general-purpose` 时，在**索引 0** 注入框架的 `general-purpose`，并补挂 `ShellExecutionMiddleware(virtual_paths=True)`。
+- `memory=None`：关闭框架自动记忆加载，文件工具通过 /memories/ 路由按需访问；平台只追加固定规则。
+- 子 Agent 保留配置顺序；未显式声明 general-purpose 时在索引 0 补充，ShellExecutionMiddleware 只负责禁止同步子 Agent 执行共享 Shell。主图路径说明在构图时加入 system。
 - `create_deep_agent(..., skills=[...] or None, permissions=..., backend=..., checkpointer=..., store=..., context_schema=AgentRunContext)`。
 
 ### 5.4 平台中间件顺序
 
 `assembly/graph/platform_middleware.py`（顺序即包装顺序）：
 
-1. `ReloadingSkillsMiddleware`（每轮重新枚举 Skill 目录，避免 checkpoint 泄漏旧选择）
-2. `ToolCallValidationMiddleware`（校验模型输出的工具调用结构）
-3. `ShellExecutionMiddleware(virtual_paths=...)`（虚拟路径说明；按需移除/拒绝 `execute`）
-4. `RuntimeContextMiddleware`（注入规划块与已确认答案）
-5. `ReviewMiddleware(review_config)`（关键词入/出审核）
-6. `ModelRetryMiddleware(max_retries=2, on_failure="error")`
-7. `ToolRetryMiddleware(max_retries=2, tools=("ls","read_file","glob","grep"), retry_on=(TimeoutError, ConnectionError))`
-8. `ModelCallLimitMiddleware(run_limit=50, exit_behavior="end")`
-9. `ToolCallLimitMiddleware(run_limit=200, exit_behavior="continue")`
-10. `ReloadingMemoryMiddleware`（仅启用长期记忆时）
-11. `ContextWindowMiddleware`（上下文窗口/压缩观测）
-12. `UserInputMiddleware`（仅启用提问且有 checkpointer 时，暴露 `ask_user`）
+1. `ReloadingSkillsMiddleware`（刷新授权并稳定排列技能目录）
+2. `ToolCallValidationMiddleware`（校验工具调用结构）
+3. `ModelRetryMiddleware(max_retries=2, on_failure="error")`
+4. `ToolRetryMiddleware`（只重试 ls/read_file/glob/grep 的瞬时失败）
+5. `ModelCallLimitMiddleware(run_limit=50, exit_behavior="end")`
+6. `ToolCallLimitMiddleware(run_limit=200, exit_behavior="continue")`
+7. `AgentMemoryMiddleware`（启用记忆时提供删除工具）
+8. `ContextWindowMiddleware`（平台请求组成估算与供应商输入用量）
+9. `UserInputMiddleware`（启用提问且有 checkpointer 时提供 ask_user）
+
+配置异步子 Agent 时，在这条平台链前添加 NamedAsyncSubAgentMiddleware；其原生说明提前纳入基础 system，不再每次包装调用追加。框架 TodoList、Skills、Filesystem、子 Agent、自动压缩等仍由 create_deep_agent 装配。规划选项随新用户消息保存一次，恢复不重复添加；已删除 RuntimeContextMiddleware。
 
 可重试的模型状态码：`408 / 409 / 429` 与 5xx，另加 `TimeoutError` / `ConnectionError` / `APIConnectionError`。
 
@@ -435,11 +434,11 @@ Agent 只能通过三个工具把产物带出临时空间（`execution/workspace
 - 隔离身份：`AgentMemoryIdentity(account_id, app_id)`，LangGraph Store 命名空间 `("mydify","agent-memory",<account_id>,<app_id>)`。
   命名空间**不含终端用户维度**，因此同一应用下的所有终端用户共享一份记忆（见 §12 第 12 条）。
 - 虚拟路径：`/memories/`；分类固定为 `preferences`（用户偏好）、`background`（背景信息）、`experience`（经验方法）。
-- 索引 `/memories/.index.md` 由系统生成（**只读**，写入会被拒绝：`记忆索引由系统生成，请编辑分类下的记忆文件`）。
+- 不生成系统索引，不自动注入目录或偏好正文；涉及先前偏好、背景或约定时，通过原生文件工具按需读取。
 - 配额：单文件 64 KiB、文件数 100、总容量 1 MiB；路径长度 ≤512，路径片段禁止空、`.`、`..`、`~` 与控制字符。
 - 写入原子性：在同一作用域锁内完成"读 → 校验 → 提交"；Postgres Store 下使用 `set_config('lock_timeout','5000')` + `pg_advisory_xact_lock`。
-- 索引渲染预算：目录行 3500 字节、正文 3600 字节、单条偏好 900 字节，超出提示 `其余文件使用 ls /memories/ 查看。`
-- Agent 侧工具：`edit_file` / `write_file` / `delete_memory_file`；`delete_memory_file` 由 `ReloadingMemoryMiddleware` 提供，并**要求 `context.agent_id == "main"`**，即 SubAgent 无记忆能力。
+- 不维护目录注入预算、目录版本缓存或每轮记忆查询。相同内容的编辑、上传和页面保存不实际写入；实际变更提交后发布结构化通知，身份沿用协议事件标识。
+- Agent 侧工具：`edit_file` / `write_file` / `delete_memory_file`；`delete_memory_file` 由 `AgentMemoryMiddleware` 提供，并**要求 `context.agent_id == "main"`**，即 SubAgent 无记忆能力。
 - 平台侧管理接口需要应用已启用长期记忆（`enable=true`），否则 `ForbiddenException("该应用未启用长期记忆")`。
 - 删除应用时会清空该应用下所有主体的记忆。
 
@@ -477,10 +476,12 @@ Agent 只能通过三个工具把产物带出临时空间（`execution/workspace
 
 ### 6.9 上下文窗口观测
 
+主动压缩通过 `ConversationCompactionMiddleware` 复用框架工具；预算由 `context_budget.py` 在构图时确定。归档存入独立 Store 作用域，文件权限为模型只读。`conversation_summary.py` 集中读取已提交摘要，执行片段结束后通知最新有效版本；前端 `/summary` 仅在用户查看时查询。详细限额、去重与失败语义见升级方案第 12.1 节。
+
 - `ContextWindowMiddleware` 在每次模型调用前后通过 `stream_writer` 发出自定义事件：
   - `context_window`：分为 `system / memory / human / assistant / tool / tools / summary` 七类计数，含 `context_limit`、`limit_kind`、`output_reserve`、`estimated_input_tokens`、`actual_input_tokens` 等；文本 token 估算为 `ceil(utf8字节数 / 2)`，每条消息 +4。
   - `context_compaction`：摘要生成阶段观测（`preparing / summarizing / completed / failed / cancelled`）。
-- `custom` 通道对协议**白名单**：只有上述两种结构会进入公开载荷，其余自定义数据被丢弃。
+- `custom` 通道按 Schema 白名单投影：上下文窗口、压缩状态、模型进度和记忆文件更新；不透传内部提示词或摘要正文。
 
 ### 6.10 助手 Agent（Creator 内置）
 

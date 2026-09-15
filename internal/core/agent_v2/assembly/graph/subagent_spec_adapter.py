@@ -8,6 +8,7 @@ from deepagents.middleware.async_subagents import AsyncSubAgent
 from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.middleware.subagents import SubAgent
 from langchain_core.tools import BaseTool
+from internal.core.agent_v2.assembly.configuration.context_budget import with_context_budget
 
 from internal.core.agent_v2.entity.agent_config import (
     AsyncSubAgentDefinition,
@@ -18,6 +19,7 @@ from internal.core.agent_v2.middleware.tool_call_validation_middleware import (
     ToolCallValidationMiddleware,
 )
 from internal.core.agent_v2.middleware.shell_execution_middleware import ShellExecutionMiddleware
+from internal.core.agent_v2.middleware.context_window_middleware import ContextWindowMiddleware
 
 _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
     {
@@ -32,6 +34,7 @@ _DEEPAGENTS_RESERVED_TOOL_NAMES = frozenset(
         "execute",
         "delete_memory_file",
         "ask_user",
+        "compact_conversation",
         "list_saved_files",
         "load_saved_file",
         "deliver_file",
@@ -110,13 +113,13 @@ def _build_sync_spec(
             "\n/workspace 是本轮临时工作副本，写入不会自动持久化。"
             "完成文件任务后向主 Agent 返回产物路径，由主 Agent 调用 deliver_file 保存交付。"
         ),
-        "model": config.model,
+        "model": with_context_budget(config.model),
         # 显式空列表避免 DeepAgents 继承父 Agent 的全部工具。
         "tools": tools,
         # 子 Agent 权限替换父规则，避免继承主 Agent 的 Memory 和 Skill 范围。
         "permissions": _build_subagent_permissions(sources),
         # 文件权限不会约束 execute，共享 Sandbox 的子 Agent 必须在执行入口关闭 Shell。
-        "middleware": [ToolCallValidationMiddleware(), ShellExecutionMiddleware(allow_execution=False)],
+        "middleware": [ToolCallValidationMiddleware(), ShellExecutionMiddleware(), ContextWindowMiddleware()],
     }
     if sources:
         spec["skills"] = sources
@@ -169,7 +172,10 @@ def _build_subagent_permissions(
     DeepAgents 的子 Agent 默认复用父 Backend 并继承父权限；这里用原生
     permissions 替换父规则，只开放已授权 Skill 和共享 Workspace。
     """
-    permissions: list[FilesystemPermission] = []
+    permissions: list[FilesystemPermission] = [
+        FilesystemPermission(operations=["read"], paths=["/conversation_history", "/conversation_history/**", "/large_tool_results", "/large_tool_results/**"], mode="allow"),
+        FilesystemPermission(operations=["write"], paths=["/conversation_history", "/conversation_history/**", "/large_tool_results", "/large_tool_results/**"], mode="deny"),
+    ]
     for source in skill_sources:
         normalized = source.rstrip("/") or "/"
         permissions.append(

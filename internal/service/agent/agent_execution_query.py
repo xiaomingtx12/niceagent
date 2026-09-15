@@ -14,6 +14,9 @@ from sqlalchemy.orm import Session, defer, load_only
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity import AGENT_EXECUTION_ACTIVE_STATUSES, AGENT_EXECUTION_TERMINAL_STATUSES
 from internal.exception import NotFoundException
+from internal.core.agent_v2.persistence.conversation_summary import read_conversation_summary
+from internal.core.agent_v2.persistence.langgraph_checkpoint_provider import get_configured_checkpointer
+from internal.schema.agent.agent_context_schema import ConversationSummaryResp
 from internal.model import Account, AgentExecution, AgentExecutionEvent, Conversation, ConversationTurn
 from internal.schema.agent.agent_model_schema import (
     AgentProtocolModelSettingsResp,
@@ -53,6 +56,11 @@ class AgentExecutionQuery:
 
     _SSE_HEARTBEAT_SECONDS = 15
     _SSE_BATCH_SIZE = 256
+
+    def get_summary(self, *, conversation_id: UUID) -> ConversationSummaryResp:
+        """入口完成归属校验后，按需读取当前根图已提交摘要；不装配 Agent。"""
+        summary = read_conversation_summary(get_configured_checkpointer(), conversation_id)
+        return ConversationSummaryResp.model_validate(summary or {})
 
     def stream_events(
         self, *, app_id: UUID, conversation_id: UUID, invoke_from: InvokeFrom,
