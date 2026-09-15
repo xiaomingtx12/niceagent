@@ -1,5 +1,7 @@
 # Agent 业务文档
 
+> 交互目标以 [Agent 最小交互业务约定](Agent-最小交互业务约定.md) 为准（2026-09-15 已确认，代码待对齐）。本文按代码整理，包含取消表单后重开等旧行为，不应据此恢复已退出目标范围的交互。
+
 > 本文档依据当前代码实现整理（`internal/core/agent_v2`、`internal/service/agent*`、`internal/handler/agent*`、`internal/router`、`internal/model`、`config`），不引用任何历史设计文档或仓库内 Markdown。
 > 标注 `【问题】` 的条目是阅读代码时发现的实现缺陷，仅作提醒，未做修改。
 
