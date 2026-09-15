@@ -84,6 +84,7 @@ class Config:
                 ),
             }
         self.SQLALCHEMY_ECHO = _get_bool_env("SQLALCHEMY_ECHO")
+        self.AGENT_RUN_MAX_WORKERS = int(_get_env("AGENT_RUN_MAX_WORKERS"))
         self.AGENT_CHECKPOINT_BACKEND = str(
             _get_env("AGENT_CHECKPOINT_BACKEND")
         ).lower()
@@ -246,6 +247,8 @@ class Config:
 
     def _validate_agent_settings(self) -> None:
         """校验 Agent 持久化和记忆配置。"""
+        if self.AGENT_RUN_MAX_WORKERS <= 0:
+            raise ValueError("AGENT_RUN_MAX_WORKERS 必须大于 0")
         supported = {"postgres", "memory", "disabled", "false", "off", "none"}
         if self.AGENT_CHECKPOINT_BACKEND not in supported:
             raise ValueError(

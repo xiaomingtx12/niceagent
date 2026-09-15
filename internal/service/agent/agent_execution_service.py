@@ -12,7 +12,7 @@ from collections.abc import Collection, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from copy import deepcopy
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
@@ -23,6 +23,7 @@ from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import load_only
 
+from config import Config
 from internal.core.agent_v2 import (
     AGENT_PERSISTENCE_ERRORS,
     AgentEvent,
@@ -91,6 +92,15 @@ class AgentExecutionService:
     model_service: AgentModelService
     attachment_service: AgentAttachmentService
     conversation_service: ConversationService
+    conf: Config
+    _run_executor: ThreadPoolExecutor = field(init=False, repr=False)
+    _run_slots: threading.BoundedSemaphore = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """单例服务共享进程内执行池，配置在实例化时读取，避免早于 .env 加载。"""
+        workers = self.conf.AGENT_RUN_MAX_WORKERS
+        self._run_executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="agent-run")
+        self._run_slots = threading.BoundedSemaphore(workers)
 
     def start_run(
         self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,
@@ -819,10 +829,6 @@ class AgentExecutionService:
         """状态转换只公开展示投影，私有调用参数不会进入事件载荷。"""
         projector = AgentProtocolEventProjector(row.id, start_sequence=int(row.last_event_sequence or 0))
         return projector.create_state_transition(select_public_snapshot(row.public_snapshot), dict(lifecycle))
-
-    _RUN_WORKERS: ClassVar[int] = 4
-    _run_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=_RUN_WORKERS, thread_name_prefix="agent-run")
-    _run_slots: ClassVar[threading.BoundedSemaphore] = threading.BoundedSemaphore(_RUN_WORKERS)
 
     # 实时交付不等落库；独立写线程按上限或 250ms 合批，收尾时排空。
     _persistence_batch_size: ClassVar[int] = 128

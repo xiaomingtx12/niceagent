@@ -33,7 +33,7 @@ else
       --bind "${LLMOPS_BIND_ADDRESS:-0.0.0.0}:${LLMOPS_PORT:-5001}" \
       --workers ${SERVER_WORKER_AMOUNT:-1} \
       --worker-class ${SERVER_WORKER_CLASS:-gthread} \
-      --threads ${SERVER_THREAD_AMOUNT:-2} \
+      --threads ${SERVER_THREAD_AMOUNT:-8} \
       --timeout ${GUNICORN_TIMEOUT:-600} \
       --preload \
       app.http.app:app
