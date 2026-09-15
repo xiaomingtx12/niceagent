@@ -6,41 +6,22 @@
   <component name="ChangeListManager">
     <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/AGENTS.md" beforeDir="false" afterPath="$PROJECT_DIR$/AGENTS.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/CONTEXT.md" beforeDir="false" afterPath="$PROJECT_DIR$/CONTEXT.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/Agent-业务文档.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-业务文档.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/业务建模自梳理.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/Agent-会话与执行表定案.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-会话与执行表定案.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/README.md" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/agent_executor.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/agent_invocation.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/agent_invocation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/agent_run_entity.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/agent_run_entity.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/entity/agent_run_interaction.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/entity/agent_run_interaction.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/agent/entry_adapter.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/agent/entry_adapter.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/handler/conversation/conversation_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/conversation/conversation_handler.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/agent_evaluation.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/agent_evaluation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/agent_run.py" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/conversation.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/conversation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/model/platform.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/model/platform.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/summary_progress.py" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/observability/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/observability/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/handler/agent/agent_run_handler.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/handler/agent/agent_run_handler.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/router/agent_routes.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/router/agent_routes.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/schema/agent/agent_protocol_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/agent/agent_protocol_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/agent_evaluation/agent_evaluation_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/agent_evaluation/agent_evaluation_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/app/app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app/app_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/app/web_app_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/app/web_app_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/conversation/conversation_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/conversation/conversation_schema.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_factory.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_events.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_run_events.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_query.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_run_query.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_run_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_run_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/creator_task_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/creator_task_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_evaluation/agent_evaluation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_evaluation/agent_evaluation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/state_projector.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/state_projector.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/ai/ai_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/ai/ai_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/app/analysis_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/app/analysis_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/audio/audio_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/audio/audio_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/conversation/conversation_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/conversation/conversation_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/internal_agent_protocol/service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/internal_agent_protocol/service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/platform/wechat_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/platform/wechat_service.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/README.md" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/event_projector.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/event_projector.py" afterDir="false" />
     </list>
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
@@ -499,7 +480,7 @@
       <workItem from="1789202141468" duration="23248000" />
       <workItem from="1789283550417" duration="30110000" />
       <workItem from="1789363735129" duration="11652000" />
-      <workItem from="1789452244130" duration="15353000" />
+      <workItem from="1789452244130" duration="26985000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
@@ -923,7 +904,7 @@
     <SUITE FILE_PATH="coverage/my_dify$.coverage" NAME=" 覆盖结果" MODIFIED="1772212813392" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$mcp_demo_server.coverage" NAME="mcp_demo_server 覆盖结果" MODIFIED="1773473881642" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$check_checkpoint_data.coverage" NAME="check_checkpoint_data 覆盖结果" MODIFIED="1772276469901" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1789289159295" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/my_dify$Flask__app_http_app_py_.coverage" NAME="Flask (app/http/app.py) 覆盖结果" MODIFIED="1789470995568" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/my_dify$import_knowledge_to_faiss.coverage" NAME="import_knowledge_to_faiss 覆盖结果" MODIFIED="1771744339484" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
     <SUITE FILE_PATH="coverage/my_dify$import_to_faiss.coverage" NAME="import_to_faiss 覆盖结果" MODIFIED="1771745631187" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/scripts" />
   </component>
