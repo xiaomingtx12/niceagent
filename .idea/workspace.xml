@@ -4,24 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" beforeDir="false" afterPath="$PROJECT_DIR$/docs/Agent-最小交互业务约定.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/entity/agent_event.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/entity/agent_event.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/event_normalizer.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/event_normalizer.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/core/agent_v2/execution/model_progress.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/core/agent_v2/execution/model_progress.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/schema/agent/agent_protocol_schema.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/schema/agent/agent_protocol_schema.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_execution_event_hub.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_execution_event_hub.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_execution_query.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_execution_query.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_execution_runtime.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_execution_runtime.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_execution_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_execution_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent/agent_model_service.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent/agent_model_service.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/README.md" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/README.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/event_projector.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/event_projector.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/internal/service/agent_protocol/recovery_snapshot.py" beforeDir="false" afterPath="$PROJECT_DIR$/internal/service/agent_protocol/recovery_snapshot.py" afterDir="false" />
-    </list>
+    <list default="true" id="f52b3e9e-da9d-4159-8106-3bd910c8ee04" name="更改" comment="" />
     <list id="22837c24-db9f-4db6-a599-55f6e1c27fac" name="不提交" comment="不提交" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -154,7 +137,7 @@
       <command value="pip install -r requirements.txt" />
     </option>
   </component>
-  <component name="RunManager" selected="Flask 服务器.Flask (app/http/app.py)">
+  <component name="RunManager" selected="Shell Script.celery">
     <configuration name="deploy_scf_function" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="my-dify" />
       <option name="ENV_FILES" value="" />
@@ -479,7 +462,7 @@
       <workItem from="1789202141468" duration="23248000" />
       <workItem from="1789283550417" duration="30110000" />
       <workItem from="1789363735129" duration="11652000" />
-      <workItem from="1789452244130" duration="34707000" />
+      <workItem from="1789452244130" duration="37614000" />
     </task>
     <task id="LOCAL-00001" summary="新功能: 项目目录结构初始化">
       <option name="closed" value="true" />
