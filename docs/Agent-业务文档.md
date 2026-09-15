@@ -544,7 +544,7 @@ Agent 只能通过三个工具把产物带出临时空间（`execution/workspace
 | `last_event_sequence` | Integer | 事件续传游标 |
 | `executor_id` | UUID nullable | **本次执行段标识**（不是账号/进程 ID）；启动或恢复换新，结算清空 |
 | `cancel_requested_at` | DateTime | 取消请求时间戳；终态保留原值供追溯 |
-| `started_at` / `finished_at` | DateTime | |
+| `created_at` / `finished_at` | DateTime | 创建即开始 / 进入终态；响应 `started_at` 映射自 `created_at`，不单独存储 `started_at` 或 `updated_at` |
 
 约束要点：状态枚举 CHECK；执行权 CHECK（`running` 必有 `executor_id`，其余状态必须为空）；`finished_at` 与终态的对应 CHECK；三个 JSONB 必须是 object；`(conversation_id, created_at, id)` 普通索引；两个部分唯一索引 + `message_id` 唯一约束（见 §4.3）。
 

@@ -2,13 +2,42 @@
 
 本目录只负责工作台业务数据与前端协议之间的映射。框架事件解析在 `internal/core/agent_v2/execution/event_normalizer.py`；内部异步子 Agent 的 SDK 接口在相邻的 `internal_agent_protocol` 目录。
 
+## 先看整条链路
+
+启动命令和事件订阅是两个 HTTP 请求：`/commands` 创建 Run 并交给后台执行，返回 Run ID；`/stream` 根据 Run ID 和游标读取已落库事件，通过 SSE 持续发送。
+
+```text
+后台执行：AgentExecutor → normalizer.accept → events.receive（筛选并适配载荷）
+                                             → event_projector.create_event（共用编号与协议外壳）
+                                             → 缓冲并调用 _record_events → AgentRunEvent 表
+
+HTTP 订阅：AgentRunQuery._stream_events → 读取 AgentRunEvent 表
+                                      → sse_response 编码 → 浏览器
+```
+
+本目录只保留多处共用的协议处理：`event_projector.py` 提供事件编号、协议外壳、终态批次和历史解析，`state_projector.py` 提供图状态适配与公开快照筛选。只有一个调用方的业务步骤直接写在调用函数内，包括事件接收转换、聊天历史与待填写任务构造、执行结果状态和生命周期映射。
+
+`AgentRunEventBuffer` 在数据库提交后唤醒订阅者，通知本身不携带正文。订阅者仍从数据库读取，断线重连才能凭游标续传。图结束时先由 Service 保存回答、状态和终态事件，再通知前端运行已结束。
+
 ## 阅读顺序
 
 1. `agent_protocol_schema.AgentProtocolCommandReq.from_mapping`：一次解析命令外壳与参数，兼容 SDK 的嵌套输入及单个／批量回答。`params` 在解析后已经是 `AgentRunInput`、`AgentProtocolInputRespondReq` 或 `AgentProtocolInputReopenReq`。
 2. 命令分派与成功／错误外壳由 `internal/handler/agent/entry_adapter.py` 的 `respond_command` 处理：消费已解析的参数直接调用启动、回答和重新填写入口，再包装协议响应。
-3. `event_projector.py`：接收 Core 规范化的 `AgentEvent`，绑定业务消息 ID、分配持久化序号并生成 `AgentProtocolEvent`。
-4. `state_projector.py`：业务消息标识、公开运行状态和表单；不再从快照合成执行事件。
-5. `message_projector.py`：业务消息历史转换与活动 Run 消息补齐。
+3. `AgentRunEventBuffer.receive`：直接筛选 Core 事件、适配载荷并绑定业务消息 ID，再调用 `create_event` 分配持久化序号和协议外壳。
+4. `AgentRunService._commit_result`：直接构造执行结果状态与待填写表单；`_prepare_result_status` 直接确定业务消息状态和公开生命周期。
+5. `AgentRunQuery.get_state`：直接构造聊天历史、补齐活动消息并生成待填写任务。共用的图状态适配和快照白名单保留在 `state_projector.py`。
+
+### 主要方法的处理步骤
+
+| 方法 | 处理顺序 |
+| --- | --- |
+| `AgentRunEventBuffer.receive` | 排除框架根终态 → 适配载荷 → 编号 → 缓冲和提交 |
+| `AgentRunQuery.get_state` | 查询历史与 Run → 构造用户和助手消息 → 补齐活动消息 → 汇总状态与表单 |
+| `adapt_graph_state` | 复制输入状态 → 合并每轮 AI 回答 → 适配异步任务会话字段；其余图状态字段保留 |
+| `select_public_snapshot` | 按公开字段白名单提取状态，供查询和业务状态通知使用 |
+| `AgentRunService._commit_result` | 提取结果展示字段 → 验证中断表单 → 保留答案历史 → 原子保存结果与终态事件 |
+
+消息合并直接写在 `adapt_graph_state` 内：用户消息开始新回合，工具与其他消息原样保留，后续 AI 回答替换本轮第一次回答的位置。深拷贝保证适配结果与输入快照隔离；`adapt_graph_state` 负责字段适配，`select_public_snapshot` 负责公开字段筛选。
 
 ## HTTP 入口
 
@@ -26,18 +55,18 @@ Handler 完成各入口鉴权后，按操作需要直接传递账号、应用、
 
 ```text
 LangGraph 原始流
-  → Core 审核与规范化：消息分片、子图边界、摘要过滤、JSON 兼容载荷
+  → Core 规范化：保留原生分片与边界、过滤摘要、转换 JSON 兼容载荷
   → AgentEvent
   → 工作台投影：业务 ID、公开通道与持久化序号
   → AgentProtocolEvent
   → 批量提交、通知与 SSE
 ```
 
-`AgentProtocolEventProjector.project` 一次最多返回一个公开事件。这里不导入 LangChain 消息类，不判断供应商 finish_reason，不累积文本或补造消息结束分片。Core 在成功、失败和取消退出时收尾已交付文本。
+`AgentRunEventBuffer.receive` 对一个 Core 事件最多创建一个公开事件，过滤、载荷适配和缓冲在同一函数内完成。共用的 `create_event` 只分配序号并构造协议外壳。Core 保留框架的正常消息结束和错误事件；前端依据模型错误、子图终态和已提交的业务终态收尾尚未完成的展示记录。
 
-`generated` 与 `generated_state_transition` 用于业务主动产生的状态和表单事件。终态批次按“状态 → 表单 → 生命周期”排列，由 Run 服务在同一事务保存。Core 的图结束不代表平台数据已经提交，不能直接作为业务完成通知。
+`create_business_event` 与 `create_state_transition` 用于业务主动产生的状态和表单事件。终态批次按“状态 → 表单 → 生命周期”排列，由 Run 服务在同一事务保存。Core 的图结束不代表平台数据已经提交，不能直接作为业务完成通知。
 
-`to_public_event` 只解析数据库历史 JSON；实时路径直接构造最终协议对象，不经过历史兼容入口。公开 custom 数据仍按工作台响应 Schema 过滤。
+`parse_stored_event` 只解析数据库历史 JSON；实时路径直接构造最终协议对象，不经过历史兼容入口。公开 custom 数据仍按工作台响应 Schema 过滤。
 
 ## 历史与重连
 

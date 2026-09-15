@@ -13,7 +13,10 @@ from internal.core.agent_v2 import (
 from internal.entity import AgentRunExecution
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_protocol_schema import AgentProtocolEvent
-from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
+from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector, normalize_custom_data
+from internal.service.agent_protocol.state_projector import adapt_graph_state
+
+_FRAMEWORK_TERMINAL_EVENTS = frozenset({"completed", "failed", "interrupted", "drained", "cancelled"})
 
 
 class EventSignal:
@@ -111,38 +114,56 @@ class AgentRunEventBuffer:
 
     def receive(self, agent_event: AgentEvent) -> None:
         """按事件到达顺序缓冲，首字和阶段边界立即提交。"""
-        # 1.Core 已完成框架解析；这里仅绑定业务序号和公开通道。
-        event = self._projector.project(agent_event)
-        if event is None:
+        # 1.根终态由业务事务发布，不能提前用框架完成事件结束前端订阅。
+        data = agent_event.data
+        channel = agent_event.channel
+        is_root = not agent_event.namespace
+        event_name = data.get("event")
+        if channel == "lifecycle" and is_root and (event_name or data.get("status")) in _FRAMEWORK_TERMINAL_EVENTS:
             return
-        # 2.投影器只返回已校验、可重放的公开事件。
-        self._pending.append(event)
-        data = event.params.data
-        event_name = data.get("event") if isinstance(data, Mapping) else None
 
-        # 3.首字计时只认文本增量，推理、工具和空文本不计入。
-        delta = data.get("delta") if isinstance(data, Mapping) else None
-        is_text_delta = (
-            event.method == "messages" and event_name == "content-block-delta"
-            and isinstance(delta, Mapping) and delta.get("type") == "text-delta"
+        # 2.在接收点适配公开载荷，助手消息直接绑定当前 Run 的业务消息 ID。
+        if channel == "custom":
+            data = normalize_custom_data(data)
+            if data is None:
+                return
+        elif channel == "values":
+            data = adapt_graph_state(data)
+        elif channel == "messages":
+            is_assistant_start = event_name == "message-start" and data.get("role") in {"ai", "assistant"}
+            if is_root and is_assistant_start:
+                data = {**data, "id": f"{self._run.spec.message_id}:assistant"}
+
+        # 3.使用与业务事件共用的编号器，再将事件加入待提交批次。
+        event = self._projector.create_event(
+            channel, data, namespace=agent_event.namespace, timestamp=agent_event.timestamp,
+            node=agent_event.node, source="agent_v2", source_sequence=agent_event.sequence,
+            model_run_id=agent_event.model_run_id,
         )
-        first_text = is_text_delta and not self._first_text_published and bool(delta.get("text"))
+        self._pending.append(event)
+        event_name = data.get("event")
 
-        # 4.逐项判断刷新原因；未命中时由数量或时间阈值兜底。
-        if first_text:
-            flush_now = True  # 首字立即交付，不能被批量阈值拖慢。
-        elif event.method != "messages":
-            flush_now = True  # 工具、状态等事件立即交付，先刷出它们之前的文本。
-        elif event_name in {"content-block-finish", "message-finish"}:
-            flush_now = True  # 消息阶段已结束，不能把尾批留到下一阶段。
-        elif len(self._pending) >= self._batch_size:
-            flush_now = True  # 已达到单批数量上限。
-        elif time.monotonic() - self._last_flush_at >= 0.03:
-            flush_now = True  # 有新事件到达时检查时间阈值，不另建定时线程；窗口取 ~30ms 平衡打字机流畅度与提交频率。
+        # 4.首字计时只认文本增量，推理、工具和空文本不计入。
+        delta = data.get("delta")
+        first_text = (
+            not self._first_text_published
+            and event.method == "messages" and event_name == "content-block-delta"
+            and isinstance(delta, Mapping) and delta.get("type") == "text-delta"
+            and bool(delta.get("text"))
+        )
+
+        # 5.首字、阶段边界和错误立即提交；普通分片按数量或到达时的 30ms 窗口合批。
+        flush_now = (
+            first_text
+            or event.method != "messages"
+            or event_name in {"content-block-finish", "message-finish", "error"}
+            or len(self._pending) >= self._batch_size
+            or time.monotonic() - self._last_flush_at >= 0.03
+        )
         if not flush_now:
             return
 
-        # 5.先落库再计时；只有首字成功交付后才记录首字耗时。
+        # 6.先落库再计时；只有首字成功交付后才记录首字耗时。
         self._flush()
         if not first_text:
             return

@@ -25,15 +25,17 @@
 4. `_commit_result` 将结果、最终快照和终态事件原子落库；提交成功后更新批次末尾游标，只通知订阅者一次。
 5. 查询服务的 `stream_events` 读取已提交事件；进程内通知只是唤醒机制，数据库是重连的数据源。
 
+后台代码从 `_execute_run` 顺着读：它负责执行、提交事件尾批和保存最终结果。`_execute_agent` 只呈现启动、发布准备状态、装配和执行四步；启动事务与取消复查在 `_mark_run_running`，取消监控的启动和退出在 `_execute_with_cancel_monitor`。Core 的 `execute` 负责资源生命周期，`_run_graph` 负责消费框架事件。各步骤直接调用，不再通过额外生成器转交执行控制。
+
 `input_message_id` 用于对齐客户端即时显示的消息、后端历史和执行时间线，也用于后端识别同 ID 的重复启动。当前前端没有配置启动命令自动重试；SSE 重连只续传事件。发送失败后重新点击发送会生成新的消息 ID，不能将其视为必然复用原 Run。
 
 时序、资源所有权与验证步骤见 [Agent 业务文档](../../../docs/Agent-业务文档.md) 的 Run 生命周期与执行链路两节。
 
 会话状态接口只返回消息、Run 摘要和公开状态，不加载执行事件。执行过程由历史分页和实时 SSE 提供；前端共用一个事件集合，运行摘要不再转换为合成事件。
 
-事件投影器直接返回 `AgentProtocolEvent`，事件缓冲只批量保存与通知。框架消息解析、摘要过滤及消息结束分片由 Core 完成；`to_public_event` 仅用于读取历史 JSON。
+事件缓冲的 `receive` 直接筛选 Core 事件、适配载荷并绑定业务消息 ID，调用共用编号器生成 `AgentProtocolEvent` 后合批提交。Core 解析框架消息并过滤摘要，前端根据真实终态收尾未完成记录；`parse_stored_event` 仅用于读取历史 JSON。
 
-终态展示由 `agent_protocol.state_projector` 的 `project_execution_state` 和 `project_execution_lifecycle` 生成；`AgentRunService` 保留数据库读取、业务消息状态、错误脱敏和原子提交顺序。
+`_commit_result` 直接构造执行结果状态与待填写表单，`_prepare_result_status` 直接生成业务消息状态和公开生命周期。待填写任务与聊天历史直接在 `AgentRunQuery.get_state` 内构造；`state_projector` 只保留实时事件和状态查询共用的转换。
 
 后台执行只向 Core 传入 `message` 或 `resume`、事件接收方和取消信号，不构造 LangGraph Command。取消监控只等待进程内取消信号，收到后调用 `AgentExecutor.request_cancel()` 请求图排空；阻塞中的工具只有主动排空才会立刻停止。微信兼容入口也使用 `execute(message=...)`，直接保存结果中的回答与用量。
 

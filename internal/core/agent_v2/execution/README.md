@@ -2,28 +2,35 @@
 
 本包是 Core 与 Deep Agents 图之间的执行边界：驱动一次 v3 图运行，把框架事件流收敛为平台稳定契约（`AgentEvent` / `AgentExecutionResult`），并管理执行器的资源生命周期。上游由 `AgentFactory` 装配创建，下游由 `AgentRunService` 的后台线程调用。
 
+`AgentExecutor.execute` 按顺序完成输入校验、图执行、资源关闭和结果汇总。`_run_graph` 独占框架流和回调，提前取消直接返回；运行时取消继续收集根状态，但停止公开事件。框架异常转成返回的执行错误，输入错误保持上抛，两种路径都会关闭运行资源。
+
 ## 一次执行的事件链路
 
 ```text
 graph.stream_events(version="v3")            框架原始流（GraphRunStream，调用方驱动泵）
-  → _consume_stream                          收集根 values 状态 + 处理取消排空
-  → AgentEventNormalizer.accept              框架事件 → AgentEvent（内容块生命周期、JSON 载荷、单执行序号）
+  → _run_graph 内的消费循环                     收集根 values 状态 + 处理取消排空
+  → AgentEventNormalizer.accept              过滤摘要、适配完整消息、序列化为 AgentEvent
   → on_event 回调                            交给 AgentRunEventBuffer 批量落库并通知订阅
 执行结束
-  → normalizer.finish()                      补齐取消/异常截断的消息结束分片
-  → _build_result                            状态、回答、用量收敛为 AgentExecutionResult
+  → execute 返回结果                         状态、回答、用量收敛为 AgentExecutionResult
   → _finalize_run（Run 服务）                 终态、快照与终态事件同一事务落库
+  → 前端 event-projection                    依据真实终态收尾尚未结束的展示记录
 ```
 
 框架事件信封即 langchain-protocol 线协议（`method` / `params.namespace` / `params.data` / `seq`），与前端 `@langchain/protocol` 同源；平台侧的业务身份绑定（run 维度序号、business_message_id）发生在下游 `internal/service/agent_protocol`，不在本包。
+
+这里采用官方 v3 raw event 入口，保留主图、子图、工具和消息之间的到达顺序供落库与重放。消息载荷按框架 `MessagesTransformer` 的规则处理：协议分片直接保留，完整 `BaseMessage` 通过框架 `message_to_events` 转换，旧式 `AIMessageChunk` 和 `ToolMessage` 不回放为模型消息。参考 [Deep Agents Event Streaming](https://docs.langchain.com/oss/python/deepagents/event-streaming#consume-concurrently)。
+
+`AgentEvent.model_run_id` 来自消息 metadata 的框架 `run_id`，与平台 Run ID 不同。Service 将其写入 `params.metadata.my_dify.model_run_id`，前端按 namespace 和模型调用 ID 关联分片；历史事件没有该字段时沿用节点路由。Core 不缓存文本、不从工具或图终态补造 `message-finish`；前端收到原生消息错误或运行/子图终态后，保留已显示正文并标记失败、取消或中断。
 
 ## 文件职责
 
 | 文件 | 职责 |
 | --- | --- |
 | `agent_executor.py` | 单次执行的编排入口：v3 流驱动、协作取消（RunControl 排空）、资源状态机、事件交付与清理兜底 |
-| `event_normalizer.py` | 框架事件规范化：消息内容块状态机、工具/生命周期边界收尾、分支 namespace 解析，出口只交付 JSON 兼容的 `AgentEvent` |
-| `message_parser.py` | 框架对象解析：模型响应包装拆包（`response_messages`）、content-block 文本提取、JSON 值序列化（`json_value`）、本轮 AI 正文扫描 |
+| `event_normalizer.py` | 框架事件适配：公开通道与摘要过滤、完整消息转换、模型调用身份及 JSON 兼容载荷 |
+| `message_text.py` | 正文提取：`extract_text` 拼接文本块，`extract_final_answer` 选取本轮最后一条有正文的 AI 回答 |
+| `json_serialization.py` | 出口序列化：`to_json_value` 将框架消息、UUID 和嵌套数据转换为 JSON 兼容值 |
 | `runtime_resources.py` | 一次执行的资源打包：Backend、Checkpointer、Store、Skill 投影与运行上下文 |
 | `summary_progress.py` | 摘要生成进度观测：只发布 SDK 标记（`lc_source=summarization`）的压缩阶段事件 |
 | `user_input_interrupt_tracker.py` | 识别 `ask_user` 工具的 `GraphInterrupt`，让事件交付把正常暂停与真实工具失败区分开 |
@@ -33,6 +40,7 @@ graph.stream_events(version="v3")            框架原始流（GraphRunStream，
 ## 修改时的边界
 
 - 本包只解释框架流，不写数据库、不知道 Run/Message 模型；平台身份与持久化全部在 `service/agent` 一侧。
-- `AgentEventNormalizer` 每次执行独占一个实例（文本状态机不可跨执行复用）；`json_value` 是唯一允许被外部直接复用的工具函数。
+- `AgentEventNormalizer` 每次执行独占一个实例，交付序号不可跨执行复用。
+- 正文提取复用 `message_text`，出口序列化复用 `json_serialization.to_json_value`；模型响应拆包只供 `ContextWindowMiddleware` 内部读取用量。
 - v3 流式协议仍是 beta：框架升级若改变消息载荷形态（例如 chunk 重新出现），先查 `event_normalizer` 的消息分支与 `langgraph.pregel._messages` 的 handler 选择逻辑，不要直接加兜底代码。
 - 框架消息的摘要调用带 `lc_source=summarization` 元数据，`_normalize_messages` 依赖它过滤内部压缩正文，删除该过滤会让摘要泄漏为用户回答。

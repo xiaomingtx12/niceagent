@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # 使用frozen=True创建一个不可变的数据类
 class AgentEvent:
-    """data 为 JSON 兼容载荷；sequence 在一次执行内递增，namespace 标识独立执行分支。"""
+    """sequence 为交付序号；namespace 标识分支，model_run_id 区分同一节点内的模型调用。"""
 
     channel: Literal["messages", "values", "tools", "lifecycle", "custom"]
     data: dict[str, Any]
@@ -14,3 +14,4 @@ class AgentEvent:
     namespace: tuple[str, ...] = ()
     timestamp: int | float | None = None
     node: str | None = None
+    model_run_id: str | None = None

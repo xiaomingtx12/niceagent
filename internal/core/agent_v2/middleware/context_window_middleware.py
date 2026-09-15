@@ -15,7 +15,7 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.stream import CustomTransformer
 
 from internal.core.agent_v2.entity.run_context import AgentRunContext
-from internal.core.agent_v2.execution.message_parser import message_content_to_text, response_messages
+from internal.core.agent_v2.execution.message_text import extract_text
 
 
 class ContextWindowMiddleware(AgentMiddleware[AgentState, AgentRunContext, Any]):
@@ -51,7 +51,7 @@ class ContextWindowMiddleware(AgentMiddleware[AgentState, AgentRunContext, Any])
 
 def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
     """输出固定分类的计数；未知窗口容量或输出上限保持 null，不猜测模型配置。"""
-    system = message_content_to_text(request.system_message.content) if request.system_message else ""
+    system = extract_text(request.system_message.content) if request.system_message else ""
     memory_blocks = re.findall(r"<agent_memory>.*?</agent_memory>|<memory_guidelines>.*?</memory_guidelines>|<长期记忆规则>.*?</长期记忆规则>", system, re.DOTALL)
     memory = "\n".join(memory_blocks)
     for block in memory_blocks:
@@ -78,7 +78,7 @@ def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
             multimodal = True
         key = "human" if role in {"human", "user"} else "tool" if role == "tool" else "system" if role == "system" else "assistant"
         # 不按 base64 字符长度伪造媒体 token；供应商返回时才有可用的实际输入总量。
-        text = message_content_to_text(content)
+        text = extract_text(content)
         if calls:
             text += json.dumps(calls, ensure_ascii=False, default=str)
         sections[key]["tokens"] += _estimate_text_tokens(text) + 4
@@ -108,7 +108,7 @@ def build_context_snapshot(request: ModelRequest) -> dict[str, Any]:
 def complete_context_snapshot(snapshot: dict, response: Any) -> dict:
     """供应商未提供输入用量时保留估算，不用本轮累计用量替代单次请求。"""
     actual = None
-    for message in response_messages(response):
+    for message in _response_messages(response):
         raw_usage = getattr(message, "usage_metadata", None)
         response_metadata = getattr(message, "response_metadata", {}) or {}
         additional = getattr(message, "additional_kwargs", {}) or {}
@@ -134,6 +134,17 @@ def complete_context_snapshot(snapshot: dict, response: Any) -> dict:
 def positive_int(value: Any) -> int | None:
     """排除 bool、零和未知配置，避免展示虚假的窗口容量。"""
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _response_messages(response: Any) -> list[BaseMessage]:
+    """为本中间件读取供应商用量拆开模型响应包装，不改变原响应对象。"""
+    model_response = getattr(response, "model_response", response)
+    result = getattr(model_response, "result", model_response)
+    if isinstance(result, BaseMessage):
+        return [result]
+    if isinstance(result, list):
+        return [message for message in result if isinstance(message, BaseMessage)]
+    return []
 
 
 def _estimate_text_tokens(value: str) -> int:

@@ -6,7 +6,7 @@ import json
 
 from langchain_core.messages import AIMessage
 
-from internal.core.agent_v2.execution.message_parser import message_content_to_text
+from internal.core.agent_v2.execution.message_text import extract_text
 
 MAX_CANDIDATE_CHARS = 48000
 MAX_FILE_CHARS = 96000
@@ -17,7 +17,7 @@ def candidate_snapshot(state: dict) -> dict:
     answer = ""
     for message in reversed(state.get("messages", [])):
         if isinstance(message, AIMessage) and not message.tool_calls:
-            answer = message_content_to_text(message.content)
+            answer = extract_text(message.content)
             break
     if len(answer) > MAX_CANDIDATE_CHARS:
         raise ValueError("候选回答超过测评上限")

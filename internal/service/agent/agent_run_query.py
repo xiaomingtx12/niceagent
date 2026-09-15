@@ -19,11 +19,10 @@ from internal.schema.agent.agent_model_schema import (
 from internal.schema.agent.agent_protocol_schema import (
     PUBLIC_EVENT_METHODS, AgentProtocolEventStreamReq, AgentProtocolStateResp,
     AgentProtocolMessagePageInfoResp, AgentProtocolRunMetadataResp, AgentProtocolRunSummaryResp,
-    AgentProtocolRunEventsResp,
+    AgentProtocolRunEventsResp, AgentProtocolHistoryMessageResp,
 )
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
-from internal.service.agent_protocol.message_projector import project_conversation_messages, merge_running_messages
-from internal.service.agent_protocol.state_projector import project_snapshot_values, project_pending_tasks
+from internal.service.agent_protocol.state_projector import select_public_snapshot
 from internal.service.conversation.conversation_service import ConversationService
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_model_service import AgentModelService
@@ -104,25 +103,71 @@ class AgentRunQuery:
             .order_by(AgentRun.created_at.asc(), AgentRun.id.asc())
             .all()
         )
-        messages = project_conversation_messages(
-            rows, runs_by_message={run.message_id: run for run in persisted_runs}
-        )
+        # 2.将业务记录展开为用户和助手消息；先确定身份，再构造消息载荷。
+        runs_by_message = {run.message_id: run for run in persisted_runs}
+        messages: list[AgentProtocolHistoryMessageResp] = []
+        for row in rows:
+            run = runs_by_message.get(row.id)
+            run_id = str(run.id) if run is not None else row.trace_id
+            input_message_id = run.input_message_id if run is not None else None
+            human_id = input_message_id or f"{row.id}:human"
+
+            # 用户消息始终存在，附件跟随用户输入；没有回答时不生成助手消息。
+            human_message = AgentProtocolHistoryMessageResp(
+                id=human_id,
+                type="human",
+                content=row.query,
+                additional_kwargs={
+                    "business_message_id": str(row.id),
+                    "run_id": run_id,
+                    "image_urls": list(row.image_urls or []),
+                    "attachments": list(row.attachments or []),
+                },
+            )
+            messages.append(human_message)
+            if not row.answer:
+                continue
+
+            # 助手消息使用本回合持久化的回答与用量，旧记录缺少用量时按零展示。
+            metrics = {
+                "latency": float(row.latency or 0),
+                "total_token_count": int(row.total_token_count or 0),
+                "input_token_count": int(row.input_token_count or 0),
+                "output_token_count": int(row.output_token_count or 0),
+                "cached_token_count": int(row.cached_token_count or 0),
+                "reasoning_token_count": int(row.reasoning_token_count or 0),
+            }
+            assistant_message = AgentProtocolHistoryMessageResp(
+                id=f"{row.id}:assistant",
+                type="ai",
+                content=row.answer,
+                additional_kwargs={"run_id": run_id, "metrics": metrics},
+            )
+            messages.append(assistant_message)
         latest_run = persisted_runs[-1] if persisted_runs else None
 
-        # 2.只读取已提交的快照，状态查询与 SSE 订阅使用同一数据源。
+        # 3.仅用活动 Run 的已提交快照补齐本轮消息，其他回合和已结束运行不受覆盖。
         source_snapshot: Mapping[str, Any] = {}
         if latest_run is not None:
             source_snapshot = latest_run.public_snapshot
-        values = project_snapshot_values(source_snapshot)
+        values = select_public_snapshot(source_snapshot)
         values["messages"] = [
             message.model_dump(mode="json") for message in messages
         ]
-        values["messages"] = merge_running_messages(
-            values["messages"], latest_run, source_snapshot,
-        )
+        if latest_run is not None and latest_run.status in AGENT_RUN_ACTIVE_STATUSES:
+            current_ids = {
+                str(latest_run.input_message_id),
+                f"{latest_run.message_id}:human",
+                f"{latest_run.message_id}:assistant",
+            }
+            by_id = {message["id"]: message for message in values["messages"]}
+            for message in source_snapshot.get("messages", []):
+                if isinstance(message, dict) and message.get("id") in current_ids:
+                    by_id[message["id"]] = message
+            values["messages"] = list(by_id.values())
         values["message_page"] = message_page.model_dump(mode="json")
 
-        # 3.状态接口只返回摘要；失败原因以 Run 自身记录为准，旧记录回落到业务消息。
+        # 4.状态接口只返回摘要；失败原因以 Run 自身记录为准，旧记录回落到业务消息。
         message_errors = {message.id: message.error for message in rows}
         values["runs"] = [
             AgentProtocolRunSummaryResp(
@@ -130,7 +175,7 @@ class AgentRunQuery:
                 input_message_id=run.input_message_id, status=run.status,
                 last_event_sequence=int(run.last_event_sequence or 0),
                 created_at=run.created_at.replace(tzinfo=UTC),
-                started_at=run.started_at.replace(tzinfo=UTC) if run.started_at else None,
+                started_at=run.created_at.replace(tzinfo=UTC),
                 finished_at=run.finished_at.replace(tzinfo=UTC) if run.finished_at else None,
                 error=(run.error_message or message_errors.get(run.message_id) or "Agent 运行失败")
                 if run.status == "failed" else None,
@@ -138,15 +183,28 @@ class AgentRunQuery:
             for run in persisted_runs
         ]
 
-        # 4.当前运行优先，找不到运行记录时返回空闲状态。
+        # 5.当前运行优先，找不到运行记录时返回空闲状态。
         if latest_run is None:
             run_id, status, last_event_sequence = None, "idle", 0
         else:
             run_id = latest_run.id
             status = str(latest_run.status)
             last_event_sequence = int(latest_run.last_event_sequence or 0)
-        # 5.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
-        tasks = project_pending_tasks(status, values)
+        # 6.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
+        tasks = []
+        if status == "waiting_input":
+            for item in values.get("pending_inputs", []):
+                interrupt_id = item["interrupt_id"]
+                interrupt = {
+                    "id": interrupt_id,
+                    "value": item["payload"],
+                    "ns": item.get("namespace", []),
+                }
+                tasks.append({
+                    "id": interrupt_id,
+                    "name": "ask_user",
+                    "interrupts": [interrupt],
+                })
         return AgentProtocolStateResp(
             values=values,
             next=["agent"] if status in AGENT_RUN_ACTIVE_STATUSES else [],
@@ -186,7 +244,7 @@ class AgentRunQuery:
         )
         events = [
             event for row in rows[:page_size]
-            if (event := AgentProtocolEventProjector.to_public_event(row.payload)) is not None
+            if (event := AgentProtocolEventProjector.parse_stored_event(row.payload)) is not None
         ]
         return AgentProtocolRunEventsResp(
             run_id=run_id, events=events,
@@ -251,14 +309,16 @@ class AgentRunQuery:
                 # 5.事件和状态查询结束后立即释放连接，等待通知期间不占用 Session。
                 self.db.session.close()
 
-            # 6.投影失败和过滤掉的事件都不发送，但都随扫描游标一起越过，不会被重复读取。
-            events = [
-                event for row in rows
-                if (event := AgentProtocolEventProjector.to_public_event(row.payload)) is not None
-            ]
-            for event in events:
-                if stream_request.matches(event):
-                    yield event.model_dump(mode="json")
+            # 6.只发送匹配订阅的公开事件；扫描到的所有行都会推进游标。
+            events = []
+            for row in rows:
+                event = AgentProtocolEventProjector.parse_stored_event(row.payload)
+                if event is None:
+                    continue
+                events.append(event)
+                if not stream_request.matches(event):
+                    continue
+                yield event.model_dump(mode="json")
 
             # 7.只有本批扫描到的行才推进游标；终态事件由本事务提交，看到它即可结束。
             terminal = any(
@@ -275,11 +335,9 @@ class AgentRunQuery:
                 # 8.心跳仅维持 SSE 连接；None 由响应适配器编码为注释行，不进入业务事件流。
                 yield None
                 heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
-            if len(rows) < self._SSE_BATCH_SIZE:
-                if terminal:
-                    return
-                if not events and status in AGENT_RUN_TERMINAL_STATUSES:
-                    return
-                # 9.当前批次已读完才等待通知；仍有后续批次时立即继续读取。
-                # 单进程内提交必然触发唤醒，空闲时睡到下一次心跳，不做固定节奏空轮询。
-                event_signal.wait(version, timeout=max(0.0, heartbeat_at - time.monotonic()))
+            # 9.满批继续读；尾批遇到终态退出，其余情况等待提交通知或心跳。
+            if len(rows) == self._SSE_BATCH_SIZE:
+                continue
+            if terminal or (not events and status in AGENT_RUN_TERMINAL_STATUSES):
+                return
+            event_signal.wait(version, timeout=max(0.0, heartbeat_at - time.monotonic()))

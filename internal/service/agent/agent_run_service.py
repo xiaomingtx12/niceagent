@@ -28,6 +28,7 @@ from internal.core.agent_v2 import (
     AgentExecutionResult,
     AgentExecutor,
     AgentMessageError,
+    PendingUserInput,
     PlatformAgentRunObserver,
     get_postgres_pool_stats,
 )
@@ -63,9 +64,8 @@ from internal.schema.agent.agent_protocol_schema import (
 )
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 from internal.service.agent_protocol.state_projector import (
-    project_execution_lifecycle,
-    project_execution_state,
-    project_snapshot_values,
+    adapt_graph_state,
+    select_public_snapshot,
 )
 from internal.service.conversation.conversation_service import ConversationService
 from pkg.response import HttpCode
@@ -824,7 +824,7 @@ class AgentRunService:
     ) -> AgentRun | None:
         """只锁定并刷新 Run，统一校验执行身份和活动状态。"""
         columns = [AgentRun.executor_id, AgentRun.status, AgentRun.last_event_sequence,
-                   AgentRun.message_id, AgentRun.started_at, AgentRun.finished_at]
+                   AgentRun.message_id, AgentRun.finished_at]
         if with_snapshot:
             columns.extend((AgentRun.state_snapshot, AgentRun.interaction_state))
         row = self.db.session.get(
@@ -851,7 +851,7 @@ class AgentRunService:
     def _state_transition_events(self, row: AgentRun, lifecycle: Mapping[str, Any]) -> list[AgentProtocolEvent]:
         """取消和重新填写共享公开快照投影，私有恢复信息不会进入事件载荷。"""
         projector = AgentProtocolEventProjector(row.id, start_sequence=int(row.last_event_sequence or 0))
-        return projector.generated_state_transition(project_snapshot_values(row.public_snapshot), dict(lifecycle))
+        return projector.create_state_transition(select_public_snapshot(row.public_snapshot), dict(lifecycle))
 
     _RUN_WORKERS: ClassVar[int] = 4
     _run_executor: ClassVar[ThreadPoolExecutor] = ThreadPoolExecutor(max_workers=_RUN_WORKERS, thread_name_prefix="agent-run")
@@ -888,7 +888,6 @@ class AgentRunService:
         projector = AgentProtocolEventProjector(
             run.run_id,
             start_sequence=run.initial_event_sequence,
-            root_message_id=f"{run.spec.message_id}:assistant",
         )
         events = AgentRunEventBuffer(
             run, projector, self._record_events,
@@ -907,7 +906,7 @@ class AgentRunService:
                     usage=observer.build_run_usage(),
                 )
 
-            # 2.Core 已补齐消息结束分片；刷新尾批时保留原始执行错误。
+            # 2.先提交 Core 已交付事件的尾批，再保存业务终态；刷新失败时保留原始执行错误。
             try:
                 events.finish()
             except Exception as exc:
@@ -952,19 +951,8 @@ class AgentRunService:
         events: AgentRunEventBuffer,
     ) -> AgentExecutionResult:
         """集中完成启动、装配和执行；提前取消只结束本阶段，不跳过外层结果保存。"""
-        # 1.写入运行状态后再次检查取消，覆盖数据库写入期间到达的取消请求。
-        if not run.cancel_requested.is_set():
-            # 在事务内锁定当前 Run，避免并发执行路径覆盖已落库终态。
-            with self.db.auto_commit():
-                current = self._lock_execution(run)
-                if current is None:
-                    raise FailException("Agent 运行已失效，请重新发送消息")
-                # 已提交的取消请求不能被启动覆盖，让执行线程按取消结果立即收敛。
-                if current.cancel_requested_at is None:
-                    current.status = AgentRunStatus.RUNNING.value
-                    if current.started_at is None:
-                        current.started_at = datetime.now(UTC).replace(tzinfo=None)
-        if run.cancel_requested.is_set():
+        # 1.启动事务统一处理取消与执行权校验；取消结果仍由外层正常保存。
+        if not self._mark_run_running(run):
             observer.finish()
             return AgentExecutionResult(
                 status="cancelled",
@@ -972,7 +960,7 @@ class AgentRunService:
             )
 
         # 2.先公开运行状态；恢复执行时清空待填表单，保留已提交回答。
-        events.publish(projector.generated("lifecycle", {
+        events.publish(projector.create_business_event("lifecycle", {
             "event": "running",
             "phase": "preparing",
             "message_id": str(run.spec.message_id),
@@ -983,7 +971,7 @@ class AgentRunService:
             snapshot = {}
             if row is not None:
                 snapshot = row.public_snapshot
-            events.publish(projector.generated("values", {
+            events.publish(projector.create_business_event("values", {
                 "pending_inputs": [],
                 "input_recovery": None,
                 "input_history": snapshot.get("input_history", []),
@@ -997,7 +985,33 @@ class AgentRunService:
         finally:
             self.db.session.close()
 
-        # 4.取消监控只等待进程内取消信号；它启动失败时必须释放已装配资源。
+        # 4.监控线程和图执行具有相同的存活范围。
+        return self._execute_with_cancel_monitor(run, agent, input_message, projector, events)
+
+    def _mark_run_running(self, run: AgentRunExecution) -> bool:
+        """事务前后都检查取消；数据库取消记录优先于本进程尚未送达的通知。"""
+        if run.cancel_requested.is_set():
+            return False
+        with self.db.auto_commit():
+            current = self._lock_execution(run)
+            if current is None:
+                raise FailException("Agent 运行已失效，请重新发送消息")
+            if current.cancel_requested_at is not None:
+                run.cancel_requested.set()
+                return False
+            current.status = AgentRunStatus.RUNNING.value
+        # 事务等待和提交期间也可能收到取消，装配前必须重新读取信号。
+        return not run.cancel_requested.is_set()
+
+    def _execute_with_cancel_monitor(
+        self,
+        run: AgentRunExecution,
+        agent: AgentExecutor,
+        input_message: Any,
+        projector: AgentProtocolEventProjector,
+        events: AgentRunEventBuffer,
+    ) -> AgentExecutionResult:
+        """图执行期间保持取消监控；启动失败释放 Agent，执行退出后停止监控。"""
         done = threading.Event()
         monitor = threading.Thread(
             target=self._watch_cancel,
@@ -1006,7 +1020,7 @@ class AgentRunService:
             name=f"agent-cancel-{run.run_id}",
         )
         try:
-            events.publish(projector.generated("lifecycle", {
+            events.publish(projector.create_business_event("lifecycle", {
                 "event": "running", "phase": "executing",
                 "message_id": str(run.spec.message_id),
                 "input_message_id": run.spec.input_message_id,
@@ -1019,7 +1033,7 @@ class AgentRunService:
                 logger.exception("取消监控启动失败后释放 Agent 资源失败 run_id=%s", run.run_id)
             raise
 
-        # 5.Core 根据消息或恢复答案构造框架输入，并在执行结束后释放资源。
+        # Core 根据消息或恢复答案构造框架输入，并在执行结束后释放资源。
         try:
             return agent.execute(
                 message=input_message if run.resume is None else None,
@@ -1028,12 +1042,11 @@ class AgentRunService:
                 cancel_requested=run.cancel_requested,
             )
         finally:
-            # 6.停止监控，但不让阻塞的状态查询无限拖住结果落库。
-            # 尚未退出的监控会在查询返回后检测 done 并释放自己的 Session。
+            # 监控只等待本地信号；限时回收，避免拖住最终结果落库。
             done.set()
             monitor.join(timeout=1)
             if monitor.is_alive():
-                logger.warning("取消监控尚未退出，待当前查询返回后清理 run_id=%s", run.run_id)
+                logger.warning("取消监控尚未退出，待当前操作结束后清理 run_id=%s", run.run_id)
 
     def _commit_result(
         self,
@@ -1048,12 +1061,26 @@ class AgentRunService:
         status = AgentRunStatus(result.status)
         message_updates, lifecycle = self._prepare_result_status(run, status, result.error)
 
-        # 2.仅保留 UI 所需状态，待填表单与已提交回答分别存放。
+        # 2.只保留界面所需的图状态，验证待填表单并沿用已提交的答案历史。
         row = self.get_run(run.run_id)
-        state = project_execution_state(result, row.public_snapshot if row is not None else None)
+        previous_snapshot = (row.public_snapshot if row is not None else None) or {}
+        display_state = {
+            key: result.state[key] for key in ("todos", "files", "async_tasks")
+            if key in result.state
+        }
+        state = adapt_graph_state(display_state)
+        pending_inputs = []
+        for item in result.interrupts:
+            pending_input = PendingUserInput.model_validate(item)
+            pending_inputs.append(pending_input.model_dump(mode="json"))
+        state.update(
+            pending_inputs=pending_inputs,
+            input_history=list(previous_snapshot.get("input_history", [])),
+            input_recovery=None,
+        )
 
         # 3.按状态、表单请求、生命周期排序，避免客户端先收到尚未保存的表单。
-        events = projector.generated_state_transition(state, lifecycle)
+        events = projector.create_state_transition(state, lifecycle)
 
         # 4.回答、用量、Run 状态和事件一次提交；旧执行实例无权覆盖已收敛状态。
         if result.answer:
@@ -1087,7 +1114,7 @@ class AgentRunService:
         status: AgentRunStatus,
         error: Exception | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        """确定业务消息状态和公开错误，生命周期字段交给协议投影。"""
+        """确定业务消息状态和公开终态，内部异常只记录到日志。"""
         message_updates: dict[str, Any]
         error_code = None
         # 1.正常结束和等待输入都用普通消息状态，只有取消和失败才改消息终态。
@@ -1117,14 +1144,22 @@ class AgentRunService:
                     exc_info=(type(error), error, error.__traceback__),
                 )
 
-        # 3.生命周期投影共用同一份公开错误，运行摘要与界面文案不会各说一套。
-        return message_updates, project_execution_lifecycle(
-            status,
-            message_id=run.spec.message_id,
-            input_message_id=run.spec.input_message_id,
-            public_error=message_updates.get("error"),
-            error_code=error_code,
-        )
+        # 3.直接生成本轮公开生命周期，status 保留业务状态，event 兼容前端协议。
+        lifecycle: dict[str, Any] = {
+            "event": status.value,
+            "status": status.value,
+            "message_id": str(run.spec.message_id),
+            "input_message_id": run.spec.input_message_id,
+        }
+        if status is AgentRunStatus.WAITING_INPUT:
+            lifecycle.update(event="interrupted", reason="user_input_required")
+        elif status is AgentRunStatus.CANCELLED:
+            lifecycle.update(event="interrupted", reason="cancel_requested")
+        elif status is AgentRunStatus.FAILED:
+            lifecycle["error"] = message_updates.get("error") or "Agent 运行失败"
+            if error_code is not None:
+                lifecycle["code"] = error_code
+        return message_updates, lifecycle
 
     def _execute_background_run(self, flask_app: Flask, run: AgentRunExecution) -> None:
         """后台线程使用独立应用上下文和 Session，退出时兜底收敛失败状态。"""
@@ -1167,7 +1202,6 @@ class AgentRunService:
                 projector = AgentProtocolEventProjector(
                     run.run_id,
                     start_sequence=int(run.last_event_sequence or 0),
-                    root_message_id=f"{run.spec.message_id}:assistant",
                 )
             # 2.复用正常结算路径，终态行锁会拒绝覆盖已提交的终态。
             self._commit_result(

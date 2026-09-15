@@ -54,8 +54,8 @@ class AgentRun(db.Model):
             name="ck_agent_run_input_message_nonempty",
         ),
         CheckConstraint(
-            "(finished_at IS NULL OR started_at <= finished_at)",
-            name="ck_agent_run_started_before_finished",
+            "(finished_at IS NULL OR created_at <= finished_at)",
+            name="ck_agent_run_created_before_finished",
         ),
         CheckConstraint(
             "jsonb_typeof(invocation_snapshot) = 'object'",
@@ -116,19 +116,10 @@ class AgentRun(db.Model):
     cancel_requested_at = Column(
         DateTime, nullable=True
     )  # 收到取消请求的时间；执行线程与状态查询都读它，终态保留原值供追溯
-    started_at = Column(
-        DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
-    )  # 首次开始执行的时间；建行即赋值，暂停恢复不改
     finished_at = Column(DateTime, nullable=True)  # 进入终态的时间，等待用户输入时不设置
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
-    )
-    updated_at = Column(
-        DateTime,
-        nullable=False,
-        server_default=text("CURRENT_TIMESTAMP(0)"),
-        server_onupdate=text("CURRENT_TIMESTAMP(0)"),
-    )
+    )  # 建行即开始任务；暂停恢复不改，公开 started_at 由此映射
 
     @property
     def is_terminal(self) -> bool:
