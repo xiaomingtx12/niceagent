@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, defer, load_only
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity import AGENT_EXECUTION_ACTIVE_STATUSES, AGENT_EXECUTION_TERMINAL_STATUSES
 from internal.exception import NotFoundException
-from internal.model import Account, AgentExecution, AgentExecutionEvent, ConversationTurn
+from internal.model import Account, AgentExecution, AgentExecutionEvent, Conversation, ConversationTurn
 from internal.schema.agent.agent_model_schema import (
     AgentProtocolModelSettingsResp,
 )
@@ -23,6 +23,7 @@ from internal.schema.agent.agent_protocol_schema import (
     AgentProtocolMessagePageInfoResp, AgentProtocolRunMetadataResp, AgentProtocolRunSummaryResp,
     AgentProtocolRunEventsResp, AgentProtocolHistoryMessageResp,
     AgentProtocolRecoverySnapshotResp,
+    AgentProtocolRunStatusesResp, AgentProtocolRunResultResp,
 )
 from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
 from internal.core.agent_v2.entity.stream_event import (
@@ -200,6 +201,50 @@ class AgentExecutionQuery:
             conversation_id=row.conversation_id, app_id=row.app_id, account=account,
         )
         return self._build_recovery_snapshot(run_id)
+
+    def get_run_statuses(self, *, run_ids: list[UUID], account: Account) -> AgentProtocolRunStatusesResp:
+        """后台任务批量读取轻量列；仅返回当前账号拥有且未删除会话中的 Run。"""
+        ids = list(dict.fromkeys(run_ids))
+        rows = (
+            self.db.session.query(AgentExecution)
+            .join(Conversation, Conversation.id == AgentExecution.conversation_id)
+            .options(load_only(
+                AgentExecution.id, AgentExecution.turn_id, AgentExecution.input_message_id,
+                AgentExecution.status, AgentExecution.last_event_sequence, AgentExecution.created_at,
+                AgentExecution.finished_at, AgentExecution.error_message, raiseload=True,
+            ))
+            .filter(
+                AgentExecution.id.in_(ids), Conversation.owner_account_id == account.id,
+                Conversation.is_deleted.is_(False), Conversation.app_id == AgentExecution.app_id,
+            )
+            .all()
+        )
+        by_id = {row.id: row for row in rows}
+        return AgentProtocolRunStatusesResp(
+            runs=[self._run_summary(by_id[run_id]) for run_id in ids if run_id in by_id],
+            unavailable_run_ids=[run_id for run_id in ids if run_id not in by_id],
+        )
+
+    def get_run_result(self, *, run_id: UUID, account: Account) -> AgentProtocolRunResultResp:
+        """归属过滤与状态查询一致，回答和终态在同一条 SQL 中读取。"""
+        row = (
+            self.db.session.query(AgentExecution, ConversationTurn.answer)
+            .join(Conversation, Conversation.id == AgentExecution.conversation_id)
+            .join(ConversationTurn, ConversationTurn.id == AgentExecution.turn_id)
+            .options(load_only(
+                AgentExecution.id, AgentExecution.turn_id, AgentExecution.input_message_id,
+                AgentExecution.status, AgentExecution.last_event_sequence, AgentExecution.created_at,
+                AgentExecution.finished_at, AgentExecution.error_message, raiseload=True,
+            ))
+            .filter(
+                AgentExecution.id == run_id, Conversation.owner_account_id == account.id,
+                Conversation.is_deleted.is_(False), Conversation.app_id == AgentExecution.app_id,
+            )
+            .one_or_none()
+        )
+        if row is None:
+            raise NotFoundException("运行不存在或无权访问")
+        return AgentProtocolRunResultResp(run=self._run_summary(row[0]), answer=row.answer or "")
 
     def get_model_settings(
         self, *, account_id: UUID, app_id: UUID, conversation_id: UUID, created_by: UUID,

@@ -179,7 +179,24 @@ emit(event)
 
 每个 Markdown 组件最多排队一份最新正文；更新更快时覆盖尚未开始的旧任务，不堆积逐 Token 的解析队列。已开始的解析可以先显示当前正文的前缀，正文被替换或清空后丢弃不匹配的旧结果。最后一个组件卸载时释放 Worker；线程不可用时显示经过 Vue 文本转义的原文，不回退到主线程全文解析。
 
+[createAgentWorkbenchAdapter](../../my-dify-ui/src/services/agent-workbench.ts) 消费密集事件时，每处理约 8ms 让出一次浏览器任务队列。连续 `await` 已就绪的事件只会产生微任务，不能保证浏览器有机会处理点击；显式让出后仍按顺序继续，下一条事件重新检查会话与连接身份，切换页面后不再交付旧流。这个时间片约束的是事件之间的调度，不是单个大事件处理时长的硬上限。[ContextWindowInspector](../../my-dify-ui/src/components/ContextWindowInspector.vue) 的详细弹窗关闭后卸载内部内容，只有标题用量摘要继续更新。
+
+2026-09-16 使用真实会话的 3052 条公开事件做集中到达回放时，曾观测到约 2.38 秒的连续主线程阻塞；这与单个约 37 KB、30 条合并事件的子 Run snapshot 回放不同，后者未复现持续卡死。密集事件调度与隐藏弹窗优化针对已复现的阻塞路径，不据此认定所有“页面点不动”都是同一原因。
+
 2026-09-16 的本地开发模式浏览器诊断中，12 个子 Agent 展开、1000 条过程记录时，正文更新引起的点击等待从约 140–220ms 降至 6–12ms；2000 条记录从约 470–710ms 降至 9–13ms。约 15 万字符表格 Markdown 的更新期间，包含 Worker 回传和 DOM 更新的最大事件循环延迟约为 58ms。数据来自独立组件的模拟输入，不代表线上请求或整页性能承诺；超大内容的首次创建仍有 DOM 成本。
+
+### 6.5 异步子 Agent 为什么单独显示
+
+同步子 Agent 的过程属于父 Run 的嵌套事件，异步子 Agent 则有独立的 Run。将 `async_tasks` 当成同步子图渲染，会一直等待父流中不会出现的子任务输出，即使子任务早已完成。
+
+阅读顺序：
+
+1. [projectAsyncTaskEvents](../../my-dify-ui/src/utils/event-projection.ts) 将初始状态和实时 `values.async_tasks` 投影成 `async_task`，不混入同步 `subagent` 时间线。
+2. [AgentConversationWorkbench](../../my-dify-ui/src/components/AgentConversationWorkbench.vue) 合并初始清单和已加载任务记录，跨轮去重，刷新无需加载父执行历史。
+3. [WorkbenchAsyncTasks](../../my-dify-ui/src/components/WorkbenchAsyncTasks.vue) 提供顶部入口和默认关闭的侧栏，任务清单支持状态筛选与每次显示 30 条；批量确认真实子 Run 状态，终态停止轮询、隐藏暂停、离开释放请求。“查看详情”先调用轻量结果接口，详情中的执行过程展开后才调用已有快照接口；列表和详情共用同一侧栏，返回或关闭时取消详情请求。
+4. [AgentExecutionQuery](../internal/service/agent/agent_execution_query.py) 的 `get_run_statuses` 只读摘要列，`get_run_result` 读取已保存回答；两者只返回当前账号拥有且未删除会话中的 Run，不扫描事件表。
+
+父图里的任务记录用来发现任务，不作为界面的实时状态来源。这里不自动唤醒父 Agent；模型再次查询任务仍使用自己的工具。
 
 ## 7. 第二遍再读分支
 

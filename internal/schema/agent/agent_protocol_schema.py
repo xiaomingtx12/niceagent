@@ -385,6 +385,27 @@ class AgentProtocolRunSummaryResp(BaseModel):
     error: str | None = None
 
 
+class AgentProtocolRunStatusesReq(BaseModel):
+    """批量状态读取限制单次规模，UUID 校验集中在请求边界。"""
+
+    model_config = ConfigDict(extra="forbid")
+    run_ids: list[UUID] = Field(min_length=1, max_length=50)
+
+
+class AgentProtocolRunStatusesResp(BaseModel):
+    """缺失与无权访问统一为不可用，避免暴露其他账号的运行信息。"""
+
+    runs: list[AgentProtocolRunSummaryResp]
+    unavailable_run_ids: list[UUID]
+
+
+class AgentProtocolRunResultResp(BaseModel):
+    """按需读取已保存回答，不扫描执行事件。"""
+
+    run: AgentProtocolRunSummaryResp
+    answer: str
+
+
 class AgentProtocolStateResp(BaseModel):
     """兼容 LangGraph SDK 的工作台状态响应。"""
 
@@ -439,6 +460,9 @@ __all__ = [
     "AgentProtocolMessagePageInfoResp",
     "AgentProtocolRunMetadataResp",
     "AgentProtocolRunSummaryResp",
+    "AgentProtocolRunStatusesReq",
+    "AgentProtocolRunStatusesResp",
+    "AgentProtocolRunResultResp",
     "AgentProtocolStateResp",
     "AgentProtocolCancelResp",
 ]

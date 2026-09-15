@@ -283,7 +283,8 @@ class InternalAgentProtocolService:
             "cancelled": "cancelled",
         }.get(str(row.status), "error")
         created_at = _format_datetime(row.created_at)
-        updated_at = _format_datetime(row.updated_at or row.created_at)
+        # Execution 没有通用更新时间；SDK 时间取已保存的结束时间，运行中取创建时间。
+        updated_at = _format_datetime(row.finished_at or row.created_at)
         return InternalRunResp(
             run_id=row.id,
             thread_id=row.conversation_id,

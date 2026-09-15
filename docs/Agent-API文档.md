@@ -608,6 +608,25 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
 
 ---
 
+### 2.2 批量读取运行状态
+
+`GET /agent-runs/statuses?run_id=<uuid>&run_id=<uuid>`，需要登录，返回原始 JSON。
+
+- `run_id` 为重复查询参数，单次 1 至 50 个 UUID，服务端按输入顺序去重。
+- `runs` 为可访问 Run 的摘要数组：`run_id`、`message_id`、`input_message_id`、`status`、`last_event_sequence`、`created_at`、`started_at`、`finished_at`、`error`。
+- `unavailable_run_ids` 为不存在或无权访问的 ID，两种情况不对客户端区分。
+- 仅允许读取 `owner_account_id` 为当前账号且未删除会话中的运行，不读取展示状态、回答或执行事件。
+
+工作台每 3 秒查询未结束的后台任务；终态不再查询，隐藏暂停，网络失败提示重试。该接口不会启动、恢复或修改 Run。
+
+### 2.3 读取运行的已保存回答
+
+`GET /agent-runs/:run_id/result`，需要登录，返回原始 JSON：`{ "run": <运行摘要>, "answer": <已保存文字回答> }`。
+
+归属条件与批量状态一致，不存在或无权访问时拒绝读取。摘要和回答由同一条查询取得，不扫描事件；运行中可能没有已保存回答，空字符串不代表任务失败。查看完整执行过程继续使用 `GET /agent-runs/:run_id/snapshot`。
+
+---
+
 ## 03. 内部 Agent Protocol 模块
 
 本模块用于平台内部已发布 Agent 之间通过 LangGraph SDK 互调，**路由注册在 `my_dify` 蓝图但没有任何 `@login_required`**，唯一凭证是 HMAC 签名的内部 Token。
