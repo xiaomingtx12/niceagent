@@ -1,4 +1,4 @@
-"""摘要生成的公开进度通知；不参与调用链和用量统计。"""
+"""模型请求与摘要生成的公开进度通知；不参与调用链和用量统计。"""
 
 from __future__ import annotations
 
@@ -20,17 +20,18 @@ from internal.extension.logging_extension import logger
 
 
 @dataclass
-class _SummaryCall:
+class _ModelCall:
     """在开始回调中捕获子图 writer，结束回调可能已经离开该图上下文。"""
 
     writer: Callable[[Any], None]
     started_at: datetime
     started_monotonic: float
+    summarization: bool
     publish_lock: RLock = field(default_factory=RLock)
 
 
-class SummaryProgressCallback(BaseCallbackHandler):
-    """只发布 SDK 标记的摘要生成进度，不推断上下文是否已完成压缩。"""
+class ModelProgressCallback(BaseCallbackHandler):
+    """请求开始即通知工作台；摘要调用仍使用独立的压缩进度语义。"""
 
     run_inline = True
     raise_error = False
@@ -38,7 +39,7 @@ class SummaryProgressCallback(BaseCallbackHandler):
     def __init__(self) -> None:
         """每次执行独占状态，以调用 ID 隔离并发子图。"""
         super().__init__()
-        self._calls: dict[str, _SummaryCall] = {}
+        self._calls: dict[str, _ModelCall] = {}
         self._lock = RLock()
         self._closed = False
 
@@ -53,17 +54,18 @@ class SummaryProgressCallback(BaseCallbackHandler):
         self, serialized: dict[str, Any], prompts: list[str], *, run_id: UUID,
         metadata: dict[str, Any] | None = None, **kwargs: Any,
     ) -> None:
-        """非聊天模型沿用相同的摘要来源判断。"""
+        """非聊天模型沿用同一调用生命周期。"""
         self._start(run_id, metadata)
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
-        """只为已登记的摘要响应读取用量，不维护累计统计。"""
+        """普通调用只发布终态，摘要保留原有的用量展示。"""
         with self._lock:
             call = self._calls.pop(str(run_id), None)
         if call is not None:
-            usage = normalize_llm_result(response)
+            usage = normalize_llm_result(response) if call.summarization else None
+            public_usage = usage.to_dict() if usage and usage.present else None
             with call.publish_lock:
-                self._publish(str(run_id), call, "completed", usage=usage.to_dict() if usage.present else None)
+                self._publish(str(run_id), call, "completed", usage=public_usage)
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         """消费调用状态后发布终态，重复结束不会再次通知。"""
@@ -81,48 +83,54 @@ class SummaryProgressCallback(BaseCallbackHandler):
             self._calls.clear()
 
     def _start(self, run_id: UUID, metadata: Mapping[str, Any] | None) -> None:
-        """普通模型调用和无图上下文的调用都不产生公开通知。"""
-        if not metadata or metadata.get("lc_source") != "summarization":
-            return
+        """在首个 Token 之前捕获 writer；无图上下文的调用不公开。"""
+        # 1.在模型所属图内捕获 writer，结束回调不再依赖当时的上下文。
         try:
             writer = get_stream_writer()
         except RuntimeError:
             return
         call_id = str(run_id)
         with self._lock:
+            # 2.登记调用并占用发布锁，保证并发结束回调不会先于开始通知。
             if self._closed or call_id in self._calls:
                 return
-            call = _SummaryCall(writer, datetime.now(UTC), monotonic())
-            # 新调用的锁尚无竞争；先占用以保证结束通知不能超过开始通知。
+            call = _ModelCall(
+                writer=writer,
+                started_at=datetime.now(UTC),
+                started_monotonic=monotonic(),
+                summarization=bool(metadata and metadata.get("lc_source") == "summarization"),
+            )
             call.publish_lock.acquire()
             self._calls[call_id] = call
         try:
-            self._publish(call_id, call, "summarizing")
+            # 3.在注册表锁外发布；不同模型调用不相互等待。
+            self._publish(call_id, call, "summarizing" if call.summarization else "started")
         finally:
             call.publish_lock.release()
 
     @staticmethod
     def _publish(
         call_id: str,
-        call: _SummaryCall,
+        call: _ModelCall,
         phase: str,
         *,
         usage: dict[str, Any] | None = None,
     ) -> None:
         """公开载荷不含正文或错误详情；通知失败不能影响模型统计。"""
         payload = {
-            "type": "context_compaction",
-            "scope": "summary_generation",
-            "compaction_id": call_id,
             "phase": phase,
             "started_at": int(call.started_at.timestamp() * 1000),
             "ended_at": (
                 int(datetime.now(UTC).timestamp() * 1000)
-                if phase != "summarizing"
+                if phase not in {"summarizing", "started"}
                 else None
             ),
             "duration_ms": max(0, int((monotonic() - call.started_monotonic) * 1000)),
         }
+        if call.summarization:
+            payload.update(type="context_compaction", scope="summary_generation", compaction_id=call_id)
+        else:
+            payload.update(type="model_progress", model_run_id=call_id)
         if usage is not None:
             payload.update(
                 input_tokens=usage.get("input_tokens"),
@@ -131,4 +139,4 @@ class SummaryProgressCallback(BaseCallbackHandler):
         try:
             call.writer(payload)
         except Exception:
-            logger.exception("摘要观测事件发布失败 call_id=%s", call_id)
+            logger.exception("模型进度事件发布失败 call_id=%s", call_id)

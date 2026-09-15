@@ -20,7 +20,7 @@ from internal.core.agent_v2.execution.event_normalizer import AgentEventNormaliz
 from internal.core.agent_v2.execution.json_serialization import to_json_value
 from internal.core.agent_v2.execution.message_text import extract_final_answer
 from internal.core.agent_v2.execution.runtime_resources import AgentRuntimeResources
-from internal.core.agent_v2.execution.summary_progress import SummaryProgressCallback
+from internal.core.agent_v2.execution.model_progress import ModelProgressCallback
 from internal.core.agent_v2.execution.user_input_interrupt_tracker import UserInputInterruptTracker
 from internal.core.agent_v2.observability.run_observer import PlatformAgentRunObserver
 from internal.extension.logging_extension import logger
@@ -151,17 +151,18 @@ class AgentExecutor:
         interrupts: tuple[dict[str, Any], ...] = ()
         error: Exception | None = None
         normalizer = AgentEventNormalizer()
-        summary_progress = SummaryProgressCallback()
+        model_progress = ModelProgressCallback()
         interrupt_tracker = UserInputInterruptTracker()
         try:
+            # 1.每次执行独立绑定统计、中断和进度回调，避免跨片段保留模型调用状态。
             config = merge_configs(
                 self._resources.runtime_context.conversation.to_config(),
                 {
                     "run_id": self._observer.run_id,
-                    "callbacks": [self._observer, interrupt_tracker, summary_progress],
+                    "callbacks": [self._observer, interrupt_tracker, model_progress],
                 },
             )
-            # 新消息走普通输入：LangGraph 丢弃旧调度，DeepAgents 补齐被取消的工具回执。
+            # 2.新消息走普通输入：LangGraph 丢弃旧调度，DeepAgents 补齐被取消的工具回执。
             # 只有已接受的表单提交才走 resume；不能将停止后的下一轮当成旧中断恢复。
             with self._graph.stream_events(
                 Command(resume=dict(resume)) if resume is not None else {"messages": [message]},
@@ -172,14 +173,14 @@ class AgentExecutor:
                     params = raw_event["params"]
                     data = params["data"]
                     channel = raw_event["method"]
-                    # 排空期间仍保存根状态，子图快照不能覆盖最终回答。
+                    # 3.排空期间仍保存根状态，子图快照不能覆盖最终回答。
                     if channel == "values" and not params["namespace"] and isinstance(data, Mapping):
                         state = dict(data)
                     if cancel_requested.is_set():
                         if not control.drain_requested:
                             self.request_cancel()
                         continue
-                    # ask_user 的 GraphInterrupt 是正常暂停，不作为工具失败交付。
+                    # 4.ask_user 的 GraphInterrupt 是正常暂停，其余公开事件按序交付。
                     if (channel == "tools" and isinstance(data, Mapping)
                             and data.get("event") == "tool-error"
                             and interrupt_tracker.is_interrupted(data.get("tool_call_id"))):
@@ -189,6 +190,7 @@ class AgentExecutor:
                         continue
                     for event in events:
                         on_event(event)
+                # 5.流退出后收集有效中断，业务层据此保存当前待填批次。
                 if stream.interrupted:
                     interrupts = tuple(
                         {"interrupt_id": item.id, "namespace": [], "payload": item.value}
@@ -202,10 +204,11 @@ class AgentExecutor:
         except Exception as exc:
             error = exc
         finally:
+            # 6.无论完成、暂停还是失败，都释放回调持有的子图 writer。
             try:
-                summary_progress.close()
+                model_progress.close()
             except Exception as exc:
-                logger.exception("Agent 摘要进度关闭失败")
+                logger.exception("Agent 模型进度关闭失败")
                 if error is None:
                     error = exc
         return state, interrupts, error

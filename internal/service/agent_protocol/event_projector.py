@@ -9,8 +9,28 @@ from pydantic import ValidationError
 
 from internal.schema.agent.agent_protocol_schema import PUBLIC_EVENT_METHODS, AgentProtocolEvent
 from internal.schema.agent.agent_context_schema import ContextCompactionResp, ContextWindowResp
+from internal.schema.agent.agent_model_progress_schema import AgentModelProgressResp
 
-_CUSTOM_SCHEMAS = {"context_window": ContextWindowResp, "context_compaction": ContextCompactionResp}
+_CUSTOM_SCHEMAS = {
+    "context_window": ContextWindowResp,
+    "context_compaction": ContextCompactionResp,
+    "model_progress": AgentModelProgressResp,
+}
+TOOL_ARGUMENT_CONTENT_TYPES = ("tool_call", "tool_call_chunk", "server_tool_call", "server_tool_call_chunk")
+
+
+def is_tool_argument_delta(data: Mapping[str, Any]) -> bool:
+    """只过滤已识别的参数生成分片；完整调用、正文和未知内容仍交付工作台。"""
+    if data.get("event") != "content-block-delta":
+        return False
+    content = data.get("content")
+    if isinstance(content, Mapping):
+        return content.get("type") in TOOL_ARGUMENT_CONTENT_TYPES
+    delta = data.get("delta")
+    if not isinstance(delta, Mapping) or delta.get("type") != "block-delta":
+        return False
+    fields = delta.get("fields")
+    return isinstance(fields, Mapping) and fields.get("type") in TOOL_ARGUMENT_CONTENT_TYPES
 
 
 class AgentProtocolEventProjector:
@@ -92,7 +112,7 @@ class AgentProtocolEventProjector:
 
 
 def normalize_custom_data(data: Any) -> dict[str, Any] | None:
-    """只展示已定义的上下文观测数据，兼容历史命名载荷。"""
+    """只展示已定义的公开进度数据，兼容历史命名载荷。"""
     # 1.兼容原始 payload 与已包装的历史载荷，统一取出待校验数据。
     if not isinstance(data, Mapping):
         return None

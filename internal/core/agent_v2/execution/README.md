@@ -32,7 +32,7 @@ graph.stream_events(version="v3")            框架原始流（GraphRunStream，
 | `message_text.py` | 正文提取：`extract_text` 拼接文本块，`extract_final_answer` 选取本轮最后一条有正文的 AI 回答 |
 | `json_serialization.py` | 出口序列化：`to_json_value` 将框架消息、UUID 和嵌套数据转换为 JSON 兼容值 |
 | `runtime_resources.py` | 一次执行的资源打包：Backend、Checkpointer、Store、Skill 投影与运行上下文 |
-| `summary_progress.py` | 摘要生成进度观测：只发布 SDK 标记（`lc_source=summarization`）的压缩阶段事件 |
+| `model_progress.py` | 在首个 Token 前发布模型请求边界，与消息流共用调用 ID；SDK 标记的摘要调用仍单独发布压缩阶段事件 |
 | `user_input_interrupt_tracker.py` | 识别 `ask_user` 工具的 `GraphInterrupt`，让事件交付把正常暂停与真实工具失败区分开 |
 | `evaluation_evidence.py` | 测评取证：从实际状态提取候选答案与文件，做确定性核验，不调用评分模型 |
 | `workspace_delivery.py` | 显式交付（deliver_file）路径：把本轮工作副本落回持久化来源 |
