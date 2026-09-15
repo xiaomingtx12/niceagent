@@ -6,6 +6,25 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr, model_validator
+from internal.entity import AgentExecutionInput
+from internal.schema.agent.agent_protocol_schema import AgentProtocolInputOptionsReq, AgentProtocolUserMessageReq
+
+
+class InternalRunInputReq(AgentProtocolInputOptionsReq):
+    """内部 SDK 的图输入，独立于公开 commands 的消息 ID 要求。"""
+
+    model_config = ConfigDict(extra="ignore")
+
+    messages: list[AgentProtocolUserMessageReq] = Field(default_factory=list)
+    query: StrictStr | None = None
+
+    def to_run_input(self) -> AgentExecutionInput:
+        """把 SDK 消息或 query 转成业务输入，不替调用者伪造幂等标识。"""
+        message = self.messages[-1] if self.messages else None
+        return self.to_execution_input(
+            query=message.text if message is not None else (self.query or ""),
+            message_id=message.id if message is not None else None,
+        )
 
 
 class InternalThreadResp(BaseModel):
@@ -55,6 +74,7 @@ class InternalRunResp(BaseModel):
 
 
 __all__ = [
+    "InternalRunInputReq",
     "InternalRunCreateReq",
     "InternalRunResp",
     "InternalThreadResp",

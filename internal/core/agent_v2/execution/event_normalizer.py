@@ -8,10 +8,8 @@ from langchain_core.messages import AIMessageChunk, BaseMessage, ToolMessage
 from langgraph.stream import ProtocolEvent
 
 from ..entity.agent_event import AgentEvent
+from ..entity.stream_event import CORE_EVENT_CHANNELS, EventChannel
 from .json_serialization import to_json_value
-
-_CHANNELS = frozenset({"messages", "values", "tools", "lifecycle", "custom"})
-
 
 class AgentEventNormalizer:
     """单次执行的协议适配器，只保存交付序号，不缓存正文或推断消息终态。"""
@@ -23,22 +21,23 @@ class AgentEventNormalizer:
     def accept(self, raw: ProtocolEvent) -> list[AgentEvent]:
         """输入来自框架的有序 v3 流；只适配公开通道，不重复校验协议外壳。"""
         channel = raw["method"]
-        if channel not in _CHANNELS:
+        if channel not in CORE_EVENT_CHANNELS:
             return []
+        channel = EventChannel(channel)
 
         params = raw["params"]
         namespace = tuple(params["namespace"])
         timestamp = params.get("timestamp")
         data = params["data"]
 
-        if channel == "messages":
+        if channel == EventChannel.MESSAGES:
             return self._normalize_messages(data, namespace=namespace, timestamp=timestamp)
 
         if not isinstance(data, Mapping):
-            if channel == "custom":
+            if channel == EventChannel.CUSTOM:
                 return []
             raise ValueError("Agent state and tool events must contain a mapping")
-        if channel == "lifecycle" and not namespace:
+        if channel == EventChannel.LIFECYCLE and not namespace:
             namespace = tuple(data.get("namespace") or ())
         return [self._emit(channel, data, namespace=namespace, timestamp=timestamp)]
 
@@ -54,7 +53,7 @@ class AgentEventNormalizer:
         if isinstance(payload, Mapping) and "event" in payload:
             message_events = [payload]
         elif isinstance(payload, BaseMessage) and not isinstance(payload, (AIMessageChunk, ToolMessage)):
-            # 节点、缓存等返回的完整消息仍交给框架转换，不把旧式 token chunk 当整条消息回放。
+            # 按当前 SDK 规则转换节点、缓存返回的完整消息；chunk 和工具消息不重复回放。
             message_events = message_to_events(payload, message_id=payload.id)
         else:
             return []
@@ -63,14 +62,14 @@ class AgentEventNormalizer:
         model_run_id = metadata.get("run_id")
         return [
             self._emit(
-                "messages", event, namespace=namespace, timestamp=timestamp,
+                EventChannel.MESSAGES, event, namespace=namespace, timestamp=timestamp,
                 node=node, model_run_id=str(model_run_id) if model_run_id is not None else None,
             )
             for event in message_events
         ]
 
     def _emit(
-        self, channel: str, data: Mapping[str, Any], *, namespace: tuple[str, ...],
+        self, channel: EventChannel, data: Mapping[str, Any], *, namespace: tuple[str, ...],
         timestamp: Any, node: str | None = None, model_run_id: str | None = None,
     ) -> AgentEvent:
         """出口统一分配交付序号并序列化载荷，业务层无需理解框架消息对象。"""

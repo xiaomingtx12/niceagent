@@ -7,34 +7,22 @@ import time
 
 from pydantic import ValidationError
 
+from internal.core.agent_v2.entity.agent_event import AgentEvent
+from internal.core.agent_v2.entity.stream_event import CustomEventType, EventChannel
 from internal.schema.agent.agent_protocol_schema import PUBLIC_EVENT_METHODS, AgentProtocolEvent
 from internal.schema.agent.agent_context_schema import ContextCompactionResp, ContextWindowResp
 from internal.schema.agent.agent_model_progress_schema import AgentModelProgressResp
+from .state_projector import adapt_graph_state
 
 _CUSTOM_SCHEMAS = {
-    "context_window": ContextWindowResp,
-    "context_compaction": ContextCompactionResp,
-    "model_progress": AgentModelProgressResp,
+    CustomEventType.CONTEXT_WINDOW: ContextWindowResp,
+    CustomEventType.CONTEXT_COMPACTION: ContextCompactionResp,
+    CustomEventType.MODEL_PROGRESS: AgentModelProgressResp,
 }
-TOOL_ARGUMENT_CONTENT_TYPES = ("tool_call", "tool_call_chunk", "server_tool_call", "server_tool_call_chunk")
-
-
-def is_tool_argument_delta(data: Mapping[str, Any]) -> bool:
-    """只过滤已识别的参数生成分片；完整调用、正文和未知内容仍交付工作台。"""
-    if data.get("event") != "content-block-delta":
-        return False
-    content = data.get("content")
-    if isinstance(content, Mapping):
-        return content.get("type") in TOOL_ARGUMENT_CONTENT_TYPES
-    delta = data.get("delta")
-    if not isinstance(delta, Mapping) or delta.get("type") != "block-delta":
-        return False
-    fields = delta.get("fields")
-    return isinstance(fields, Mapping) and fields.get("type") in TOOL_ARGUMENT_CONTENT_TYPES
 
 
 class AgentProtocolEventProjector:
-    """共用 Run 的持久化事件序号；生成协议外壳并解析历史事件。"""
+    """集中处理工作台可见范围、业务身份与编号；不管理写线程和订阅。"""
 
     def __init__(self, run_id: UUID | str, *, start_sequence: int = 0) -> None:
         """公开序号可从历史游标继续，Core 执行序号每次恢复重新开始。"""
@@ -42,6 +30,31 @@ class AgentProtocolEventProjector:
             raise ValueError("protocol start sequence must be non-negative")
         self.run_id = str(run_id)
         self.last_event_sequence = start_sequence
+
+    def project_agent_event(self, event: AgentEvent, *, turn_id: UUID) -> AgentProtocolEvent | None:
+        """过滤发生在编号之前；根图终态由结果保存事务另行发布。"""
+        if event.is_root_terminal:
+            return None
+        data = event.data
+        match event.channel:
+            case EventChannel.CUSTOM:
+                data = normalize_custom_data(data)
+                if data is None:
+                    return None
+            case EventChannel.VALUES:
+                data = adapt_graph_state(data)
+            case EventChannel.MESSAGES:
+                message = event.message
+                assert message is not None
+                if message.is_tool_argument_delta:
+                    return None
+                if not event.namespace and message.is_assistant_start:
+                    data = {**data, "id": f"{turn_id}:assistant"}
+        return self.create_event(
+            event.channel, data, namespace=event.namespace, timestamp=event.timestamp,
+            node=event.node, source="agent_v2", source_sequence=event.sequence,
+            model_run_id=event.model_run_id,
+        )
 
     def create_business_event(
         self, method: Literal["values", "lifecycle", "input.requested"], data: Mapping[str, Any],
@@ -53,32 +66,35 @@ class AgentProtocolEventProjector:
     def create_state_transition(self, state: Mapping[str, Any], lifecycle: Mapping[str, Any]) -> list[AgentProtocolEvent]:
         """状态、表单、生命周期按顺序生成，调用方负责同一事务提交。"""
         # 1.先交付状态，使客户端拿到生成表单所需的快照。
-        events = [self.create_business_event("values", state)]
+        events = [self.create_business_event(EventChannel.VALUES, state)]
         # 2.每个待输入中断生成独立表单事件，沿用中断 ID 提交答案。
         for item in state.get("pending_inputs", []):
-            events.append(self.create_business_event("input.requested", {
+            events.append(self.create_business_event(EventChannel.INPUT_REQUESTED, {
                 "interrupt_id": item["interrupt_id"], "payload": item["payload"],
             }))
         # 3.生命周期放在最后，避免客户端先结束订阅而漏掉状态或表单。
-        events.append(self.create_business_event("lifecycle", lifecycle))
+        events.append(self.create_business_event(EventChannel.LIFECYCLE, lifecycle))
         return events
 
     @staticmethod
     def parse_stored_event(event: Mapping[str, Any]) -> AgentProtocolEvent | None:
-        """只用于历史 JSON 读取，实时事件不再走历史兼容转换。"""
+        """历史读取当前协议外壳，custom 只接受当前保存的 name/payload 结构。"""
         # 1.未知通道不参与重放；普通公开事件直接按协议 DTO 读取。
         method = event.get("method")
         if not isinstance(method, str) or method not in PUBLIC_EVENT_METHODS:
             return None
-        if method != "custom":
+        if method != EventChannel.CUSTOM:
             return AgentProtocolEvent.model_validate(event)
 
         # 2.历史 custom 载荷仍须通过当前白名单，不直接信任存储中的任意自定义数据。
         params = event.get("params")
         if not isinstance(params, Mapping):
             return None
-        data = normalize_custom_data(params.get("data"))
-        if data is None:
+        envelope = params.get("data")
+        if not isinstance(envelope, Mapping):
+            return None
+        data = normalize_custom_data(envelope.get("payload"))
+        if data is None or envelope.get("name") != data["name"]:
             return None
 
         # 3.仅替换规范化后的载荷，保留历史事件 ID、序号和其他参数。
@@ -112,20 +128,17 @@ class AgentProtocolEventProjector:
 
 
 def normalize_custom_data(data: Any) -> dict[str, Any] | None:
-    """只展示已定义的公开进度数据，兼容历史命名载荷。"""
-    # 1.兼容原始 payload 与已包装的历史载荷，统一取出待校验数据。
+    """将 Core 的原始进度载荷校验后包装为当前工作台 name/payload 结构。"""
+    # 1.Core 固定提供带 type 的载荷，已包装事件只由历史读取入口解包。
     if not isinstance(data, Mapping):
         return None
-    payload = data.get("payload") if data.get("name") in _CUSTOM_SCHEMAS else data
-    if not isinstance(payload, Mapping):
-        return None
     # 2.只有明确登记的自定义类型可以公开，其他类型直接忽略。
-    schema = _CUSTOM_SCHEMAS.get(payload.get("type"))
+    schema = _CUSTOM_SCHEMAS.get(data.get("type"))
     if schema is None:
         return None
     # 3.校验字段后重新序列化，实时交付和历史重放使用相同数据形状。
     try:
-        validated = schema.model_validate(payload)
+        validated = schema.model_validate(data)
     except ValidationError:
         return None
     return {"name": validated.type, "payload": validated.model_dump(mode="json")}

@@ -32,13 +32,13 @@
 
 时序、资源所有权与验证步骤见 [Agent 业务文档](../../../docs/Agent-业务文档.md) 的 Run 生命周期与执行链路两节。
 
-会话状态接口只返回消息、Run 摘要和公开状态，不加载执行事件。执行过程由历史分页和实时 SSE 提供；前端共用一个事件集合，运行摘要不再转换为合成事件。
+会话状态接口只返回最近 20 轮问答、相关 Run 摘要和公开状态，不加载执行事件。`_read_state` 独占一个短只读 `REPEATABLE READ` 事务，保证问答与运行状态来自同一数据库快照，读取结束即释放连接；历史 Run 只加载摘要列，展示状态和表单大字段仅加载最新 Run。执行过程由历史快照和实时 SSE 提供；前端共用一个事件集合，运行摘要不再转换为合成事件。
 
 事件缓冲的 `receive` 直接筛选 Core 事件、适配载荷并绑定业务消息 ID，调用共用编号器生成 `AgentProtocolEvent` 后合批提交。Core 解析框架消息并过滤摘要，前端根据真实终态收尾未完成记录；`parse_stored_event` 仅用于读取历史 JSON。
 
 每个活动片段独占一个写线程和 Flask 应用上下文，不跨线程共用数据库 Session。每批最多 128 个事件，未凑满时等待最多 250ms 后提交，空闲小批次也会保存；待写队列最多 512 个事件，实时尾部保留最近 2048 个事件。先登记待写队列再实时发布，只有持续写入拥塞才施加背压，因此正常情况下淘汰的历史都已落库。结束前 `finish()` 排空并回收线程，异常尾批在调用线程重试一次；仍失败则只能按失败结算，不能宣告成功。片段退出后释放内存尾部，后续历史统一读库。
 
-`_commit_result` 直接构造执行结果状态与待填写表单，`_prepare_result_status` 直接生成业务消息状态和公开生命周期。待填写任务与聊天历史直接在 `AgentExecutionQuery.get_state` 内构造；`state_projector` 只保留实时事件和状态查询共用的转换。
+`_commit_result` 直接构造执行结果状态与待填写表单，`_prepare_result_status` 直接生成业务消息状态和公开生命周期。`AgentExecutionQuery.get_state` 负责组装页面状态与待填写任务；`_turn_messages` 和 `_run_summary` 由 state 与恢复快照共用，统一消息身份、用量和失败原因。`state_projector` 只保留实时事件和状态查询共用的转换。
 
 后台执行只向 Core 传入 `message` 或 `resume`、事件接收方和取消信号，不构造 LangGraph Command。取消监控只等待进程内取消信号，收到后调用 `AgentExecutor.request_cancel()` 请求图排空；阻塞中的工具只有主动排空才会立刻停止。微信兼容入口也使用 `execute(message=...)`，直接保存结果中的回答与用量。
 
@@ -47,7 +47,9 @@
 - `restart_run`（内部 SDK 更新）：先校验新输入，再取消并有界等待旧执行释放，最后沿用正常启动事务。
 - `submit_answers` 复核答案、身份和配置指纹，提交后才恢复图执行。
 - 前端补充表单在提交失败后保留答案，允许按同批中断 ID 再次提交；Submission 记录本批已接受答案和游标，避免重复恢复。它不保存 Agent 最终回复。
-- 已停止 Run 不可重开；旧 `input.reopen` 命令返回明确拒绝，下一条普通消息创建新 Run。
+- 已停止 Run 不可重开；commands 仅接受 `run.start` 与 `input.respond`，下一条普通消息创建新 Run。
+- `run.start` 使用 `params.input.messages`，每条用户消息必须带非空 `id`。同 ID 同输入返回原 Run，不同输入拒绝；命令外壳的 `id` 只用于关联响应。
+- 启动校验与恢复指纹复用同一次应用定义读取；会话锁内继续保证去重、占用检查与创建的原子性。
 - `_request_cancel` 对活动运行请求停止；没有执行线程的待填运行直接原子取消并清空待填表单；新输入由 LangGraph 丢弃旧调度，DeepAgents 的工具回执修复保留可用历史。
 - 同一会话的操作先锁会话，再锁 Run；重构时保留各入口原有的 Run 查询范围。
 - `internal/entity/agent_run_interaction.py` 集中维护表单校验、批次身份和已确认问答生成；已提交答案直接查询 `AgentExecutionSubmission`，不扫描快照数组。
@@ -74,7 +76,7 @@
 - 已发布子 Agent 的模型由其发布配置决定，自定义跟随子 Agent 绑定本次父模型。
 - SDK 的命令 ID、分派及成功／错误外壳由命令入口 `respond_command` 处理：按已解析参数直接分派 `start_run` / `submit_answers`，业务命令返回 `RunAccepted` 或 `RunRejected`。
 - SSE 续传在 `AgentExecutionQuery._stream_events` 内切换数据库前缀和实时尾部：游标按扫描序号前进，过滤只影响发送，隐藏事件不阻断续传。
-- 公开事件通道词表只在 `agent_protocol_schema.PUBLIC_EVENT_METHODS` 定义一次：DTO 校验的 `Literal`、历史回放过滤和持久化查询都从它派生，新增通道只改这一处。
+- 公开事件通道词表由 `core/agent_v2/entity/stream_event.EventChannel` 定义：`agent_protocol_schema.PUBLIC_EVENT_METHODS`、DTO 校验、历史回放过滤和查询从它派生。
 
 ## 数据对象的位置
 
@@ -92,3 +94,7 @@
 后台调度的线程池、进程内取消信号和公开错误映射仍在平台层；`AgentExecutionService` 负责数据库锁、事件/消息/快照的原子提交，观测合并函数只处理数据。事件缓冲通过 `_record_events` 回调提交，不反向依赖服务类。
 
 内部异步子 Agent 的 SDK 服务与鉴权位于 `../internal_agent_protocol`，前端事件投影保留在 `../agent_protocol`。
+
+命令输入边界：`AgentProtocolCommandInputReq` 直接声明消息及 ID 必填，拒绝未知业务输入字段；内部 `runs` 使用独立的 `InternalRunInputReq`，共用运行选项校验，不把内部 query 形式带入公开命令。数组字段省略时为空，显式 null 不再兼容。
+
+订阅查询先验证不可变的 Run 归属，再直接按 execution_id 与 sequence 读取事件；占用检查只读状态与取消标记。前端适配器独立管理订阅身份，通过 onRunChange 通知 Hook，不再由 SDK 完成回调反向 resetRun。

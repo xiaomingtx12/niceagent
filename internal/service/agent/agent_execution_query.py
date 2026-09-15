@@ -10,7 +10,7 @@ from uuid import UUID
 from injector import inject
 from sqlalchemy import case, func, or_
 from sqlalchemy.dialects.postgresql import array
-from sqlalchemy.orm import defer
+from sqlalchemy.orm import Session, defer, load_only
 from internal.entity.conversation_entity import InvokeFrom
 from internal.entity import AGENT_EXECUTION_ACTIVE_STATUSES, AGENT_EXECUTION_TERMINAL_STATUSES
 from internal.exception import NotFoundException
@@ -24,7 +24,10 @@ from internal.schema.agent.agent_protocol_schema import (
     AgentProtocolRunEventsResp, AgentProtocolHistoryMessageResp,
     AgentProtocolRecoverySnapshotResp,
 )
-from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector, TOOL_ARGUMENT_CONTENT_TYPES
+from internal.service.agent_protocol.event_projector import AgentProtocolEventProjector
+from internal.core.agent_v2.entity.stream_event import (
+    DeltaKind, EventChannel, MessageEventKind, TOOL_ARGUMENT_CONTENT_TYPES,
+)
 from internal.service.agent_protocol.state_projector import select_public_snapshot
 from internal.service.agent_protocol.recovery_snapshot import compact_execution_events
 from internal.service.conversation.conversation_service import ConversationService
@@ -72,7 +75,7 @@ class AgentExecutionQuery:
         self.db.session.close()
         # 2.返回延迟执行的生成器，首批事件会在 SSE 响应开始迭代后读取。
         return self._stream_events(
-            conversation_id=conversation_id, invoke_from=invoke_from,
+            conversation_id=conversation_id,
             stream_request=stream_request, run_id=run_id,
         )
 
@@ -80,89 +83,22 @@ class AgentExecutionQuery:
         self, *, conversation_id: UUID, invoke_from: InvokeFrom,
     ) -> AgentProtocolStateResp:
         """读取已授权会话在指定入口下的状态。"""
-        # 1.重连和轮询都从这里读真实状态，只读不写；崩溃残留的运行中记录由下一次写操作收敛。
-        rows, has_more, next_before = self.conversation_service.get_turn_page(
-            conversation_id=conversation_id,
-            page_size=20,
-        )
-        message_page = AgentProtocolMessagePageInfoResp(
-            has_more=has_more,
-            next_before=next_before,
-        )
-        # 状态不受消息分页截断：一条查询同时取回消息页关联 Run 和当前入口最新 Run。
-        message_ids = [message.id for message in rows]
-        latest_run_id = (
-            self.db.session.query(AgentExecution.id)
-            .filter(
-                AgentExecution.conversation_id == conversation_id,
-                AgentExecution.invoke_from == invoke_from.value,
-            )
-            .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
-            .limit(1)
-            .scalar_subquery()
-        )
-        persisted_runs = (
-            self.db.session.query(AgentExecution)
-            .options(defer(AgentExecution.execution_options))
-            .filter(
-                AgentExecution.conversation_id == conversation_id,
-                AgentExecution.invoke_from == invoke_from.value,
-                or_(AgentExecution.turn_id.in_(message_ids), AgentExecution.id == latest_run_id),
-            )
-            .order_by(AgentExecution.created_at.asc(), AgentExecution.id.asc())
-            .all()
-        )
-        # 2.将业务记录展开为用户和助手消息；先确定身份，再构造消息载荷。
-        runs_by_message = {run.turn_id: run for run in persisted_runs}
-        messages: list[AgentProtocolHistoryMessageResp] = []
-        for row in rows:
-            run = runs_by_message.get(row.id)
-            run_id = str(run.id) if run is not None else row.trace_id
-            input_message_id = run.input_message_id if run is not None else None
-            human_id = input_message_id or f"{row.id}:human"
-
-            # 用户消息始终存在，附件跟随用户输入；没有回答时不生成助手消息。
-            human_message = AgentProtocolHistoryMessageResp(
-                id=human_id,
-                type="human",
-                content=row.query,
-                additional_kwargs={
-                    "business_message_id": str(row.id),
-                    "run_id": run_id,
-                    "image_urls": list(row.image_urls or []),
-                    "attachments": list(row.attachments or []),
-                },
-            )
-            messages.append(human_message)
-            if not row.answer:
-                continue
-
-            # 助手消息使用本回合持久化的回答与用量，旧记录缺少用量时按零展示。
-            metrics = {
-                "latency": float(row.latency or 0),
-                "total_token_count": int(row.total_token_count or 0),
-                "input_token_count": int(row.input_token_count or 0),
-                "output_token_count": int(row.output_token_count or 0),
-                "cached_token_count": int(row.cached_token_count or 0),
-                "reasoning_token_count": int(row.reasoning_token_count or 0),
-            }
-            assistant_message = AgentProtocolHistoryMessageResp(
-                id=f"{row.id}:assistant",
-                type="ai",
-                content=row.answer,
-                additional_kwargs={"run_id": run_id, "metrics": metrics},
-            )
-            messages.append(assistant_message)
+        # 1.问答、Run 摘要和最新展示状态来自同一个只读数据库快照。
+        rows, persisted_runs, message_page = self._read_state(conversation_id, invoke_from)
         latest_run = persisted_runs[-1] if persisted_runs else None
+        runs_by_message = {run.turn_id: run for run in persisted_runs}
+        messages = [
+            message
+            for turn in rows
+            for message in self._turn_messages(turn, runs_by_message.get(turn.id))
+        ]
 
-        # 3.仅用活动 Run 的已提交快照补齐本轮消息，其他回合和已结束运行不受覆盖。
+        # 2.仅用活动 Run 的已提交快照补齐本轮消息，其他回合和已结束运行不受覆盖。
         source_snapshot: Mapping[str, Any] = {}
         if latest_run is not None:
             source_snapshot = latest_run.public_snapshot
         values = select_public_snapshot(source_snapshot)
-        values["messages"] = [
-            message.model_dump(mode="json") for message in messages
-        ]
+        values["messages"] = messages
         if latest_run is not None and latest_run.status in AGENT_EXECUTION_ACTIVE_STATUSES:
             current_ids = {
                 str(latest_run.input_message_id),
@@ -176,30 +112,21 @@ class AgentExecutionQuery:
             values["messages"] = list(by_id.values())
         values["message_page"] = message_page.model_dump(mode="json")
 
-        # 4.状态接口只返回摘要；失败原因以 Run 自身记录为准，旧记录回落到业务消息。
+        # 3.状态接口只返回摘要；失败原因以 Run 自身记录为准，旧记录回落到业务消息。
         message_errors = {message.id: message.error for message in rows}
         values["runs"] = [
-            AgentProtocolRunSummaryResp(
-                run_id=run.id, message_id=run.turn_id,
-                input_message_id=run.input_message_id, status=run.status,
-                last_event_sequence=int(run.last_event_sequence or 0),
-                created_at=run.created_at.replace(tzinfo=UTC),
-                started_at=run.created_at.replace(tzinfo=UTC),
-                finished_at=run.finished_at.replace(tzinfo=UTC) if run.finished_at else None,
-                error=(run.error_message or message_errors.get(run.turn_id) or "Agent 运行失败")
-                if run.status == "failed" else None,
-            ).model_dump(mode="json")
+            self._run_summary(run, fallback_error=message_errors.get(run.turn_id)).model_dump(mode="json")
             for run in persisted_runs
         ]
 
-        # 5.当前运行优先，找不到运行记录时返回空闲状态。
+        # 4.当前运行优先，找不到运行记录时返回空闲状态。
         if latest_run is None:
             run_id, status, last_event_sequence = None, "idle", 0
         else:
             run_id = latest_run.id
             status = str(latest_run.status)
             last_event_sequence = int(latest_run.last_event_sequence or 0)
-        # 6.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
+        # 5.等待输入时才生成待办表单，避免普通状态响应构造无效任务。
         tasks = []
         if status == "waiting_input":
             for item in values.get("pending_inputs", []):
@@ -300,8 +227,60 @@ class AgentExecutionQuery:
             invoke_from=invoke_from, saved=dict(row._mapping) if row is not None else {},
         )
 
+    def _read_state(
+        self, conversation_id: UUID, invoke_from: InvokeFrom,
+    ) -> tuple[list[ConversationTurn], list[AgentExecution], AgentProtocolMessagePageInfoResp]:
+        """短只读事务内固定同一快照，防止终态已更新而问答仍来自提交前。"""
+        # 1.授权已完成，先释放请求的读取连接；新 Session 不复用授权阶段的 ORM 缓存。
+        self.db.session.close()
+        engine = self.db.engine.execution_options(
+            isolation_level="REPEATABLE READ", postgresql_readonly=True,
+        )
+        with Session(bind=engine, autoflush=False) as session:
+            # 2.初始化只取第一页，沿用会话历史的 created_at/id 排序与多取一条规则。
+            descending = (
+                session.query(ConversationTurn)
+                .options(defer(ConversationTurn.token_usage, raiseload=True))
+                .filter(ConversationTurn.conversation_id == conversation_id, ConversationTurn.is_deleted.is_(False))
+                .order_by(ConversationTurn.created_at.desc(), ConversationTurn.id.desc())
+                .limit(21)
+                .all()
+            )
+            page_rows = descending[:20]
+            page = AgentProtocolMessagePageInfoResp(
+                has_more=len(descending) > 20,
+                next_before=page_rows[-1].id if len(descending) > 20 else None,
+            )
+            # 3.历史 Run 只加载摘要；最新 Run 即便不在消息页内也不能遗漏。
+            latest_run_id = (
+                session.query(AgentExecution.id)
+                .filter(AgentExecution.conversation_id == conversation_id, AgentExecution.invoke_from == invoke_from.value)
+                .order_by(AgentExecution.created_at.desc(), AgentExecution.id.desc())
+                .limit(1)
+                .scalar_subquery()
+            )
+            runs = (
+                session.query(AgentExecution)
+                .options(load_only(
+                    AgentExecution.id, AgentExecution.turn_id, AgentExecution.input_message_id,
+                    AgentExecution.status, AgentExecution.last_event_sequence, AgentExecution.created_at,
+                    AgentExecution.finished_at, AgentExecution.error_message, raiseload=True,
+                ))
+                .filter(
+                    AgentExecution.conversation_id == conversation_id,
+                    AgentExecution.invoke_from == invoke_from.value,
+                    or_(AgentExecution.turn_id.in_([turn.id for turn in page_rows]), AgentExecution.id == latest_run_id),
+                )
+                .order_by(AgentExecution.created_at.asc(), AgentExecution.id.asc())
+                .all()
+            )
+            # 4.只为最新 Run 读取展示大字段，仍处于同一个数据库快照。
+            if runs:
+                session.refresh(runs[-1], attribute_names=["display_state", "pending_inputs", "input_history"])
+            return list(reversed(page_rows)), runs, page
+
     def _stream_events(
-        self, *, conversation_id: UUID, invoke_from: InvokeFrom, stream_request: AgentProtocolEventStreamReq,
+        self, *, conversation_id: UUID, stream_request: AgentProtocolEventStreamReq,
         run_id: UUID,
     ) -> Iterator[dict[str, Any] | None]:
         """历史前缀接实时尾部；两者共用序号，慢订阅者回数据库补齐缺口。"""
@@ -330,12 +309,10 @@ class AgentExecutionQuery:
                     status = self.run_service.get_run_status(run_id)
                     rows = (
                         self.db.session.query(AgentExecutionEvent.sequence, AgentExecutionEvent.payload)
-                        .join(AgentExecution, AgentExecution.id == AgentExecutionEvent.execution_id)
                         .filter(
-                            AgentExecution.conversation_id == conversation_id,
-                            AgentExecution.invoke_from == invoke_from.value,
+                            # 归属已在响应开始前验证，执行身份与归属创建后不可变。
+                            AgentExecutionEvent.execution_id == run_id,
                             AgentExecutionEvent.sequence > cursor,
-                            AgentExecution.id == run_id,
                         )
                         .order_by(AgentExecutionEvent.sequence.asc())
                         .limit(self._SSE_BATCH_SIZE)
@@ -365,7 +342,7 @@ class AgentExecutionQuery:
 
             # 5.最终状态只在持久化收尾后发布，看到它即可结束订阅。
             stream_finished = any(
-                event.method == "lifecycle"
+                event.method == EventChannel.LIFECYCLE
                 and not event.params.namespace
                 and isinstance(event.params.data, Mapping)
                 and event.params.data.get("status") in _SSE_FINISHED_STATUSES
@@ -396,22 +373,17 @@ class AgentExecutionQuery:
         # 1.一起读取执行和问答记录，固定此次恢复的状态与已提交水位。
         run, turn = (
             self.db.session.query(AgentExecution, ConversationTurn)
+            .options(defer(AgentExecution.execution_options))
             .join(ConversationTurn, ConversationTurn.id == AgentExecution.turn_id)
             .filter(AgentExecution.id == run_id)
             .populate_existing()
             .one()
         )
         sequence = int(run.last_event_sequence or 0)
-        summary = AgentProtocolRunSummaryResp(
-            run_id=run.id, message_id=run.turn_id, input_message_id=run.input_message_id,
-            status=run.status, last_event_sequence=sequence,
-            created_at=run.created_at.replace(tzinfo=UTC), started_at=run.created_at.replace(tzinfo=UTC),
-            finished_at=run.finished_at.replace(tzinfo=UTC) if run.finished_at else None,
-            error=run.error_message or None,
-        )
+        summary = self._run_summary(run, fallback_error=turn.error)
         # 2.会话正文从业务表恢复，执行细节只使用公开字段。
         values = select_public_snapshot(run.public_snapshot)
-        values["messages"] = self._recovery_messages(run, turn)
+        values["messages"] = self._turn_messages(turn, run)
         values["runs"] = [summary.model_dump(mode="json")]
         # 3.只合并固定水位之内的事件；水位之后由实时流继续交付。
         events = compact_execution_events(self._recovery_events(run_id, sequence))
@@ -420,26 +392,19 @@ class AgentExecutionQuery:
         )
 
     def _recovery_events(self, run_id: UUID, sequence: int) -> Iterator[AgentProtocolEvent]:
-        """旧历史沿用当前展示范围，在数据库内排除参数分片，避免读取被放大的旧载荷。"""
+        """按当前协议读取历史，在数据库内排除工具参数分片并裁剪重复消息。"""
         payload = AgentExecutionEvent.payload
         data = payload["params"]["data"]
-        # 1.与写入端一致识别工具参数：旧 content 格式优先，未知事件不丢弃。
-        argument_content = case(
-            (
-                func.jsonb_typeof(data["content"]) == "object",
-                data["content"]["type"].astext.in_(TOOL_ARGUMENT_CONTENT_TYPES),
-            ),
-            else_=(
-                (data["delta"]["type"].astext == "block-delta")
-                & data["delta"]["fields"]["type"].astext.in_(TOOL_ARGUMENT_CONTENT_TYPES)
-            ),
+        # 1.工具参数统一使用 block-delta.fields，与实时投影共用内容类型词表。
+        argument_delta = (
+            (payload["method"].astext == EventChannel.MESSAGES.value)
+            & (data["event"].astext == MessageEventKind.BLOCK_DELTA.value)
+            & (data["delta"]["type"].astext == DeltaKind.FIELDS.value)
+            & data["delta"]["fields"]["type"].astext.in_(TOOL_ARGUMENT_CONTENT_TYPES)
         )
-        argument_delta = (payload["method"].astext == "messages") & (
-            data["event"].astext == "content-block-delta"
-        ) & argument_content
         # 2.在数据库侧裁掉重复聊天历史，避免先传输完整大载荷再由 Python 丢弃。
         public_payload = case(
-            (payload["method"].astext == "values", payload.op("#-")(array(["params", "data", "messages"]))),
+            (payload["method"].astext == EventChannel.VALUES.value, payload.op("#-")(array(["params", "data", "messages"]))),
             else_=payload,
         )
         # 3.按序分批读取公开前缀，不改变原有事件序号。
@@ -459,34 +424,47 @@ class AgentExecutionQuery:
                 yield event
 
     @staticmethod
-    def _recovery_messages(run: AgentExecution, turn: ConversationTurn) -> list[dict[str, Any]]:
-        """将本轮已保存问答还原为 SDK 消息，业务 ID 用于与实时消息合并去重。"""
-        messages = [{
-            "id": run.input_message_id or f"{turn.id}:human",
-            "type": "human",
-            "content": turn.query,
-            "additional_kwargs": {
+    def _turn_messages(turn: ConversationTurn, run: AgentExecution | None = None) -> list[dict[str, Any]]:
+        """state 与恢复快照共用问答和用量投影，消息身份与实时事件一致。"""
+        run_id = str(run.id) if run is not None else turn.trace_id
+        input_message_id = run.input_message_id if run is not None else None
+        messages = [AgentProtocolHistoryMessageResp(
+            id=input_message_id or f"{turn.id}:human",
+            type="human",
+            content=turn.query,
+            additional_kwargs={
                 "business_message_id": str(turn.id),
-                "run_id": str(run.id),
-                "image_urls": turn.image_urls,
-                "attachments": turn.attachments,
+                "run_id": run_id,
+                "image_urls": list(turn.image_urls or []),
+                "attachments": list(turn.attachments or []),
             },
-        }]
+        )]
         if turn.answer:
-            messages.append({
-                "id": f"{turn.id}:assistant",
-                "type": "ai",
-                "content": turn.answer,
-                "additional_kwargs": {
-                    "run_id": str(run.id),
+            messages.append(AgentProtocolHistoryMessageResp(
+                id=f"{turn.id}:assistant",
+                type="ai",
+                content=turn.answer,
+                additional_kwargs={
+                    "run_id": run_id,
                     "metrics": {
-                        "latency": turn.latency,
-                        "total_token_count": turn.total_token_count,
-                        "input_token_count": turn.input_token_count,
-                        "output_token_count": turn.output_token_count,
-                        "cached_token_count": turn.cached_token_count,
-                        "reasoning_token_count": turn.reasoning_token_count,
+                        "latency": float(turn.latency or 0),
+                        "total_token_count": int(turn.total_token_count or 0),
+                        "input_token_count": int(turn.input_token_count or 0),
+                        "output_token_count": int(turn.output_token_count or 0),
+                        "cached_token_count": int(turn.cached_token_count or 0),
+                        "reasoning_token_count": int(turn.reasoning_token_count or 0),
                     },
                 },
-            })
-        return messages
+            ))
+        return [message.model_dump(mode="json") for message in messages]
+
+    @staticmethod
+    def _run_summary(run: AgentExecution, *, fallback_error: str | None = None) -> AgentProtocolRunSummaryResp:
+        """运行摘要只读取轻量列，错误优先使用 Run 自身记录。"""
+        return AgentProtocolRunSummaryResp(
+            run_id=run.id, message_id=run.turn_id, input_message_id=run.input_message_id,
+            status=run.status, last_event_sequence=int(run.last_event_sequence or 0),
+            created_at=run.created_at.replace(tzinfo=UTC), started_at=run.created_at.replace(tzinfo=UTC),
+            finished_at=run.finished_at.replace(tzinfo=UTC) if run.finished_at else None,
+            error=(run.error_message or fallback_error or "Agent 运行失败") if run.status == "failed" else None,
+        )

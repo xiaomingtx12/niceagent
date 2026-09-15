@@ -26,9 +26,9 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.model import Account, AgentExecution, App, Conversation, EndUser
-from internal.schema.agent.agent_protocol_schema import AgentProtocolCommandInputReq
 from internal.schema.agent_protocol.internal_agent_protocol_schema import (
     InternalRunCreateReq,
+    InternalRunInputReq,
     InternalRunResp,
     InternalThreadResp,
 )
@@ -101,7 +101,7 @@ class InternalAgentProtocolService:
             raise ValidateErrorException("后台 Run 缺少 input")
 
         try:
-            command_input = AgentProtocolCommandInputReq.model_validate(
+            command_input = InternalRunInputReq.model_validate(
                 run_input
             ).to_run_input()
         except ValueError as exc:

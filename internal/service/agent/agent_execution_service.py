@@ -25,6 +25,7 @@ from sqlalchemy.orm import load_only
 
 from internal.core.agent_v2 import (
     AGENT_PERSISTENCE_ERRORS,
+    AgentEvent,
     AgentExecutionResult,
     AgentExecutor,
     AgentMessageError,
@@ -40,7 +41,7 @@ from internal.entity import (
     AgentExecutionInput,
     AgentExecutionStatus,
 )
-from internal.entity.agent_invocation import AgentInvocation
+from internal.entity.agent_invocation import AgentExecutionOptions, AgentInvocation
 from internal.entity.agent_execution_interaction import (
     AgentExecutionInteraction,
     InvalidInputAnswer,
@@ -384,21 +385,40 @@ class AgentExecutionService:
                 message="输入消息已用于其他调用入口",
             )
 
+        # 同一标识只能重试同一份输入，不能把改过的消息静默当成旧请求接受。
+        turn = self.db.session.get(ConversationTurn, duplicate_run.turn_id)
+        if turn is None:
+            raise NotFoundException("原始问答不存在")
+        options = AgentExecutionOptions.model_validate(duplicate_run.execution_options or {})
+        original_input = AgentExecutionInput(
+            query=turn.query,
+            image_urls=tuple(turn.image_urls or []),
+            file_ids=tuple(UUID(str(item["id"])) for item in (turn.attachments or [])),
+            planning_enabled=options.planning_enabled,
+            selected_skills=options.selected_skills,
+            reasoning_effort=options.reasoning_effort,
+            model_selection=options.model_selection,
+            input_message_id=duplicate_run.input_message_id,
+        )
+        if original_input != run_input:
+            return ExecutionRejected(message="消息 id 已用于不同输入；发送新消息时请使用新 id")
+
         # 3.重放起点取本 Run 最早的事件序号，不能把终态游标当作起点；
         # 本进程仍持有该执行时以内存游标为准，避免读到尚未提交的事件序号。
-        first_sequence = (
-            self.db.session.query(func.min(AgentExecutionEvent.sequence))
-            .filter(AgentExecutionEvent.execution_id == duplicate_run.id)
-            .scalar()
-        )
-        applied_sequence = (
-            int(first_sequence) - 1
-            if first_sequence is not None
-            else int(duplicate_run.last_event_sequence or 0)
-        )
         local_run = self.tracker.get(conversation_id)
         if local_run is not None and local_run.run_id == duplicate_run.id:
             applied_sequence = local_run.initial_event_sequence
+        else:
+            first_sequence = (
+                self.db.session.query(func.min(AgentExecutionEvent.sequence))
+                .filter(AgentExecutionEvent.execution_id == duplicate_run.id)
+                .scalar()
+            )
+            applied_sequence = (
+                int(first_sequence) - 1
+                if first_sequence is not None
+                else int(duplicate_run.last_event_sequence or 0)
+            )
         return ExecutionAccepted(
             run_id=duplicate_run.id,
             sequence=applied_sequence,
@@ -410,7 +430,7 @@ class AgentExecutionService:
         """判断会话是否仍被活动、停止中或待输入的 Run 占用。"""
         # 1.数据库占用（活动/待填）与本地未结束执行任一存在都不能新建 Run。
         active_run = (
-            self.db.session.query(AgentExecution)
+            self.db.session.query(AgentExecution.status, AgentExecution.cancel_requested_at)
             .filter(
                 AgentExecution.conversation_id == conversation_id,
                 AgentExecution.status.in_(AGENT_EXECUTION_OCCUPYING_STATUSES),
@@ -446,11 +466,16 @@ class AgentExecutionService:
         user_input_enabled: bool,
     ) -> tuple[AgentExecutionHandle, int]:
         """在当前事务中创建消息、Invocation 和本地 Run。"""
+        # 校验与恢复指纹共用本次读取的应用定义，避免持有会话锁时重复装配配置。
+        definition = self.definition_service.load(
+            account_id=account_id, app_id=app_id, invoke_from=invoke_from,
+        ) if user_input_enabled else None
         # 1.先校验模型思考强度与附件归属，任何失败都不留下消息和 Run 记录。
         self.model_service.validate_reasoning_effort(
             account_id=account_id, app_id=app_id, created_by=created_by,
             invoke_from=invoke_from, effort=run_input.reasoning_effort,
             selection=run_input.model_selection,
+            definition=definition,
         )
         attachments = self.attachment_service.resolve(
             run_input.file_ids,
@@ -479,13 +504,9 @@ class AgentExecutionService:
             user_input_enabled=user_input_enabled,
         )
         # 3.只有需要中途问人的任务才记录配置指纹，用于恢复时判断应用配置是否已变更。
-        if user_input_enabled:
-            fingerprint = self.definition_service.load(
-                account_id=invocation.account_id, app_id=invocation.app_id,
-                invoke_from=invocation.invoke_from,
-            ).fingerprint()
+        if definition is not None:
             invocation = invocation.model_copy(
-                update={"definition_fingerprint": fingerprint}
+                update={"definition_fingerprint": definition.fingerprint()}
             )
         # 4.新 Run 从该入口已持久化的最大序号之后开始编号，保证事件序号跨 Run 单调递增。
         sequence = int(
@@ -837,7 +858,7 @@ class AgentExecutionService:
             start_sequence=run.initial_event_sequence,
         )
         events = AgentExecutionEventBuffer(
-            run, projector, self._record_events,
+            run, self._record_events,
             started_at=started_at, batch_size=self._persistence_batch_size,
             publish_realtime=lambda event: self.tracker.publish_events(run, [event]),
             worker_context=current_app._get_current_object().app_context,
@@ -982,12 +1003,19 @@ class AgentExecutionService:
                 logger.exception("取消监控启动失败后释放 Agent 资源失败 run_id=%s", run.run_id)
             raise
 
+        def deliver_event(agent_event: AgentEvent) -> None:
+            """串联事件投影与交付；缓冲层只接收最终协议事件。"""
+            event = projector.project_agent_event(agent_event, turn_id=run.spec.turn_id)
+            if event is not None:
+                is_text_delta = agent_event.message is not None and agent_event.message.has_text_delta
+                events.emit(event, is_text_delta=is_text_delta)
+
         # Core 根据消息或恢复答案构造框架输入，并在执行结束后释放资源。
         try:
             return agent.execute(
                 message=input_message if run.resume is None else None,
                 resume=run.resume,
-                on_event=events.accept_agent_event,
+                on_event=deliver_event,
                 cancel_requested=run.cancel_requested,
             )
         finally:

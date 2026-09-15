@@ -15,6 +15,7 @@ from langchain_core.outputs import LLMResult
 from langgraph.config import get_stream_writer
 
 from internal.core.agent_v2.observability.callback_metadata import exception_status
+from internal.core.agent_v2.entity.stream_event import CustomEventType, ModelProgressPhase
 from internal.core.agent_v2.observability.token_usage import normalize_llm_result
 from internal.extension.logging_extension import logger
 
@@ -65,11 +66,14 @@ class ModelProgressCallback(BaseCallbackHandler):
             usage = normalize_llm_result(response) if call.summarization else None
             public_usage = usage.to_dict() if usage and usage.present else None
             with call.publish_lock:
-                self._publish(str(run_id), call, "completed", usage=public_usage)
+                self._publish(str(run_id), call, ModelProgressPhase.COMPLETED, usage=public_usage)
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
         """消费调用状态后发布终态，重复结束不会再次通知。"""
-        phase = "cancelled" if exception_status(error) == "cancelled" else "failed"
+        phase = (
+            ModelProgressPhase.CANCELLED if exception_status(error) == ModelProgressPhase.CANCELLED
+            else ModelProgressPhase.FAILED
+        )
         with self._lock:
             call = self._calls.pop(str(run_id), None)
         if call is not None:
@@ -104,7 +108,8 @@ class ModelProgressCallback(BaseCallbackHandler):
             self._calls[call_id] = call
         try:
             # 3.在注册表锁外发布；不同模型调用不相互等待。
-            self._publish(call_id, call, "summarizing" if call.summarization else "started")
+            phase = ModelProgressPhase.SUMMARIZING if call.summarization else ModelProgressPhase.STARTED
+            self._publish(call_id, call, phase)
         finally:
             call.publish_lock.release()
 
@@ -112,25 +117,25 @@ class ModelProgressCallback(BaseCallbackHandler):
     def _publish(
         call_id: str,
         call: _ModelCall,
-        phase: str,
+        phase: ModelProgressPhase,
         *,
         usage: dict[str, Any] | None = None,
     ) -> None:
         """公开载荷不含正文或错误详情；通知失败不能影响模型统计。"""
         payload = {
-            "phase": phase,
+            "phase": phase.value,
             "started_at": int(call.started_at.timestamp() * 1000),
             "ended_at": (
                 int(datetime.now(UTC).timestamp() * 1000)
-                if phase not in {"summarizing", "started"}
+                if phase not in {ModelProgressPhase.SUMMARIZING, ModelProgressPhase.STARTED}
                 else None
             ),
             "duration_ms": max(0, int((monotonic() - call.started_monotonic) * 1000)),
         }
         if call.summarization:
-            payload.update(type="context_compaction", scope="summary_generation", compaction_id=call_id)
+            payload.update(type=CustomEventType.CONTEXT_COMPACTION.value, scope="summary_generation", compaction_id=call_id)
         else:
-            payload.update(type="model_progress", model_run_id=call_id)
+            payload.update(type=CustomEventType.MODEL_PROGRESS.value, model_run_id=call_id)
         if usage is not None:
             payload.update(
                 input_tokens=usage.get("input_tokens"),

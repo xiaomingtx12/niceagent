@@ -16,7 +16,7 @@ from internal.schema.agent.agent_model_schema import (
 )
 from internal.schema.app.app_config_schema import AppModelConfigReq
 from internal.service.language_model.language_model_service import LanguageModelService
-from .agent_definition_service import AgentDefinitionService
+from .agent_definition_service import AgentDefinitionService, ApplicationAgentDefinition
 
 _MODEL_SELECTABLE_SOURCES = frozenset({
     InvokeFrom.DEBUGGER, InvokeFrom.CREATOR_TASK, InvokeFrom.ASSISTANT_AGENT,
@@ -112,15 +112,19 @@ class AgentModelService:
     def validate_reasoning_effort(
         self, *, account_id: UUID, app_id: UUID, created_by: UUID, invoke_from: InvokeFrom,
         effort: str | None, selection: AgentModelSelection | None = None,
+        definition: ApplicationAgentDefinition | None = None,
     ) -> None:
         """任务覆盖只允许当前模型明确声明的等级，在创建消息前拒绝无效选择。"""
         # 1.完全没有覆盖时不查模型；只切换模型时仍需校验连接权限。
         if selection is None and effort is None:
             return
-        default_config, owner_account_id = self._load_default_configuration(
-            account_id=account_id, app_id=app_id,
-            invoke_from=invoke_from,
-        )
+        # 启动时复用计算恢复指纹的定义；内置助手的默认模型仍来自账号设置。
+        if definition is not None and invoke_from is not InvokeFrom.ASSISTANT_AGENT:
+            default_config, owner_account_id = definition.config.model_config_data, definition.account_id
+        else:
+            default_config, owner_account_id = self._load_default_configuration(
+                account_id=account_id, app_id=app_id, invoke_from=invoke_from,
+            )
         config, model = self.resolve(
             account_id=account_id, created_by=created_by,
             invoke_from=invoke_from, default_config=default_config,

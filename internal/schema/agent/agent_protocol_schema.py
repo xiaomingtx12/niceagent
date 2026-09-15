@@ -26,15 +26,14 @@ from pydantic import (
 from internal.entity import AgentExecutionInput
 from internal.entity.agent_execution_entity import AgentModelSelection
 from internal.exception import ValidateErrorException
+from internal.core.agent_v2.entity.stream_event import EventChannel
 
 # 公开协议方法词表：DTO 校验、历史回放过滤和持久化查询共用同一来源，新增通道只改这里。
-PUBLIC_EVENT_METHODS = (
-    "messages", "values", "tools", "lifecycle", "custom", "input.requested",
-)
+PUBLIC_EVENT_METHODS = tuple(channel.value for channel in EventChannel)
 
 
-class AgentProtocolCommandMessageReq(BaseModel):
-    """一次 run.start 中最后一条用户消息。"""
+class AgentProtocolUserMessageReq(BaseModel):
+    """用户消息的内容解析；内部 SDK 输入允许未分配消息 ID。"""
 
     model_config = ConfigDict(extra="allow")
 
@@ -57,13 +56,17 @@ class AgentProtocolCommandMessageReq(BaseModel):
         return str(self.content or "")
 
 
-class AgentProtocolCommandInputReq(BaseModel):
-    """从 Agent Protocol command 中提取出的业务输入。"""
+class AgentProtocolCommandMessageReq(AgentProtocolUserMessageReq):
+    """公开启动命令携带稳定消息 ID，重试不能由服务端重新分配。"""
 
-    model_config = ConfigDict(extra="allow")
+    id: StrictStr = Field(min_length=1, max_length=255, pattern=r"\S")
 
-    messages: list[AgentProtocolCommandMessageReq] = Field(default_factory=list)
-    query: StrictStr | None = None
+
+class AgentProtocolInputOptionsReq(BaseModel):
+    """两个真实入口共用运行选项与字段校验，不决定各自的消息格式。"""
+
+    model_config = ConfigDict(extra="forbid")
+
     planning_enabled: bool = Field(default=False, strict=True)
     reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
     model_selection: AgentModelSelection | None = None
@@ -75,9 +78,7 @@ class AgentProtocolCommandInputReq(BaseModel):
 
     @field_validator("image_urls", "file_ids", "selected_skills", mode="before")
     def normalize_list(value: Any) -> list[Any]:
-        """兼容旧客户端的 null，其他非数组输入仍拒绝。"""
-        if value is None:
-            return []
+        """传入的集合必须为数组，省略字段才使用空数组默认值。"""
         if not isinstance(value, list):
             raise ValueError("必须是数组")
         return value
@@ -101,10 +102,8 @@ class AgentProtocolCommandInputReq(BaseModel):
             raise ValueError("附件不能重复提交")
         return value
 
-    def to_run_input(self) -> AgentExecutionInput:
-        """把已校验的协议输入转换成核心服务使用的运行输入。"""
-        message = self.messages[-1] if self.messages else None
-        query = message.text if message is not None else (self.query or "")
+    def to_execution_input(self, *, query: str, message_id: str | None) -> AgentExecutionInput:
+        """输入格式由各入口解释，规范化后的选项在这里转换一次。"""
         query = query.strip()
         if not query:
             raise ValidateErrorException("run.start 需要非空的用户输入")
@@ -114,10 +113,21 @@ class AgentProtocolCommandInputReq(BaseModel):
             image_urls=tuple(self.image_urls),
             file_ids=tuple(self.file_ids),
             selected_skills=tuple(self.selected_skills),
-            input_message_id=message.id if message else None,
+            input_message_id=message_id,
             reasoning_effort=self.reasoning_effort,
             model_selection=self.model_selection,
         )
+
+
+class AgentProtocolCommandInputReq(AgentProtocolInputOptionsReq):
+    """公开启动输入直接声明消息必填，不接受 query 或任意图状态字段。"""
+
+    messages: list[AgentProtocolCommandMessageReq] = Field(min_length=1)
+
+    def to_run_input(self) -> AgentExecutionInput:
+        """仅执行本次输入的最后一条用户消息，历史由服务端加载。"""
+        message = self.messages[-1]
+        return self.to_execution_input(query=message.text, message_id=message.id)
 
 
 class AgentProtocolInputResponseReq(BaseModel):
@@ -131,7 +141,7 @@ class AgentProtocolInputResponseReq(BaseModel):
 
 
 class AgentProtocolInputRespondReq(BaseModel):
-    """兼容 SDK 单个与批量 input.respond 请求。"""
+    """当前 SDK 支持单个与批量 input.respond，业务层统一按批次处理。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -154,15 +164,6 @@ class AgentProtocolInputRespondReq(BaseModel):
         return self
 
 
-class AgentProtocolInputReopenReq(BaseModel):
-    """仅解析旧客户端重开命令以返回明确拒绝，已停止任务不可恢复。"""
-
-    model_config = ConfigDict(extra="forbid")
-
-    run_id: UUID
-    cancellation_sequence: int = Field(gt=0, strict=True)
-
-
 class AgentProtocolCommandReq(BaseModel):
     """在请求解析时确定命令参数类型，分派阶段只消费已规范化的数据。"""
 
@@ -170,8 +171,8 @@ class AgentProtocolCommandReq(BaseModel):
 
     type: StrictStr | None = None
     id: StrictInt | None = None
-    method: Literal["run.start", "input.respond", "input.reopen"]
-    params: AgentExecutionInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq = Field(
+    method: Literal["run.start", "input.respond"]
+    params: AgentExecutionInput | AgentProtocolInputRespondReq = Field(
         default_factory=dict, validate_default=True,
     )
 
@@ -189,8 +190,8 @@ class AgentProtocolCommandReq(BaseModel):
     @classmethod
     def parse_params(
         cls, value: Any, info: ValidationInfo,
-    ) -> AgentExecutionInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq:
-        """按方法解析唯一参数类型，旧 SDK 的嵌套输入和单条回答在此收敛。"""
+    ) -> AgentExecutionInput | AgentProtocolInputRespondReq:
+        """启动只读取 params.input.messages；消息 ID 是重试去重键。"""
         if not isinstance(value, Mapping):
             raise ValueError("命令 params 必须是对象")
         method = info.data.get("method")
@@ -199,20 +200,13 @@ class AgentProtocolCommandReq(BaseModel):
                 return AgentProtocolInputRespondReq.model_validate(value)
             except ValidationError as exc:
                 raise ValidateErrorException("表单提交格式错误") from exc
-        if method == "input.reopen":
-            try:
-                return AgentProtocolInputReopenReq.model_validate(value)
-            except ValidationError as exc:
-                raise ValidateErrorException("表单恢复格式错误") from exc
         if method != "run.start":
             raise ValueError("不支持的工作台命令")
-        raw = value.get("input", value)
+        raw = value.get("input")
         if not isinstance(raw, Mapping):
             raise ValidateErrorException("run.start 的 input 必须是对象")
         try:
             parsed = AgentProtocolCommandInputReq.model_validate(raw)
-            if not parsed.messages and not parsed.query:
-                raise ValidateErrorException("run.start 需要 input.messages 或 query")
             return parsed.to_run_input()
         except ValidationError as exc:
             raise ValidateErrorException(f"工作台输入格式错误: {exc}") from exc
@@ -432,9 +426,10 @@ __all__ = [
     "PUBLIC_EVENT_METHODS",
     "AgentProtocolRunEventsResp",
     "AgentProtocolCommandReq",
-    "AgentProtocolInputReopenReq",
     "AgentProtocolCommandInputReq",
     "AgentProtocolCommandMessageReq",
+    "AgentProtocolUserMessageReq",
+    "AgentProtocolInputOptionsReq",
     "AgentProtocolEventStreamReq",
     "AgentProtocolCommandSuccessResp",
     "AgentProtocolCommandErrorResp",

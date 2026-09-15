@@ -85,7 +85,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
 
 ### 1.1 提交运行命令
 
-- **接口说明**：该接口是工作台唯一的写入入口，通过 `method` 区分三种命令：`run.start(启动新任务)`、`input.respond(提交表单答案)`、`input.reopen(恢复被取消的表单)`。命令的鉴权、幂等和并发冲突都由服务端处理，客户端不需要先查询状态再提交。**该接口固定返回 HTTP 200**，命令级失败也通过响应体中的 `type: "error"` 表达，不改变 HTTP 状态码。
+- **接口说明**：该接口是工作台唯一的写入入口，通过 `method` 区分两种命令：`run.start(启动新任务)`、`input.respond(提交表单答案)`。已停止的 Run 不可重开，`input.reopen` 不再接受。命令的鉴权、幂等和并发冲突都由服务端处理，客户端不需要先查询状态再提交。**该接口固定返回 HTTP 200**，命令级失败也通过响应体中的 `type: "error"` 表达，不改变 HTTP 状态码。
 
 - **接口信息**：`授权`+`POST:/apps/:app_id/conversations/:conversation_id/commands`（其余四个入口替换路径前缀即可）
 
@@ -96,31 +96,27 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
     - `conversation_id -> uuid`：路由参数，会话 id，类型为 uuid。
     - `id -> int`：可选参数，客户端命令序号，类型为整型，会原样回显在响应 `id` 中；不传时响应 `id` 固定为 0。
     - `type -> str`：可选参数，命令类型标识，类型为字符串，服务端不校验该字段。
-    - `method -> str`：必填参数，命令名称，枚举值为 `run.start`、`input.respond`、`input.reopen`。
-    - `params -> dict`：必填参数，命令参数，结构随 `method` 变化，详见下方三张参数表。
+    - `method -> str`：必填参数，命令名称，枚举值为 `run.start`、`input.respond`。
+    - `params -> dict`：必填参数，命令参数，结构随 `method` 变化，详见下方参数表。
   - 请求参数（`method = run.start`）：
-    - `input -> dict`：与 `params` 同级的业务输入容器；服务端会先取 `params.input`，没有该键时直接把 `params` 当作输入对象，因此 `{"params": {"query": "..."}}` 与 `{"params": {"input": {"query": "..."}}}` 等价。
-      - `messages -> list[dict]`：消息列表，只有**最后一条**会被使用，类型为字典列表。
-        - `id -> str`：可选参数，消息标识，长度不超过 255，用于命令幂等去重。
+    - `input -> dict`：必填的业务输入容器，固定放在 `params.input`，不接受直接将 `params` 作为输入。
+      - `messages -> list[dict]`：必填的非空消息列表，只有**最后一条**会被使用，类型为字典列表。
+        - `id -> str`：每条消息必填的非空标识，长度不超过 255。相同输入重试必须沿用同一 id；同 id 携带不同输入会被拒绝。外层命令 id 不参与去重。
         - `type -> str` / `role -> str`：可选参数，角色标识，支持 `human` 和 `user`。
         - `content -> any`：消息正文，字符串或内容块数组；数组时只拼接 `type` 为 `text` 或未标注 `type` 的文本片段。
-      - `query -> str`：用户提问文本；`messages` 为空时使用该字段。与 `messages` 至少提供一个，且去除首尾空白后不能为空。
       - `planning_enabled -> bool`：可选参数，是否启用任务规划，默认 `false`。
       - `reasoning_effort -> str`：可选参数，推理等级，长度 1–64，需在该模型的可用等级内。
       - `model_selection -> dict`：可选参数，本轮切换模型，包含 `provider`、`model`、`provider_connection_id` 三个字段；不接受凭证、地址或任意参数。
-      - `image_urls -> list[str]`：可选参数，图片 URL 列表，最多 10 条；不传或传 `null` 时按空列表处理。
+      - `image_urls -> list[str]`：可选参数，图片 URL 列表，最多 10 条；省略时按空列表处理，显式传 `null` 会被拒绝。
       - `file_ids -> list[uuid]`：可选参数，附件 id 列表，最多 5 条且不能重复。
-      - `selected_skills -> list[str]`：可选参数，本轮启用的 Skill 名称，最多 20 条，名称长度 1–64；不传或传 `null` 时按空列表处理，去重后不能为空项。
-      - `assistant_id -> str`：可选参数，LangGraph SDK 兼容字段，服务端**接受但忽略**。
+      - `selected_skills -> list[str]`：可选参数，本轮启用的 Skill 名称，最多 20 条，名称长度 1–64；省略时按空列表处理，显式传 `null` 会被拒绝；不允许重复或空名称。
+    - `assistant_id -> str`：SDK 的目标标识，放在 `params` 内，与 `input` 同级；实际应用归属由路由和鉴权确定。
   - 请求参数（`method = input.respond`）：
     - `responses -> list[dict]`：必填参数，答案批次，数量 1–40，同一中断不能出现两次。
       - `namespace -> list[str]`：可选参数，**只接受空数组**（`max_length=0`），非空会被拒绝。
       - `interrupt_id -> str`：必填参数，中断标识，长度 1–255，必须与状态接口返回的待填表单一一对应。
       - `response -> dict`：必填参数，该表单的答案对象，键为字段名。
-    - 兼容形式：当 `params` 直接是 `{interrupt_id, response, namespace}` 时，服务端自动包装为 `{"responses": [...]}`，用于兼容官方 SDK 的单条提交。
-  - 请求参数（`method = input.reopen`）：
-    - `run_id -> uuid`：必填参数，被取消运行的 id，必须是当前会话最新 Run。
-    - `cancellation_sequence -> int`：必填参数，取消事件序号，必须大于 0，用于防止迟到的请求复活后来停止的任务。
+    - 当前官方 SDK 同时支持单条和批量响应。当 `params` 为 `{interrupt_id, response, namespace}` 时，服务端按单元素批次处理，并非旧格式兼容。
   - 响应参数（成功，`type = "success"`）：
     - `type -> str`：固定为 `success`。
     - `id -> int`：回显请求中的命令序号，请求未传时为 0。
@@ -227,7 +223,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
     - `id -> str`：SSE 事件 id，格式为 `<run_id>:<seq>`，可直接作为下次请求的 `Last-Event-ID`。
     - `data -> dict`：事件正文，为一个完整的 `AgentProtocolEvent` 对象，结构见文末「工作台事件数据结构」。
 
-  首次建立连接时会先发送一行 `: connected` 注释；空闲超过 15 秒会发送一行 `: heartbeat` 心跳注释，用于保持连接与探测断线。**响应为 `text/event-stream`，不包含平台信封。**
+  首次建立连接时发送 `: connected` 注释；空闲超过 15 秒发送 `: heartbeat` 心跳注释。订阅正常结束时发送 `: stream-end`，异常退出不发送；客户端只需检查结束注释即可识别异常 EOF，无需额外解析业务 JSON。运行结果仍以快照或根生命周期状态为准。**响应为 `text/event-stream`，不包含平台信封。**
 
 - **请求示例**：
 
@@ -265,7 +261,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
 
 ### 1.3 获取会话状态快照
 
-- **接口说明**：该接口用于在水合页面或断线重连时读取当前会话的完整状态，包含最近 20 条消息、运行摘要列表、待填表单和当前运行的元数据。**该接口只读取已提交的快照**，与 SSE 订阅使用同一数据源，因此不会出现状态与事件不一致。执行孤儿收敛：若发现本进程未持有的 `running` 运行（例如进程重启），会在此处将其标记为失败。
+- **接口说明**：该接口用于页面初始化和重新进入会话时读取已保存的状态，包含最近 20 轮问答、相关运行摘要、待填表单和当前运行元数据。问答、摘要与最新展示状态在一个短只读 `REPEATABLE READ` 事务中读取，避免并发提交期间读到不同版本。历史 Run 只读摘要列，展示状态和表单大字段仅加载最新 Run；不读取执行事件。快照之后的进度由 SSE 补齐。该接口不修改运行状态，进程退出后遗留的活动 Run 由后续写操作收敛。
 
 - **接口信息**：`授权`+`GET:/apps/:app_id/conversations/:conversation_id/state`（其余四个入口替换路径前缀即可）
 
@@ -276,13 +272,13 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
     - `conversation_id -> uuid`：路由参数，会话 id，类型为 uuid。
   - 响应参数：
     - `values -> dict`：会话状态投影，只包含白名单字段，不含模型调用配置与内部表单恢复信息。
-      - `messages -> list[dict]`：最近 20 条对话消息，按时间正序，类型为字典列表。
+      - `messages -> list[dict]`：最近 20 轮问答转换出的聊天消息（通常最多 40 条），按时间正序；运行中的本轮正文可由已提交展示状态补齐。
         - `id -> str`：消息 id。人类消息为 `Run.input_message_id` 或 `<message_id>:human`；AI 消息为 `<message_id>:assistant`。
         - `type -> str`：消息角色，取值为 `human` 或 `ai`。
         - `content -> any`：消息正文。
         - `additional_kwargs -> dict`：附加字段，AI 消息中包含 `run_id`。
       - `message_page -> dict`：消息分页信息，结构为 `{has_more: bool, next_before: uuid | null}`；需要更早的历史时使用 `next_before` 作为游标另行拉取。
-      - `runs -> list[dict]`：会话内的运行摘要列表，不含执行事件。
+      - `runs -> list[dict]`：当前入口下、消息页涉及的运行摘要，另包含最新 Run，按创建时间和 ID 正序；不含执行事件。
         - `run_id -> uuid`：运行 id。
         - `message_id -> uuid`：承载本轮问答的消息 id。
         - `input_message_id -> str | null`：客户端输入消息标识。
@@ -297,7 +293,6 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
       - `async_tasks -> dict`：异步子 Agent 任务表，键为任务 id，值为任务状态；原字段 `thread_id` 已投影为 `conversation_id`。
       - `pending_inputs -> list[dict]`：待填表单列表，元素结构为 `{interrupt_id, namespace, payload}`，`payload` 为表单定义。
       - `input_history -> list[dict]`：已提交的答案历史。
-      - `input_recovery -> dict | null`：可恢复的表单标识，结构为 `{run_id, cancellation_sequence}`；没有可恢复表单时为 `null`。
     - `next -> list[str]`：需要继续执行的节点；**仅在运行状态为 `running` 时返回 `["agent"]`**，其余状态返回空数组。
     - `tasks -> list[dict]`：待处理任务，仅在状态为 `waiting_input` 时生成，否则为空数组。
       - `id -> str`：任务 id，等于中断 id。
@@ -745,7 +740,7 @@ Agent 工作台是平台统一的 Agent Protocol 运行时接口，**五个业�
   - 请求参数：
     - `conversation_id -> uuid`：路由参数，线程（会话）id，类型为 uuid。
     - `assistant_id -> str`：必填参数，图标识，必须等于 `mydify:published:<target_app_id>`，否则返回 403。
-    - `input -> dict`：可选参数，运行输入，结构同工作台 `run.start` 的输入对象（`messages` 或 `query`）。
+    - `input -> dict`：可选参数，运行输入，由 `InternalRunInputReq` 解析，可提供 `messages` 或 `query`，内部消息 ID 可省略；运行选项与工作台共用校验。
     - `command -> dict`：可选参数，运行命令；只识别 `command.update` 中的对象作为输入。
     - `multitask_strategy -> str`：可选参数，多任务策略，枚举值为 `reject(默认，冲突时返回 409)` 或 `interrupt(先停止前序运行再启动)`。
     - `input` 与 `command` **必须且只能提供一个**，否则返回 422 `Run 必须且只能提供 input 或 command`。
@@ -3347,7 +3342,7 @@ Agent 测评用于对已完成的历史任务或重新执行的任务按评分�
 | `工作台命令格式错误: <详情>` | 工作台命令校验 |
 | `不支持的工作台命令` | 工作台命令校验 |
 | `run.start 的 input 必须是对象` | 工作台命令校验 |
-| `run.start 需要 input.messages 或 query` | 工作台命令校验 |
+| `run.start 只接受 input.messages` | 工作台命令校验 |
 | `run.start 需要非空的用户输入` | 工作台命令校验 |
 | `工作台输入格式错误: <详情>` | 工作台命令校验 |
 | `表单提交格式错误` / `表单恢复格式错误` | 工作台命令校验 |

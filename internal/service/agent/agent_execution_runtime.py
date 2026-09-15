@@ -5,27 +5,14 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from uuid import UUID
 
-from internal.core.agent_v2 import (
-    AgentEvent,
-)
 from internal.entity import AgentExecutionHandle
 from internal.extension.logging_extension import logger
 from internal.schema.agent.agent_protocol_schema import AgentProtocolEvent
-from internal.service.agent_protocol.event_projector import (
-    AgentProtocolEventProjector,
-    is_tool_argument_delta,
-    normalize_custom_data,
-)
-from internal.service.agent_protocol.state_projector import adapt_graph_state
 from .agent_execution_event_hub import AgentExecutionEventHub
-
-_FRAMEWORK_TERMINAL_EVENTS = frozenset(
-    {"completed", "failed", "interrupted", "drained", "cancelled"}
-)
 
 
 class AgentExecutionTracker:
@@ -111,7 +98,6 @@ class AgentExecutionEventBuffer:
     def __init__(
         self,
         run: AgentExecutionHandle,
-        projector: AgentProtocolEventProjector,
         commit_events: Callable[
             [AgentExecutionHandle, list[AgentProtocolEvent]], None
         ],
@@ -123,7 +109,6 @@ class AgentExecutionEventBuffer:
     ) -> None:
         """写线程由执行片段独占，数据库上下文由 Service 注入，禁止跨线程共用 Session。"""
         self._run = run
-        self._projector = projector
         self._commit_events = commit_events
         self._started_at = started_at
         self._batch_size = batch_size
@@ -140,73 +125,6 @@ class AgentExecutionEventBuffer:
             daemon=True,
         )
         self._worker.start()
-
-    def accept_agent_event(self, agent_event: AgentEvent) -> None:
-        """接收一条 Agent 原始事件，转换后同时交给实时通道和落库队列。"""
-        # 1.根终态由业务事务发布，不能提前用框架完成事件结束前端订阅。
-        data = agent_event.data
-        channel = agent_event.channel
-        is_root = not agent_event.namespace
-        event_name = data.get("event")
-        if (
-            channel == "lifecycle"
-            and is_root
-            and (event_name or data.get("status")) in _FRAMEWORK_TERMINAL_EVENTS
-        ):
-            return
-
-        # 2.在接收点适配公开载荷，助手消息直接绑定当前 Run 的业务消息 ID。
-        if channel == "custom":
-            data = normalize_custom_data(data)
-            if data is None:
-                return
-        elif channel == "values":
-            data = adapt_graph_state(data)
-        elif channel == "messages":
-            if is_tool_argument_delta(data):
-                return
-            is_assistant_start = event_name == "message-start" and data.get("role") in {
-                "ai",
-                "assistant",
-            }
-            if is_root and is_assistant_start:
-                data = {**data, "id": f"{self._run.spec.turn_id}:assistant"}
-
-        # 3.使用与业务事件共用的编号器，登记待写队列并立即发布。
-        event = self._projector.create_event(
-            channel,
-            data,
-            namespace=agent_event.namespace,
-            timestamp=agent_event.timestamp,
-            node=agent_event.node,
-            source="agent_v2",
-            source_sequence=agent_event.sequence,
-            model_run_id=agent_event.model_run_id,
-        )
-        self.emit(event)
-        event_name = data.get("event")
-
-        # 4.首字计时只认文本增量，推理、工具和空文本不计入。
-        delta = data.get("delta")
-        first_text = (
-            not self._first_text_published
-            and event.method == "messages"
-            and event_name == "content-block-delta"
-            and isinstance(delta, Mapping)
-            and delta.get("type") == "text-delta"
-            and bool(delta.get("text"))
-        )
-
-        # 5.首字计时对应内存发布，不再把数据库耗时算成模型首字交付。
-        if not first_text:
-            return
-        self._first_text_published = True
-        duration_ms = (time.monotonic() - self._started_at) * 1000
-        logger.info(
-            "agent_delivery_timing run_id=%s stage=first_text duration_ms=%.2f",
-            self._run.run_id,
-            duration_ms,
-        )
 
     def drain_and_close(self) -> None:
         """停止接收并等待尾批；失败必须上报，调用方不能发布成功终态。"""
@@ -230,7 +148,7 @@ class AgentExecutionEventBuffer:
             self._condition.notify_all()
         self._worker.join()
 
-    def emit(self, event: AgentProtocolEvent) -> None:
+    def emit(self, event: AgentProtocolEvent, *, is_text_delta: bool = False) -> None:
         """登记一条统一事件并立即实时交付；写入落后时通过背压限制内存。"""
         with self._condition:
             # 1.待写队列包含正在提交的批次，背压不能只计算尚未取出的事件。
@@ -247,6 +165,13 @@ class AgentExecutionEventBuffer:
             self._pending_events.append(event)
             self._publish_realtime(event)
             self._condition.notify_all()
+        # 发布成功后才计首字；格式识别由消息解析器完成。
+        if is_text_delta and not self._first_text_published:
+            self._first_text_published = True
+            logger.info(
+                "agent_delivery_timing run_id=%s stage=first_text duration_ms=%.2f",
+                self._run.run_id, (time.monotonic() - self._started_at) * 1000,
+            )
 
     def _run_writer(self, worker_context: Callable[[], AbstractContextManager]) -> None:
         """空闲时也按截止时间提交小批次；提交失败保留队列并唤醒生产者。"""
@@ -275,7 +200,7 @@ class AgentExecutionEventBuffer:
                             self._pending_events.popleft()
                         self._condition.notify_all()
         except Exception as exc:
-            # 4.保留失败批，唤醒生产者停止接收；finish() 在本线程退出后负责补写。
+            # 4.保留失败批，唤醒生产者停止接收；drain_and_close() 在本线程退出后负责补写。
             with self._condition:
                 self._error = exc
                 self._condition.notify_all()

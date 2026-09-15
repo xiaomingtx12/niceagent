@@ -37,13 +37,15 @@ class AgentExecutionEventHub:
             )
             if sequence < oldest_cursor:
                 return None
-            result = []
-            for event in self._events:
-                if event.seq > sequence:
-                    result.append(event)
-                    if len(result) >= limit:
-                        break
-            return result
+            if not self._events or sequence >= self._events[-1].seq:
+                return []
+            result: deque[AgentProtocolEvent] = deque(maxlen=limit)
+            # 从尾部扫到游标，只保留最早一批未读事件，积压时也不复制整个尾部。
+            for event in reversed(self._events):
+                if event.seq <= sequence:
+                    break
+                result.appendleft(event)
+            return list(result)
 
     def change_token(self) -> int:
         """返回当前变化版本；版本只用于判断是否需要重新读取事件。"""

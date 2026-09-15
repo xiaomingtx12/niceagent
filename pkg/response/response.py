@@ -52,6 +52,9 @@ def sse_response(events: Iterable[Any]) -> FlaskResponse:
                         lines.append(f"event: {event_name}")
                 lines.append(f"data: {jsonlib.dumps(event, ensure_ascii=False, separators=(',', ':'))}")
                 yield "\n".join(lines) + "\n\n"
+            # 只有订阅正常结束才发完成注释；异常或连接提前关闭不会进入这里。
+            # 客户端可据此识别异常 EOF，无需重复解析整份业务 JSON。
+            yield ": stream-end\n\n"
         finally:
             close = getattr(iterator, "close", None)
             if callable(close):
