@@ -40,7 +40,7 @@ from .platform.wechat_service import WechatService
 from .file.workspace_file_service import WorkspaceFileService
 from .memory.memory_file_service import MemoryFileService
 from .workflow.workflow_service import WorkflowService
-from .agent.agent_run_service import AgentRunService
+from .agent.agent_execution_service import AgentExecutionService
 from .internal_agent_protocol.service import InternalAgentProtocolService
 from .agent.creator_task_service import CreatorTaskService
 
@@ -74,7 +74,7 @@ __all__ = [
     "ApiKeyService",
     "AppConfigService",
     "WorkflowService",
-    "AgentRunService",
+    "AgentExecutionService",
     "InternalAgentProtocolService",
     "BuiltinAppService",
     "AssistantAgentService",

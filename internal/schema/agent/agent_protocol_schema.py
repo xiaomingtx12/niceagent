@@ -23,8 +23,8 @@ from pydantic import (
     model_validator,
 )
 
-from internal.entity import AgentRunInput
-from internal.entity.agent_run_entity import AgentModelSelection
+from internal.entity import AgentExecutionInput
+from internal.entity.agent_execution_entity import AgentModelSelection
 from internal.exception import ValidateErrorException
 
 # 公开协议方法词表：DTO 校验、历史回放过滤和持久化查询共用同一来源，新增通道只改这里。
@@ -101,14 +101,14 @@ class AgentProtocolCommandInputReq(BaseModel):
             raise ValueError("附件不能重复提交")
         return value
 
-    def to_run_input(self) -> AgentRunInput:
+    def to_run_input(self) -> AgentExecutionInput:
         """把已校验的协议输入转换成核心服务使用的运行输入。"""
         message = self.messages[-1] if self.messages else None
         query = message.text if message is not None else (self.query or "")
         query = query.strip()
         if not query:
             raise ValidateErrorException("run.start 需要非空的用户输入")
-        return AgentRunInput(
+        return AgentExecutionInput(
             query=query,
             planning_enabled=self.planning_enabled,
             image_urls=tuple(self.image_urls),
@@ -171,7 +171,7 @@ class AgentProtocolCommandReq(BaseModel):
     type: StrictStr | None = None
     id: StrictInt | None = None
     method: Literal["run.start", "input.respond", "input.reopen"]
-    params: AgentRunInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq = Field(
+    params: AgentExecutionInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq = Field(
         default_factory=dict, validate_default=True,
     )
 
@@ -189,7 +189,7 @@ class AgentProtocolCommandReq(BaseModel):
     @classmethod
     def parse_params(
         cls, value: Any, info: ValidationInfo,
-    ) -> AgentRunInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq:
+    ) -> AgentExecutionInput | AgentProtocolInputRespondReq | AgentProtocolInputReopenReq:
         """按方法解析唯一参数类型，旧 SDK 的嵌套输入和单条回答在此收敛。"""
         if not isinstance(value, Mapping):
             raise ValueError("命令 params 必须是对象")

@@ -1,15 +1,15 @@
 # Agent 服务阅读入口
 
-从 `agent_run_service.py` 的公共方法开始阅读：类顶部是命令（启动、重启、提交答案、取消），中部是 Run 持久化与查询，底部是后台执行编排。
+从 `agent_execution_service.py` 的公共方法开始阅读：类顶部是命令（启动、重启、提交答案、取消），中部是 Run 持久化与查询，底部是后台执行编排。
 
 交互规则见 [Agent 最小交互业务约定](../../../docs/Agent-最小交互业务约定.md)；最终表结构及落库前的数据保留要求见 [会话与执行表定案](../../../docs/Agent-会话与执行表定案.md)。其他业务背景见 [Agent 业务文档](../../../docs/Agent-业务文档.md)。
 
 | 文件 | 职责 |
 | --- | --- |
-| `agent_run_service.py` | Run 聚合唯一入口：命令、持久化、孤儿收敛与有界后台执行 |
-| `agent_run_query.py` | Run 状态、历史快照及 SSE；已保存前缀与实时尾部按序衔接 |
-| `agent_run_events.py` | 进程内 Run 跟踪、实时发布、独立写入线程及结束前排空 |
-| `live_event_stream.py` | 活动执行的有界事件尾部；实时交付及刷新后补接未落库内容 |
+| `agent_execution_service.py` | Run 聚合唯一入口：命令、持久化、孤儿收敛与有界后台执行 |
+| `agent_execution_query.py` | Run 状态、历史快照及 SSE；已保存前缀与实时尾部按序衔接 |
+| `agent_execution_runtime.py` | `AgentExecutionTracker` 管理活动 Run；`AgentExecutionEventBuffer` 接收事件、实时发布并批量落库 |
+| `agent_execution_event_hub.py` | `AgentExecutionEventHub` 保存实时尾部、按序读取、等待变化和关闭订阅 |
 | `agent_model_service.py` | 默认模型来源、手动覆盖、连接授权、思考强度和模型目录 |
 | `agent_definition_service.py` | 读取草稿／发布／内置定义及恢复指纹，不解析模型连接 |
 | `agent_factory.py` | 一次读取应用定义，直接生成 AgentConfig 与运行上下文，交给 Core 装配执行器 |
@@ -38,7 +38,7 @@
 
 每个活动片段独占一个写线程和 Flask 应用上下文，不跨线程共用数据库 Session。每批最多 128 个事件，未凑满时等待最多 250ms 后提交，空闲小批次也会保存；待写队列最多 512 个事件，实时尾部保留最近 2048 个事件。先登记待写队列再实时发布，只有持续写入拥塞才施加背压，因此正常情况下淘汰的历史都已落库。结束前 `finish()` 排空并回收线程，异常尾批在调用线程重试一次；仍失败则只能按失败结算，不能宣告成功。片段退出后释放内存尾部，后续历史统一读库。
 
-`_commit_result` 直接构造执行结果状态与待填写表单，`_prepare_result_status` 直接生成业务消息状态和公开生命周期。待填写任务与聊天历史直接在 `AgentRunQuery.get_state` 内构造；`state_projector` 只保留实时事件和状态查询共用的转换。
+`_commit_result` 直接构造执行结果状态与待填写表单，`_prepare_result_status` 直接生成业务消息状态和公开生命周期。待填写任务与聊天历史直接在 `AgentExecutionQuery.get_state` 内构造；`state_projector` 只保留实时事件和状态查询共用的转换。
 
 后台执行只向 Core 传入 `message` 或 `resume`、事件接收方和取消信号，不构造 LangGraph Command。取消监控只等待进程内取消信号，收到后调用 `AgentExecutor.request_cancel()` 请求图排空；阻塞中的工具只有主动排空才会立刻停止。微信兼容入口也使用 `execute(message=...)`，直接保存结果中的回答与用量。
 
@@ -58,7 +58,7 @@
 
 - 应用配置来源由定义服务管理，恢复指纹由调用方 `load(...).fingerprint()` 直接比较，不经单行转发；模型服务统一处理默认来源、覆盖校验、历史选择恢复和失效回退；恢复过程中只读取一次默认配置，失效覆盖不把旧思考强度带入回退模型。查询服务自己读取历史覆盖字段，只把解析委托给模型服务。
 - 只读投影（状态 Run 列表、历史事件分页、续传批次、模型覆盖字段）由查询服务自己查询；写服务只保留喂给写决策的读取与 `get_run_status`。
-- 命令方法与持久化同属 `AgentRunService`：公开方法编排事务和业务规则，下划线方法只做数据库读写，两者不再跨服务转发；锁定查询后不关闭 Session，Session 生命周期由入口负责。
+- 命令方法与持久化同属 `AgentExecutionService`：公开方法编排事务和业务规则，下划线方法只做数据库读写，两者不再跨服务转发；锁定查询后不关闭 Session，Session 生命周期由入口负责。
 - 公开面只保留真正被外部调用的成员：四个命令（`start_run` / `restart_run` / `submit_answers` / `cancel_run`）加三个只读入口（`get_run` / `get_run_status` / `get_run_metadata`）。执行链路步骤、锁、事件与结算一律下划线，同模块内引用，不改动它们的外部契约。
 - 只有单一调用者的查询不再抽成方法：占用检查、幂等查重、事件序号读取、最新 Run 读取都直接写在调用点，靠 `# 1.` 步骤注释和局部变量名表达意图。因此同一段查询不因"加锁/不加锁"分叉成两个方法，也不留布尔开关参数。
 - 装配工厂不依赖 Run 服务：近期答案由 `AgentFactory._load_confirmed_inputs` 自己读取，避免装配层反向依赖持久化层，也避免模块循环导入。
@@ -73,7 +73,7 @@
 - 助手和普通应用共用类型化模型配置、覆盖规则及加载路径；助手服务只构造专属工具。
 - 已发布子 Agent 的模型由其发布配置决定，自定义跟随子 Agent 绑定本次父模型。
 - SDK 的命令 ID、分派及成功／错误外壳由命令入口 `respond_command` 处理：按已解析参数直接分派 `start_run` / `submit_answers`，业务命令返回 `RunAccepted` 或 `RunRejected`。
-- SSE 续传在 `AgentRunQuery._stream_events` 内切换数据库前缀和实时尾部：游标按扫描序号前进，过滤只影响发送，隐藏事件不阻断续传。
+- SSE 续传在 `AgentExecutionQuery._stream_events` 内切换数据库前缀和实时尾部：游标按扫描序号前进，过滤只影响发送，隐藏事件不阻断续传。
 - 公开事件通道词表只在 `agent_protocol_schema.PUBLIC_EVENT_METHODS` 定义一次：DTO 校验的 `Literal`、历史回放过滤和持久化查询都从它派生，新增通道只改这一处。
 
 ## 数据对象的位置
@@ -89,6 +89,6 @@
 
 装配工厂仍负责模型/工具/Skill 授权、可信上下文和附件准备，Workspace 存储适配器以已创建对象交给 Core。附件服务返回已授权文件的路径和字节，Core 负责写入本轮副本；框架 Store、Checkpointer 和 Backend 装配均在 AgentV2 内完成。Core 的事件与结果状态已经转换为 JSON 兼容数据，Service 不解释框架消息类型。会话删除属于业务资源清理，持久化和沙箱删除适配器保留独立入口。
 
-后台调度的线程池、进程内取消信号和公开错误映射仍在平台层；`AgentRunService` 负责数据库锁、事件/消息/快照的原子提交，观测合并函数只处理数据。事件缓冲通过 `_record_events` 回调提交，不反向依赖服务类。
+后台调度的线程池、进程内取消信号和公开错误映射仍在平台层；`AgentExecutionService` 负责数据库锁、事件/消息/快照的原子提交，观测合并函数只处理数据。事件缓冲通过 `_record_events` 回调提交，不反向依赖服务类。
 
 内部异步子 Agent 的 SDK 服务与鉴权位于 `../internal_agent_protocol`，前端事件投影保留在 `../agent_protocol`。

@@ -1,7 +1,7 @@
 """工作台模型选项的公开响应，不包含运行输入或身份上下文。"""
 
 from pydantic import BaseModel, ConfigDict, Field
-from internal.entity.agent_run_entity import AgentModelSelection
+from internal.entity.agent_execution_entity import AgentModelSelection
 
 
 class AgentProtocolModelChoiceResp(BaseModel):

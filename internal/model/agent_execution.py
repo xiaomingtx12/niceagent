@@ -19,13 +19,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 
 from internal.extension.database_extension import db
-from internal.entity.agent_run_entity import AGENT_RUN_TERMINAL_STATUSES
+from internal.entity.agent_execution_entity import AGENT_EXECUTION_TERMINAL_STATUSES
 
 _DISPLAY_STATE_KEYS = ("messages", "todos", "files", "async_tasks")
 
 
 class AgentExecution(db.Model):
-    """本轮逻辑执行与写入资格；表单恢复沿用 Run，停止后只能开始新一轮。"""
+    """本轮逻辑执行与写入资格；表单恢复沿用 Execution，停止后只能开始新一轮。"""
 
     __tablename__ = "agent_execution"
     __table_args__ = (
@@ -63,13 +63,13 @@ class AgentExecution(db.Model):
     turn_id = Column(
         UUID, ForeignKey("conversation_turn.id", ondelete="CASCADE"), nullable=False
     )  # 承载本轮问答与累计用量；归属三元组一致性由创建服务保证
-    input_message_id = Column(String(255), nullable=True)  # 对齐客户端消息、历史和时间线；相同标识重复启动时复用 Run
+    input_message_id = Column(String(255), nullable=True)  # 对齐客户端消息、历史和时间线；相同标识重复启动时复用 Execution
     status = Column(
         String(32), nullable=False, server_default=text("'running'")
-    )  # AgentRunStatus，独立于消息展示状态；建行即已分配执行权
+    )  # AgentExecutionStatus，独立于消息展示状态；建行即已分配执行权
     error_message = Column(
         Text, nullable=False, server_default=text("''::text")
-    )  # 可向用户展示的 Run 失败原因；异常堆栈只写入日志
+    )  # 可向用户展示的 Execution 失败原因；异常堆栈只写入日志
     execution_options = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))  # 模型覆盖、能力开关、Skill 选择与配置指纹；不复制问答内容或身份
     pending_inputs = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
@@ -93,7 +93,7 @@ class AgentExecution(db.Model):
     @property
     def is_terminal(self) -> bool:
         """统一记录的终态判断，等待用户输入仍可继续执行。"""
-        return self.status in AGENT_RUN_TERMINAL_STATUSES
+        return self.status in AGENT_EXECUTION_TERMINAL_STATUSES
 
     @property
     def public_snapshot(self) -> dict[str, Any]:

@@ -12,37 +12,37 @@
                                              → 内存尾部 → 通知实时订阅者
                                              → 独立写线程合批调用 _record_events → 事件表
 
-HTTP 订阅：AgentRunQuery._stream_events → 已保存历史接内存尾部
+HTTP 订阅：AgentExecutionQuery._stream_events → 已保存历史接内存尾部
                                       → sse_response 编码 → 浏览器
 ```
 
 本目录只保留多处共用的协议处理：`event_projector.py` 提供事件编号、协议外壳、终态批次和历史解析，`state_projector.py` 提供图状态适配与公开快照筛选。只有一个调用方的业务步骤直接写在调用函数内，包括事件接收转换、聊天历史与待填写任务构造、执行结果状态和生命周期映射。
 
-`AgentRunEventBuffer` 发布内存事件后立即唤醒订阅者，批量写入独立进行。刷新和断线重连共用“已保存前缀 + 内存尾部”，按同一序号衔接，已经发送的实时事件落库后不重复发送。图结束时先排空写队列，由 Service 保存回答、状态和终态事件，再通知前端运行已结束；服务异常退出允许丢失尚未保存的尾部。
+`AgentExecutionEventBuffer` 发布内存事件后立即唤醒订阅者，批量写入独立进行。刷新和断线重连共用“已保存前缀 + 内存尾部”，按同一序号衔接，已经发送的实时事件落库后不重复发送。图结束时先排空写队列，由 Service 保存回答、状态和终态事件，再通知前端运行已结束；服务异常退出允许丢失尚未保存的尾部。
 
 ## 阅读顺序
 
 1. `agent_protocol_schema.AgentProtocolCommandReq.from_mapping`：一次解析命令外壳与参数，兼容 SDK 的嵌套输入及单个／批量回答。`params` 在解析后已经是 `AgentRunInput`、`AgentProtocolInputRespondReq` 或 `AgentProtocolInputReopenReq`。
 2. 命令分派与成功／错误外壳由 `internal/handler/agent/entry_adapter.py` 的 `respond_command` 处理：消费已解析的参数直接调用启动、回答和重新填写入口，再包装协议响应。
-3. `AgentRunEventBuffer.receive`：直接筛选 Core 事件、适配载荷并绑定业务消息 ID，再调用 `create_event` 分配持久化序号和协议外壳。
-4. `AgentRunService._commit_result`：直接构造执行结果状态与待填写表单；`_prepare_result_status` 直接确定业务消息状态和公开生命周期。
-5. `AgentRunQuery.get_state`：直接构造聊天历史、补齐活动消息并生成待填写任务。共用的图状态适配和快照白名单保留在 `state_projector.py`。
+3. `AgentExecutionEventBuffer.receive`：直接筛选 Core 事件、适配载荷并绑定业务消息 ID，再调用 `create_event` 分配持久化序号和协议外壳。
+4. `AgentExecutionService._commit_result`：直接构造执行结果状态与待填写表单；`_prepare_result_status` 直接确定业务消息状态和公开生命周期。
+5. `AgentExecutionQuery.get_state`：直接构造聊天历史、补齐活动消息并生成待填写任务。共用的图状态适配和快照白名单保留在 `state_projector.py`。
 
 ### 主要方法的处理步骤
 
 | 方法 | 处理顺序 |
 | --- | --- |
-| `AgentRunEventBuffer.receive` | 排除框架根终态 → 适配载荷 → 编号 → 缓冲和提交 |
-| `AgentRunQuery.get_state` | 查询历史与 Run → 构造用户和助手消息 → 补齐活动消息 → 汇总状态与表单 |
+| `AgentExecutionEventBuffer.receive` | 排除框架根终态 → 适配载荷 → 编号 → 缓冲和提交 |
+| `AgentExecutionQuery.get_state` | 查询历史与 Run → 构造用户和助手消息 → 补齐活动消息 → 汇总状态与表单 |
 | `adapt_graph_state` | 复制输入状态 → 合并每轮 AI 回答 → 适配异步任务会话字段；其余图状态字段保留 |
 | `select_public_snapshot` | 按公开字段白名单提取状态，供查询和业务状态通知使用 |
-| `AgentRunService._commit_result` | 提取结果展示字段 → 验证中断表单 → 保留答案历史 → 原子保存结果与终态事件 |
+| `AgentExecutionService._commit_result` | 提取结果展示字段 → 验证中断表单 → 保留答案历史 → 原子保存结果与终态事件 |
 
 消息合并直接写在 `adapt_graph_state` 内：用户消息开始新回合，工具与其他消息原样保留，后续 AI 回答替换本轮第一次回答的位置。深拷贝保证适配结果与输入快照隔离；`adapt_graph_state` 负责字段适配，`select_public_snapshot` 负责公开字段筛选。
 
 ## HTTP 入口
 
-`internal/handler/agent` 按入口组织处理器：`DebugAgentHandler`、`WebAppAgentHandler`、`CreatorTaskAgentHandler` 各负责命令、订阅、状态、模型选项和取消；每个处理器只依赖自己的会话授权入口。`AgentRunHandler` 单独负责 Run 历史事件查询。
+`internal/handler/agent` 按入口组织处理器：`DebugAgentHandler`、`WebAppAgentHandler`、`CreatorTaskAgentHandler` 各负责命令、订阅、状态、模型选项和取消；每个处理器只依赖自己的会话授权入口。`AgentExecutionHandler` 单独负责 Run 历史事件查询。
 
 六个入口的命令、订阅、状态、模型选项和取消行为完全一致，差异只有会话鉴权方式和 `InvokeFrom`，因此统一由 `internal/handler/agent/entry_adapter.py` 解析请求并包装响应；每个处理器只保留一个 `_caller(...)` 完成鉴权并组装可信身份，不再各自复制协议处理。鉴权先于请求体解析，未授权请求不会触发参数校验。该适配器被工作台入口和 Agent Protocol 入口共用，因此归在 `handler/agent`，`handler/agent_protocol` 只放专属入口本身。
 
@@ -63,7 +63,7 @@ LangGraph 原始流
   → 实时发布与 SSE；并行批量保存，收尾时等待保存完成
 ```
 
-`AgentRunEventBuffer.receive` 对一个 Core 事件最多创建一个公开事件，过滤、载荷适配和缓冲在同一函数内完成。共用的 `create_event` 只分配序号并构造协议外壳。Core 保留框架的正常消息结束和错误事件；前端依据模型错误、子图终态和已提交的业务终态收尾尚未完成的展示记录。
+`AgentExecutionEventBuffer.receive` 对一个 Core 事件最多创建一个公开事件，过滤、载荷适配和缓冲在同一函数内完成。共用的 `create_event` 只分配序号并构造协议外壳。Core 保留框架的正常消息结束和错误事件；前端依据模型错误、子图终态和已提交的业务终态收尾尚未完成的展示记录。
 
 `create_business_event` 与 `create_state_transition` 用于业务主动产生的状态和表单事件。终态批次按“状态 → 表单 → 生命周期”排列，由 Run 服务在同一事务保存。Core 的图结束不代表平台数据已经提交，不能直接作为业务完成通知。
 

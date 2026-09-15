@@ -21,7 +21,7 @@ class InvalidInputAnswer(ValueError):
 
 
 @dataclass(frozen=True)
-class RunAccepted:
+class ExecutionAccepted:
     """已接受的业务操作及客户端可以继续读取的事件序号。"""
 
     run_id: UUID
@@ -29,14 +29,14 @@ class RunAccepted:
 
 
 @dataclass(frozen=True)
-class RunRejected:
+class ExecutionRejected:
     """可呈现的运行冲突或字段错误，不绑定 SDK 的响应外壳。"""
 
     message: str
     field_errors: dict[str, dict[str, str]] | None = None
 
 
-class AgentRunInteraction:
+class AgentExecutionInteraction:
     """校验当前待填批次并生成已确认问答；提交幂等和事务由调用方管理。"""
 
     def __init__(

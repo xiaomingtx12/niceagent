@@ -9,15 +9,15 @@ from injector import inject
 
 from internal.entity.conversation_entity import InvokeFrom
 from internal.handler.agent.entry_adapter import (
-    AgentRunCaller,
+    AgentExecutionCaller,
     respond_cancel,
     respond_command,
     respond_model_settings,
     respond_state,
     respond_stream,
 )
-from internal.service import AgentRunService, CreatorTaskService
-from internal.service.agent.agent_run_query import AgentRunQuery
+from internal.service import AgentExecutionService, CreatorTaskService
+from internal.service.agent.agent_execution_query import AgentExecutionQuery
 
 
 @inject
@@ -25,8 +25,8 @@ from internal.service.agent.agent_run_query import AgentRunQuery
 class CreatorTaskAgentHandler:
     """任务中心入口只使用本入口的会话授权，执行和查询复用工作台能力。"""
 
-    service: AgentRunService
-    query_service: AgentRunQuery
+    service: AgentExecutionService
+    query_service: AgentExecutionQuery
     creator_task_service: CreatorTaskService
 
     @login_required
@@ -54,12 +54,12 @@ class CreatorTaskAgentHandler:
         """先校验会话权限，再限制目标 Run 的应用、会话和来源。"""
         return respond_cancel(self.service, self._caller(app_id, conversation_id), run_id)
 
-    def _caller(self, app_id: UUID, conversation_id: UUID) -> AgentRunCaller:
+    def _caller(self, app_id: UUID, conversation_id: UUID) -> AgentExecutionCaller:
         """五个动作共用同一次授权；任务中心的创建者就是当前账号。"""
         conversation = self.creator_task_service.get_owned_conversation(
             app_id=app_id, conversation_id=conversation_id, account=current_user,
         )
-        return AgentRunCaller(
+        return AgentExecutionCaller(
             app_id=conversation.app_id, conversation_id=conversation.id,
             invoke_from=InvokeFrom.CREATOR_TASK,
             account_id=current_user.id, created_by=current_user.id,

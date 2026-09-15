@@ -1,11 +1,11 @@
 from .agent_attachment_entity import AgentAttachment
-from .agent_run_entity import (
-    AGENT_RUN_ACTIVE_STATUSES,
-    AGENT_RUN_OCCUPYING_STATUSES,
-    AGENT_RUN_TERMINAL_STATUSES,
-    AgentExecutionSegment,
-    AgentRunInput,
-    AgentRunStatus,
+from .agent_execution_entity import (
+    AGENT_EXECUTION_ACTIVE_STATUSES,
+    AGENT_EXECUTION_OCCUPYING_STATUSES,
+    AGENT_EXECUTION_TERMINAL_STATUSES,
+    AgentExecutionHandle,
+    AgentExecutionInput,
+    AgentExecutionStatus,
 )
 from .skill_entity import BuiltinSkill
 from .workspace_file_entity import (
@@ -20,10 +20,10 @@ __all__ = [
     "WorkspaceFilePreview",
     "supports_text_preview",
     "AgentAttachment",
-    "AGENT_RUN_ACTIVE_STATUSES",
-    "AGENT_RUN_OCCUPYING_STATUSES",
-    "AGENT_RUN_TERMINAL_STATUSES",
-    "AgentExecutionSegment",
-    "AgentRunInput",
-    "AgentRunStatus",
+    "AGENT_EXECUTION_ACTIVE_STATUSES",
+    "AGENT_EXECUTION_OCCUPYING_STATUSES",
+    "AGENT_EXECUTION_TERMINAL_STATUSES",
+    "AgentExecutionHandle",
+    "AgentExecutionInput",
+    "AgentExecutionStatus",
 ]

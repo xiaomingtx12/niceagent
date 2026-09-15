@@ -1,4 +1,4 @@
-"""Agent Run 历史事件查询。"""
+"""Agent 执行历史事件查询。"""
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -8,17 +8,17 @@ from flask_login import current_user, login_required
 from injector import inject
 
 from internal.exception import ValidateErrorException
-from internal.service.agent.agent_run_query import AgentRunQuery
+from internal.service.agent.agent_execution_query import AgentExecutionQuery
 from pkg.paginator import PaginatorReq
 from pkg.response import json_response
 
 
 @inject
 @dataclass
-class AgentRunHandler:
-    """仅按 Run 标识查询，归属校验由查询服务完成。"""
+class AgentExecutionHandler:
+    """仅按执行标识查询，归属校验由查询服务完成。"""
 
-    query_service: AgentRunQuery
+    query_service: AgentExecutionQuery
 
     @login_required
     def snapshot(self, run_id: UUID) -> Response:

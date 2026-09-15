@@ -8,7 +8,7 @@ from injector import inject
 
 from internal.core.language_model.entities.model_entity import ModelEntity, ModelParameter, ModelType
 from internal.core.language_model.parameters import canonicalize_parameters
-from internal.entity.agent_run_entity import AgentModelSelection
+from internal.entity.agent_execution_entity import AgentModelSelection
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import NotFoundException, ValidateErrorException
 from internal.schema.agent.agent_model_schema import (

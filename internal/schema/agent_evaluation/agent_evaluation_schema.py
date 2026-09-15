@@ -15,7 +15,7 @@ from pydantic import (
     model_validator,
 )
 
-from internal.entity.agent_run_entity import AgentModelSelection
+from internal.entity.agent_execution_entity import AgentModelSelection
 
 
 class EvaluationEvidenceRuleReq(BaseModel):

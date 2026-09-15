@@ -34,7 +34,7 @@ from internal.handler import (
     DebugAgentHandler,
     WebAppAgentHandler,
     CreatorTaskAgentHandler,
-    AgentRunHandler,
+    AgentExecutionHandler,
     AssistantAgentProtocolHandler,
     InternalAgentProtocolHandler,
     OpenAPIAgentProtocolHandler,
@@ -45,7 +45,7 @@ from .agent_routes import (
     register_debug_agent_routes,
     register_web_app_agent_routes,
     register_creator_task_agent_routes,
-    register_agent_run_routes,
+    register_agent_execution_routes,
     register_assistant_agent_protocol_routes,
     register_internal_agent_protocol_routes,
     register_openapi_agent_protocol_routes,
@@ -90,7 +90,7 @@ class Router:
     debug_agent_handler: DebugAgentHandler
     web_app_agent_handler: WebAppAgentHandler
     creator_task_agent_handler: CreatorTaskAgentHandler
-    agent_run_handler: AgentRunHandler
+    agent_execution_handler: AgentExecutionHandler
     assistant_agent_protocol_handler: AssistantAgentProtocolHandler
     internal_agent_protocol_handler: InternalAgentProtocolHandler
     openapi_agent_protocol_handler: OpenAPIAgentProtocolHandler
@@ -573,7 +573,7 @@ class Router:
         register_debug_agent_routes(bp, self.debug_agent_handler)
         register_web_app_agent_routes(bp, self.web_app_agent_handler)
         register_creator_task_agent_routes(bp, self.creator_task_agent_handler)
-        register_agent_run_routes(bp, self.agent_run_handler)
+        register_agent_execution_routes(bp, self.agent_execution_handler)
         register_assistant_agent_protocol_routes(
             bp,
             self.assistant_agent_protocol_handler,

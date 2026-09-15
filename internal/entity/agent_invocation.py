@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from internal.entity.agent_attachment_entity import AgentAttachment
-from internal.entity.agent_run_entity import AgentModelSelection
+from internal.entity.agent_execution_entity import AgentModelSelection
 from internal.entity.conversation_entity import InvokeFrom
 
 

@@ -9,16 +9,16 @@ from injector import inject
 
 from internal.entity.conversation_entity import InvokeFrom
 from internal.handler.agent.entry_adapter import (
-    AgentRunCaller,
+    AgentExecutionCaller,
     respond_cancel,
     respond_command,
     respond_model_settings,
     respond_state,
     respond_stream,
 )
-from internal.service import AgentRunService, AssistantAgentService
+from internal.service import AgentExecutionService, AssistantAgentService
 from internal.middleware.rate_limit_middleware import rate_limit
-from internal.service.agent.agent_run_query import AgentRunQuery
+from internal.service.agent.agent_execution_query import AgentExecutionQuery
 from pkg.response import json_response
 
 
@@ -27,8 +27,8 @@ from pkg.response import json_response
 class AssistantAgentProtocolHandler:
     """辅助 Agent command、stream、state 和取消适配器。"""
 
-    query_service: AgentRunQuery
-    service: AgentRunService
+    query_service: AgentExecutionQuery
+    service: AgentExecutionService
     assistant_agent_service: AssistantAgentService
 
     @rate_limit(config_key="user")
@@ -65,12 +65,12 @@ class AssistantAgentProtocolHandler:
         """先校验会话权限，再限制目标 Run 的应用、会话和来源。"""
         return respond_cancel(self.service, self._caller(conversation_id), run_id)
 
-    def _caller(self, conversation_id: UUID) -> AgentRunCaller:
+    def _caller(self, conversation_id: UUID) -> AgentExecutionCaller:
         """五个动作共用同一次授权；内置助手应用由服务端按配置解析。"""
         conversation = self.assistant_agent_service.get_owned_conversation(
             conversation_id=conversation_id, account=current_user,
         )
-        return AgentRunCaller(
+        return AgentExecutionCaller(
             app_id=conversation.app_id, conversation_id=conversation.id,
             invoke_from=InvokeFrom.ASSISTANT_AGENT,
             account_id=current_user.id, created_by=current_user.id,

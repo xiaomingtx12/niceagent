@@ -16,8 +16,8 @@ from internal.service.internal_agent_protocol.auth import (
     InternalAgentProtocolClaims,
     parse_internal_agent_protocol_token,
 )
-from internal.entity import AGENT_RUN_ACTIVE_STATUSES
-from internal.entity.agent_run_interaction import RunRejected
+from internal.entity import AGENT_EXECUTION_ACTIVE_STATUSES
+from internal.entity.agent_execution_interaction import ExecutionRejected
 from internal.entity.app_entity import AppStatus
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import (
@@ -34,7 +34,7 @@ from internal.schema.agent_protocol.internal_agent_protocol_schema import (
 )
 from pkg.sqlalchemy import SQLAlchemy
 
-from internal.service.agent.agent_run_service import AgentRunService
+from internal.service.agent.agent_execution_service import AgentExecutionService
 from internal.service.conversation.conversation_service import ConversationService
 
 
@@ -45,7 +45,7 @@ class InternalAgentProtocolService:
 
     db: SQLAlchemy
     config: Config
-    run_service: AgentRunService
+    run_service: AgentExecutionService
     conversation_service: ConversationService
 
     def authenticate(self, token: str | None) -> InternalAgentProtocolClaims:
@@ -84,7 +84,7 @@ class InternalAgentProtocolService:
         claims: InternalAgentProtocolClaims,
         conversation_id: UUID,
         request: InternalRunCreateReq,
-    ) -> InternalRunResp | RunRejected:
+    ) -> InternalRunResp | ExecutionRejected:
         """校验 graph、可选中断前序 Run，并经 Agent Run 服务入队后台任务。"""
         # 1.验证签名声明、目标应用和 graph_id，再解析 SDK 输入。
         account = self._get_authorized_account(claims)
@@ -118,7 +118,7 @@ class InternalAgentProtocolService:
                 created_by=account.id, invoke_from=InvokeFrom.CREATOR_TASK,
                 run_input=command_input, user_input_enabled=False,
             )
-        if isinstance(started, RunRejected):
+        if isinstance(started, ExecutionRejected):
             return started
 
         run_id = started.run_id
@@ -155,7 +155,7 @@ class InternalAgentProtocolService:
             created_at=_format_datetime(conversation.created_at),
             updated_at=_format_datetime(conversation.updated_at),
             metadata={"graph_id": build_published_graph_id(claims.target_app_id)},
-            status="busy" if metadata.status in AGENT_RUN_ACTIVE_STATUSES else "idle",
+            status="busy" if metadata.status in AGENT_EXECUTION_ACTIVE_STATUSES else "idle",
             values={"messages": messages},
         )
 

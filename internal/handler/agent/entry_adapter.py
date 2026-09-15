@@ -11,7 +11,7 @@ from uuid import UUID
 
 from flask import Response, request
 
-from internal.entity.agent_run_interaction import RunRejected
+from internal.entity.agent_execution_interaction import ExecutionRejected
 from internal.entity.conversation_entity import InvokeFrom
 from internal.schema.agent.agent_protocol_schema import (
     AgentProtocolCommandErrorResp,
@@ -21,13 +21,13 @@ from internal.schema.agent.agent_protocol_schema import (
     AgentProtocolInputReopenReq,
     AgentProtocolInputRespondReq,
 )
-from internal.service.agent.agent_run_query import AgentRunQuery
-from internal.service.agent.agent_run_service import AgentRunService
+from internal.service.agent.agent_execution_query import AgentExecutionQuery
+from internal.service.agent.agent_execution_service import AgentExecutionService
 from pkg.response import json_response, sse_response
 
 
 @dataclass(frozen=True)
-class AgentRunCaller:
+class AgentExecutionCaller:
     """一次入口请求已解析的可信身份；客户端命令不能覆盖其中任何字段。"""
 
     app_id: UUID
@@ -38,7 +38,7 @@ class AgentRunCaller:
     end_user_id: UUID | None = None
 
 
-def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Response:
+def respond_command(service: AgentExecutionService, caller: AgentExecutionCaller) -> Response:
     """解析命令并按类型分派业务操作，命令 ID 只进入响应外壳。"""
     command = AgentProtocolCommandReq.from_mapping(request.get_json(silent=True))
     params = command.params
@@ -51,7 +51,7 @@ def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Respons
         )
     elif isinstance(params, AgentProtocolInputReopenReq):
         # 旧客户端仍可解析响应，但不能恢复已经结束的 Run。
-        result = RunRejected("本轮已停止，不支持重新填写恢复；请在当前会话发送新消息")
+        result = ExecutionRejected("本轮已停止，不支持重新填写恢复；请在当前会话发送新消息")
     else:
         result = service.start_run(
             account_id=caller.account_id, app_id=caller.app_id,
@@ -59,7 +59,7 @@ def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Respons
             end_user_id=caller.end_user_id, invoke_from=caller.invoke_from,
             run_input=params,
         )
-    if isinstance(result, RunRejected):
+    if isinstance(result, ExecutionRejected):
         response: AgentProtocolCommandErrorResp | AgentProtocolCommandSuccessResp = (
             AgentProtocolCommandErrorResp(
                 id=command.id, message=result.message, field_errors=result.field_errors,
@@ -73,7 +73,7 @@ def respond_command(service: AgentRunService, caller: AgentRunCaller) -> Respons
     return json_response(response.model_dump(mode="json", exclude_none=True))
 
 
-def respond_stream(query_service: AgentRunQuery, caller: AgentRunCaller) -> Response:
+def respond_stream(query_service: AgentExecutionQuery, caller: AgentExecutionCaller) -> Response:
     """按已解析游标订阅当前入口的 Run；游标同时接受 Last-Event-ID 头。"""
     stream_request = AgentProtocolEventStreamReq.from_mapping(
         request.get_json(silent=True),
@@ -86,7 +86,7 @@ def respond_stream(query_service: AgentRunQuery, caller: AgentRunCaller) -> Resp
     return sse_response(events)
 
 
-def respond_state(query_service: AgentRunQuery, caller: AgentRunCaller) -> Response:
+def respond_state(query_service: AgentExecutionQuery, caller: AgentExecutionCaller) -> Response:
     """返回当前入口的状态快照，只读已提交数据。"""
     result = query_service.get_state(
         conversation_id=caller.conversation_id, invoke_from=caller.invoke_from,
@@ -94,7 +94,7 @@ def respond_state(query_service: AgentRunQuery, caller: AgentRunCaller) -> Respo
     return json_response(result.model_dump(mode="json"))
 
 
-def respond_model_settings(query_service: AgentRunQuery, caller: AgentRunCaller) -> Response:
+def respond_model_settings(query_service: AgentExecutionQuery, caller: AgentExecutionCaller) -> Response:
     """返回模型选项；可见范围由查询服务按账号与创建者身份判断。"""
     result = query_service.get_model_settings(
         app_id=caller.app_id, conversation_id=caller.conversation_id,
@@ -104,7 +104,7 @@ def respond_model_settings(query_service: AgentRunQuery, caller: AgentRunCaller)
     return json_response(result.model_dump(mode="json"))
 
 
-def respond_cancel(service: AgentRunService, caller: AgentRunCaller, run_id: UUID) -> Response:
+def respond_cancel(service: AgentExecutionService, caller: AgentExecutionCaller, run_id: UUID) -> Response:
     """取消指定 Run 并返回真实状态；等待表单的任务会被直接取消。"""
     result = service.cancel_run(
         app_id=caller.app_id, conversation_id=caller.conversation_id,
@@ -114,7 +114,7 @@ def respond_cancel(service: AgentRunService, caller: AgentRunCaller, run_id: UUI
 
 
 __all__ = [
-    "AgentRunCaller",
+    "AgentExecutionCaller",
     "respond_cancel",
     "respond_command",
     "respond_model_settings",

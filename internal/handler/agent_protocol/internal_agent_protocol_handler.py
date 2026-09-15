@@ -16,7 +16,7 @@ from internal.exception import (
     ValidateErrorException,
 )
 from internal.schema.agent_protocol.internal_agent_protocol_schema import InternalRunCreateReq
-from internal.entity.agent_run_interaction import RunRejected
+from internal.entity.agent_execution_interaction import ExecutionRejected
 from internal.service.internal_agent_protocol.service import (
     InternalAgentProtocolService,
 )
@@ -63,7 +63,7 @@ class InternalAgentProtocolHandler:
                 conversation_id=conversation_id,
                 request=payload,
             )
-            if isinstance(result, RunRejected):
+            if isinstance(result, ExecutionRejected):
                 return json_response(
                     {"detail": result.message},
                     status=409,

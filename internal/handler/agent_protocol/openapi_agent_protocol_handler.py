@@ -10,15 +10,15 @@ from injector import inject
 from internal.entity.conversation_entity import InvokeFrom
 from internal.exception import ValidateErrorException
 from internal.handler.agent.entry_adapter import (
-    AgentRunCaller,
+    AgentExecutionCaller,
     respond_cancel,
     respond_command,
     respond_model_settings,
     respond_state,
     respond_stream,
 )
-from internal.service import AgentRunService, ConversationService
-from internal.service.agent.agent_run_query import AgentRunQuery
+from internal.service import AgentExecutionService, ConversationService
+from internal.service.agent.agent_execution_query import AgentExecutionQuery
 from pkg.response import json_response
 
 
@@ -27,8 +27,8 @@ from pkg.response import json_response
 class OpenAPIAgentProtocolHandler:
     """服务 API command、stream、state 和取消适配器。"""
 
-    query_service: AgentRunQuery
-    service: AgentRunService
+    query_service: AgentExecutionQuery
+    service: AgentExecutionService
     conversation_service: ConversationService
 
     @login_required
@@ -73,12 +73,12 @@ class OpenAPIAgentProtocolHandler:
         """先校验会话权限，再限制目标 Run 的应用、会话和来源。"""
         return respond_cancel(self.service, self._caller(app_id, conversation_id), run_id)
 
-    def _caller(self, app_id: UUID, conversation_id: UUID) -> AgentRunCaller:
+    def _caller(self, app_id: UUID, conversation_id: UUID) -> AgentExecutionCaller:
         """五个动作共用同一次授权；服务 API 的创建者是会话所有者。"""
         conversation = self.conversation_service.get_service_api_conversation(
             app_id=app_id, conversation_id=conversation_id, account=current_user,
         )
-        return AgentRunCaller(
+        return AgentExecutionCaller(
             app_id=conversation.app_id, conversation_id=conversation.id,
             invoke_from=InvokeFrom.SERVICE_API,
             account_id=current_user.id, created_by=conversation.created_by,

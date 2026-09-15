@@ -1,6 +1,6 @@
 # Agent V2 执行层阅读入口
 
-本包是 Core 与 Deep Agents 图之间的执行边界：驱动一次 v3 图运行，把框架事件流收敛为平台稳定契约（`AgentEvent` / `AgentExecutionResult`），并管理执行器的资源生命周期。上游由 `AgentFactory` 装配创建，下游由 `AgentRunService` 的后台线程调用。
+本包是 Core 与 Deep Agents 图之间的执行边界：驱动一次 v3 图运行，把框架事件流收敛为平台稳定契约（`AgentEvent` / `AgentExecutionResult`），并管理执行器的资源生命周期。上游由 `AgentFactory` 装配创建，下游由 `AgentExecutionService` 的后台线程调用。
 
 `AgentExecutor.execute` 按顺序完成输入校验、图执行、资源关闭和结果汇总。`_run_graph` 独占框架流和回调，提前取消直接返回；运行时取消继续收集根状态，但停止公开事件。框架异常转成返回的执行错误，输入错误保持上抛，两种路径都会关闭运行资源。
 
@@ -10,7 +10,7 @@
 graph.stream_events(version="v3")            框架原始流（GraphRunStream，调用方驱动泵）
   → _run_graph 内的消费循环                     收集根 values 状态 + 处理取消排空
   → AgentEventNormalizer.accept              过滤摘要、适配完整消息、序列化为 AgentEvent
-  → on_event 回调                            交给 AgentRunEventBuffer 批量落库并通知订阅
+  → on_event 回调                            交给 AgentExecutionEventBuffer 批量落库并通知订阅
 执行结束
   → execute 返回结果                         状态、回答、用量收敛为 AgentExecutionResult
   → _finalize_run（Run 服务）                 终态、快照与终态事件同一事务落库

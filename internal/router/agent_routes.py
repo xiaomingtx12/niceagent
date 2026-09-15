@@ -3,7 +3,7 @@
 from flask import Blueprint
 
 from internal.handler import (
-    AgentRunHandler,
+    AgentExecutionHandler,
     DebugAgentHandler,
     WebAppAgentHandler,
     CreatorTaskAgentHandler,
@@ -88,7 +88,7 @@ def register_creator_task_agent_routes(blueprint: Blueprint, handler: CreatorTas
     )
 
 
-def register_agent_run_routes(blueprint: Blueprint, handler: AgentRunHandler) -> None:
+def register_agent_execution_routes(blueprint: Blueprint, handler: AgentExecutionHandler) -> None:
     """Run 查询独立于入口类型，保留历史路由标识。"""
     blueprint.add_url_rule(
         "/agent-runs/<uuid:run_id>/snapshot", methods=["GET"],
@@ -207,7 +207,7 @@ __all__ = [
     "register_debug_agent_routes",
     "register_web_app_agent_routes",
     "register_creator_task_agent_routes",
-    "register_agent_run_routes",
+    "register_agent_execution_routes",
     "register_assistant_agent_protocol_routes",
     "register_internal_agent_protocol_routes",
     "register_openapi_agent_protocol_routes",

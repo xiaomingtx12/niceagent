@@ -1,4 +1,4 @@
-"""Agent Run 只读视图与事件订阅，不创建运行或提交业务状态。"""
+"""Agent 执行只读视图与事件订阅，不创建执行或提交业务状态。"""
 
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from sqlalchemy import case, func, or_
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import defer
 from internal.entity.conversation_entity import InvokeFrom
-from internal.entity import AGENT_RUN_ACTIVE_STATUSES, AGENT_RUN_TERMINAL_STATUSES
+from internal.entity import AGENT_EXECUTION_ACTIVE_STATUSES, AGENT_EXECUTION_TERMINAL_STATUSES
 from internal.exception import NotFoundException
 from internal.model import Account, AgentExecution, AgentExecutionEvent, ConversationTurn
 from internal.schema.agent.agent_model_schema import (
@@ -30,21 +30,20 @@ from internal.service.agent_protocol.recovery_snapshot import compact_execution_
 from internal.service.conversation.conversation_service import ConversationService
 from pkg.sqlalchemy import SQLAlchemy
 from .agent_model_service import AgentModelService
-from .agent_run_events import event_signal
-from .agent_run_service import AgentRunService
+from .agent_execution_service import AgentExecutionService
 
 
 # 等待表单只结束当前事件流，Run 本身仍允许在提交答案后恢复。
-_SSE_FINISHED_STATUSES = frozenset((*AGENT_RUN_TERMINAL_STATUSES, "waiting_input"))
+_SSE_FINISHED_STATUSES = frozenset((*AGENT_EXECUTION_TERMINAL_STATUSES, "waiting_input"))
 
 
 @inject
 @dataclass
-class AgentRunQuery:
+class AgentExecutionQuery:
     """调用方先校验会话权限；历史读数据库，活动 SSE 优先读取实时尾部。"""
 
     db: SQLAlchemy
-    run_service: AgentRunService
+    run_service: AgentExecutionService
     model_service: AgentModelService
     conversation_service: ConversationService
 
@@ -164,7 +163,7 @@ class AgentRunQuery:
         values["messages"] = [
             message.model_dump(mode="json") for message in messages
         ]
-        if latest_run is not None and latest_run.status in AGENT_RUN_ACTIVE_STATUSES:
+        if latest_run is not None and latest_run.status in AGENT_EXECUTION_ACTIVE_STATUSES:
             current_ids = {
                 str(latest_run.input_message_id),
                 f"{latest_run.turn_id}:human",
@@ -217,7 +216,7 @@ class AgentRunQuery:
                 })
         return AgentProtocolStateResp(
             values=values,
-            next=["agent"] if status in AGENT_RUN_ACTIVE_STATUSES else [],
+            next=["agent"] if status in AGENT_EXECUTION_ACTIVE_STATUSES else [],
             tasks=tasks,
             metadata=AgentProtocolRunMetadataResp(
                 run_id=run_id,
@@ -320,9 +319,10 @@ class AgentRunQuery:
         heartbeat_at = time.monotonic() + self._SSE_HEARTBEAT_SECONDS
         while True:
             # 2.先记录通知版本，内存发布、写库和片段退出都能唤醒本次等待。
-            version = event_signal.snapshot()
-            live_stream = self.run_service.tracker.stream(conversation_id, run_id)
-            events = live_stream.read_after(cursor, self._SSE_BATCH_SIZE) if live_stream else None
+            event_hub = self.run_service.tracker.event_hub(conversation_id, run_id)
+            # 活动 Run 等待自己的事件中心；没有活动中心时按 SSE 心跳重新查库。
+            version = event_hub.change_token() if event_hub else None
+            events = event_hub.read_after(cursor, self._SSE_BATCH_SIZE) if event_hub else None
             status = None
             if events is None:
                 try:
@@ -383,9 +383,13 @@ class AgentRunQuery:
             if not events and status in _SSE_FINISHED_STATUSES:
                 return
             # 数据库查询期间可能已产生尚未提交的实时尾部，先切回内存再等待。
-            if live_stream is not None and status is not None and scanned_count:
+            if event_hub is not None and status is not None and scanned_count:
                 continue
-            event_signal.wait(version, timeout=max(0.0, heartbeat_at - time.monotonic()))
+            wait_timeout = max(0.0, heartbeat_at - time.monotonic())
+            if event_hub:
+                event_hub.wait_for_change(version, timeout=wait_timeout)
+            else:
+                time.sleep(wait_timeout)
 
     def _build_recovery_snapshot(self, run_id: UUID) -> AgentProtocolRecoverySnapshotResp:
         """先固定事务已提交的水位，再读取不可变事件前缀；构造期间新增事件由后续 SSE 交付。"""

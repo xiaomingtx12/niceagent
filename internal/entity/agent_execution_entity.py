@@ -1,4 +1,4 @@
-"""Agent Run 领域实体，不包含 Flask 或数据库查询细节。"""
+"""Agent 执行领域实体，不包含 Flask 或数据库查询细节。"""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 _InvocationReqT = TypeVar("_InvocationReqT")
 
 
-class AgentRunStatus(str, Enum):
-    """Agent Run 生命周期状态；取消请求由 cancel_requested_at 表达，不占用状态位。"""
+class AgentExecutionStatus(str, Enum):
+    """Agent 执行生命周期状态；取消请求由 cancel_requested_at 表达，不占用状态位。"""
 
     RUNNING = "running"
     WAITING_INPUT = "waiting_input"
@@ -24,17 +24,17 @@ class AgentRunStatus(str, Enum):
 
 
 # 正在执行、持有执行租约的唯一状态。
-AGENT_RUN_ACTIVE_STATUSES = (AgentRunStatus.RUNNING.value,)
+AGENT_EXECUTION_ACTIVE_STATUSES = (AgentExecutionStatus.RUNNING.value,)
 # 仍占用会话的状态；等待输入虽无执行进程，但不允许同会话启动新任务。
-AGENT_RUN_OCCUPYING_STATUSES = (
-    AgentRunStatus.RUNNING.value,
-    AgentRunStatus.WAITING_INPUT.value,
+AGENT_EXECUTION_OCCUPYING_STATUSES = (
+    AgentExecutionStatus.RUNNING.value,
+    AgentExecutionStatus.WAITING_INPUT.value,
 )
-AGENT_RUN_TERMINAL_STATUSES = frozenset(
+AGENT_EXECUTION_TERMINAL_STATUSES = frozenset(
     {
-        AgentRunStatus.COMPLETED.value,
-        AgentRunStatus.FAILED.value,
-        AgentRunStatus.CANCELLED.value,
+        AgentExecutionStatus.COMPLETED.value,
+        AgentExecutionStatus.FAILED.value,
+        AgentExecutionStatus.CANCELLED.value,
     }
 )
 
@@ -48,8 +48,8 @@ class AgentModelSelection(BaseModel):
     provider_connection_id: UUID
 
 
-class AgentRunInput(BaseModel):
-    """从 Agent Protocol 命令中提取出的可信运行输入。"""
+class AgentExecutionInput(BaseModel):
+    """从 Agent Protocol 命令中提取出的可信执行输入。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -64,8 +64,8 @@ class AgentRunInput(BaseModel):
 
 
 @dataclass
-class AgentExecutionSegment(Generic[_InvocationReqT]):
-    """当前进程持有的执行片段；Run 身份稳定，每次恢复分配新的 executor_id。"""
+class AgentExecutionHandle(Generic[_InvocationReqT]):
+    """当前进程持有的执行片段；Execution 身份稳定，每次恢复分配新的 executor_id。"""
 
     run_id: UUID
     conversation_id: UUID
@@ -79,10 +79,10 @@ class AgentExecutionSegment(Generic[_InvocationReqT]):
 
 
 __all__ = [
-    "AGENT_RUN_ACTIVE_STATUSES",
-    "AGENT_RUN_OCCUPYING_STATUSES",
-    "AGENT_RUN_TERMINAL_STATUSES",
-    "AgentExecutionSegment",
-    "AgentRunInput",
-    "AgentRunStatus",
+    "AGENT_EXECUTION_ACTIVE_STATUSES",
+    "AGENT_EXECUTION_OCCUPYING_STATUSES",
+    "AGENT_EXECUTION_TERMINAL_STATUSES",
+    "AgentExecutionHandle",
+    "AgentExecutionInput",
+    "AgentExecutionStatus",
 ]
