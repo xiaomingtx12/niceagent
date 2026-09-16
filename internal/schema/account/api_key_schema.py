@@ -12,7 +12,7 @@ class CreateApiKeyReq(FlaskForm):
 
     is_active = BooleanField("is_active")
     remark = StringField(
-        "remark", validators=[Length(max=100, message="秘钥备注不能超过100个字符")]
+        "remark", validators=[Length(max=100, message="密钥备注不能超过100个字符")]
     )
 
 
@@ -21,7 +21,7 @@ class UpdateApiKeyReq(FlaskForm):
 
     is_active = BooleanField("is_active")
     remark = StringField(
-        "remark", validators=[Length(max=100, message="秘钥备注不能超过100个字符")]
+        "remark", validators=[Length(max=100, message="密钥备注不能超过100个字符")]
     )
 
 

@@ -34,7 +34,7 @@ class ApiKeyService(BaseService):
         """根据传递的秘钥id+账号信息获取记录"""
         api_key = self.get(ApiKey, api_key_id)
         if not api_key or api_key.account_id != account.id:
-            raise ForbiddenException("API秘钥不存在或无权限")
+            raise ForbiddenException("API 密钥不存在或无权限")
         return api_key
 
     def get_api_by_by_credential(self, api_key: str) -> ApiKey:
@@ -78,6 +78,6 @@ class ApiKeyService(BaseService):
         return api_keys, paginator
 
     @classmethod
-    def generate_api_key(cls, api_key_prefix: str = "llmops-v1/") -> str:
-        """生成一个长度为48的API秘钥，并携带前缀"""
+    def generate_api_key(cls, api_key_prefix: str = "niceagent-v1/") -> str:
+        """新密钥使用平台品牌前缀，随机部分由 48 字节安全随机数生成。"""
         return api_key_prefix + secrets.token_urlsafe(48)

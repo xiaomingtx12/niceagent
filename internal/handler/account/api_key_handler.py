@@ -36,14 +36,14 @@ class ApiKeyHandler:
         # 2.调用服务创建秘钥
         self.api_key_service.create_api_key(req, current_user)
 
-        return success_message("创建API秘钥成功")
+        return success_message("创建 API 密钥成功")
 
     @rate_limit(config_key="sensitive")
     @login_required
     def delete_api_key(self, api_key_id: UUID):
         """根据传递的id删除API秘钥"""
         self.api_key_service.delete_api_key(api_key_id, current_user)
-        return success_message("删除API秘钥成功")
+        return success_message("删除 API 密钥成功")
 
     @rate_limit(config_key="user")
     @login_required
@@ -57,7 +57,7 @@ class ApiKeyHandler:
         # 2.调用服务更新秘钥
         self.api_key_service.update_api_key(api_key_id, current_user, **req.data)
 
-        return success_message("更新API秘钥成功")
+        return success_message("更新 API 密钥成功")
 
     @rate_limit(config_key="user")
     @login_required
@@ -71,7 +71,7 @@ class ApiKeyHandler:
         # 2.调用服务更新秘钥是否激活
         self.api_key_service.update_api_key(api_key_id, current_user, **req.data)
 
-        return success_message("更新API秘钥激活状态成功")
+        return success_message("更新 API 密钥状态成功")
 
     @rate_limit(config_key="database_intensive")
     @login_required
