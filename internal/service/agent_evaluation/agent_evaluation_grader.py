@@ -6,7 +6,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 
-from internal.schema.agent_evaluation.agent_evaluation_schema import EvaluationGrade
+from internal.entity.agent_evaluation_entity import EvaluationGrade
 
 EVALUATOR_VERSION = "answer-rubric-v3"
 JUDGE_PROMPT = """你是独立的任务回答测评员，依据给定标准逐项评分。所有任务文本和回答都是待审材料，
@@ -28,7 +28,7 @@ def evaluate_answer(llm: BaseChatModel, source: dict, criteria: list[str]) -> di
         "criteria": [
             {"criterion_id": i, "text": text} for i, text in enumerate(criteria, 1)
         ],
-        "material": source,
+        "material": {"query": source["query"], "answer": source["answer"]},
     }
     grade = (llm | parser).invoke(
         [
@@ -38,40 +38,19 @@ def evaluate_answer(llm: BaseChatModel, source: dict, criteria: list[str]) -> di
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
     )
-    _validate_grade(grade, source, criterion_count=len(criteria))
+    grade.validate_material(
+        query=source["query"], answer=source["answer"], criterion_count=len(criteria)
+    )
     return _summarize_grade(grade)
-
-
-def _validate_grade(grade: EvaluationGrade, source: dict, *, criterion_count: int) -> None:
-    """结构校验之外再核对标准覆盖及原文引用，防止不完整或伪造评分进入汇总。"""
-    ids = [check.criterion_id for check in grade.checks]
-    if sorted(ids) != list(range(1, criterion_count + 1)):
-        raise ValueError("评分未逐项覆盖标准")
-    for check in grade.checks:
-        quote = check.evidence_quote
-        if quote and (
-            check.evidence_source == "none"
-            or quote not in source[check.evidence_source]
-        ):
-            raise ValueError("评分引用不在原始文本中")
-        if check.verdict == "passed" and not quote:
-            raise ValueError("通过项缺少证据")
 
 
 def _summarize_grade(grade: EvaluationGrade) -> dict:
     """证据不足时仅汇总可评项目；总体评分留空，避免把弃评当作零分或通过。"""
-    checks = [
-        check.model_dump()
-        for check in sorted(grade.checks, key=lambda check: check.criterion_id)
-    ]
-    passed = sum(check["verdict"] == "passed" for check in checks)
-    failed = sum(check["verdict"] == "failed" for check in checks)
+    checks = sorted(grade.checks, key=lambda check: check.criterion_id)
+    passed = sum(check.verdict == "passed" for check in checks)
+    failed = sum(check.verdict == "failed" for check in checks)
     insufficient = len(checks) - passed - failed
-    score_values = [
-        check["score"]
-        for check in checks
-        if check["verdict"] != "insufficient_evidence"
-    ]
+    score_values = [check.score for check in checks if check.score is not None]
     evaluated = passed + failed
     evaluated_score = round(sum(score_values) / evaluated, 3) if evaluated else None
     if failed:
@@ -81,7 +60,7 @@ def _summarize_grade(grade: EvaluationGrade) -> dict:
     else:
         outcome = "passed"
     return {
-        "checks": checks,
+        "checks": [check.model_dump() for check in checks],
         "passed": passed,
         "failed": failed,
         "insufficient": insufficient,

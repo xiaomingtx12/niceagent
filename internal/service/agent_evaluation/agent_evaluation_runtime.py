@@ -15,8 +15,14 @@ from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.memory import InMemorySaver
 
 from internal.core.agent_v2.execution.evaluation_evidence import candidate_snapshot
-from internal.core.agent_v2.middleware.evaluation_tool_middleware import EvaluationToolBoundary
-from internal.core.agent_v2.middleware.evidence_rubric_middleware import EvidenceRubricMiddleware
+from internal.core.agent_v2.middleware.evaluation_tool_middleware import (
+    EvaluationToolBoundary,
+)
+from internal.core.agent_v2.middleware.evidence_rubric_middleware import (
+    EvaluationRound,
+    EvidenceRubricMiddleware,
+)
+from internal.entity.agent_evaluation_entity import EvaluationEvidenceRule
 
 EXECUTION_VERSION = "rubric-runtime-v1"
 EXECUTION_SCOPE = "使用提交时 Agent 的模型和提示词，在独立会话与临时文件空间运行；不接入生产工具、知识库、Skills、子 Agent、长期记忆或历史附件。"
@@ -37,7 +43,10 @@ def execute_with_rubric(
     middleware = EvidenceRubricMiddleware(
         model=judge_model,
         criteria=criteria,
-        rules=execution["evidence_rules"],
+        rules=[
+            EvaluationEvidenceRule.model_validate(rule)
+            for rule in execution["evidence_rules"]
+        ],
         max_iterations=execution["max_iterations"],
         on_progress=on_progress,
     )
@@ -52,7 +61,7 @@ def execute_with_rubric(
         + "\n"
         + EXECUTION_SCOPE
         + "\n根据验收差距修订当前结果。需要文件时使用临时文件空间；最终回答必须说明交付结果。",
-        backend=StateBackend(),
+        backend=StateBackend(file_format="v2"),
         checkpointer=InMemorySaver(),
         middleware=[
             EvaluationToolBoundary(),
@@ -80,29 +89,28 @@ def execute_with_rubric(
 
 
 def _execution_result(
-    state: dict, *, rounds: list[dict], max_iterations: int, started_at: float,
+    state: dict,
+    *,
+    rounds: list[EvaluationRound],
+    max_iterations: int,
+    started_at: float,
 ) -> dict:
     """只有末轮通过且候选哈希仍与最终状态一致才放行，图正常结束不代表验收通过。"""
     current = candidate_snapshot(state)
     final = rounds[-1] if rounds else None
-    accepted = bool(
-        final
-        and final["status"] == "satisfied"
-        and final["candidate"]["candidate_hash"] == current["candidate_hash"]
-        and final["evidence"]
-    )
-    status = final["status"] if final else "grader_error"
+    accepted = final is not None and final.accepts(current)
+    status = final.status if final else "grader_error"
     if status == "satisfied" and not accepted:
         status = "grader_error"
     return {
         "duration_ms": round((time.monotonic() - started_at) * 1000),
-        "first_pass": bool(rounds and rounds[0]["status"] == "satisfied"),
+        "first_pass": len(rounds) == 1 and accepted,
         "phase": "finished",
         "status": status,
         "accepted": accepted,
-        "rounds": rounds,
-        "final_answer": current["answer"],
-        "files": current["files"],
+        "rounds": [item.to_dict() for item in rounds],
+        "final_answer": current.answer,
+        "files": dict(current.files),
         "max_iterations": max_iterations,
         "scope": EXECUTION_SCOPE,
     }

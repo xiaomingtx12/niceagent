@@ -1,4 +1,4 @@
-"""测评请求、评分模型输出和公开响应边界。"""
+"""测评 HTTP 请求和公开响应边界；评分领域约束见 agent_evaluation_entity。"""
 
 from typing import Annotated, Literal
 from uuid import UUID
@@ -8,37 +8,13 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    StrictFloat,
     StrictInt,
     StrictStr,
     field_validator,
-    model_validator,
 )
 
 from internal.entity.agent_execution_entity import AgentModelSelection
-
-
-class EvaluationEvidenceRuleReq(BaseModel):
-    """限定确定性核验类型；不接受任意代码、命令或主机路径。"""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    kind: Literal["contains", "json_keys", "file_exists"]
-    value: StrictStr = Field(min_length=1, max_length=500)
-
-    @model_validator(mode="after")
-    def valid_target(self):
-        """文件核验只允许本次虚拟文件空间，JSON 只检查顶层字段。"""
-        if self.kind == "file_exists" and (
-            not self.value.startswith("/")
-            or ".." in self.value.split("/")
-            or "\\" in self.value
-        ):
-            raise ValueError("请使用虚拟空间中的绝对路径，如 /report.md")
-        if self.kind == "json_keys" and not all(
-            part.strip() for part in self.value.split(",")
-        ):
-            raise ValueError("JSON 字段名不能为空")
-        return self
+from internal.entity.agent_evaluation_entity import EvaluationEvidenceRule
 
 
 class AgentEvaluationReq(BaseModel):
@@ -50,7 +26,7 @@ class AgentEvaluationReq(BaseModel):
     judge: AgentModelSelection
     mode: Literal["historical", "execute"] = "historical"
     max_iterations: StrictInt = Field(default=3, ge=1, le=5)
-    evidence_rules: list[EvaluationEvidenceRuleReq] = Field(
+    evidence_rules: list[EvaluationEvidenceRule] = Field(
         default_factory=list, max_length=8
     )
     criteria: list[Annotated[StrictStr, Field(min_length=1, max_length=500)]] = Field(
@@ -64,40 +40,6 @@ class AgentEvaluationReq(BaseModel):
         if len(set(values)) != len(values):
             raise ValueError("测评标准不能重复")
         return values
-
-
-class CriterionGrade(BaseModel):
-    """证据必须引用提供的文本；缺少材料时允许明确弃评。"""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    criterion_id: StrictInt = Field(ge=1, le=12)
-    verdict: Literal["passed", "failed", "insufficient_evidence"]
-    reason: StrictStr = Field(min_length=1, max_length=1500)
-    evidence_source: Literal["query", "answer", "none"]
-    evidence_quote: StrictStr = Field(max_length=1500)
-    suggestion: StrictStr = Field(max_length=1500)
-    score: StrictFloat | None = Field(
-        description="完全满足 1.0，部分满足 0.5，不满足 0.0，证据不足 null"
-    )
-
-    @model_validator(mode="after")
-    def consistent_score(self):
-        """分档与结论必须一致，缺失证据不能伪装成零分。"""
-        allowed = {
-            "passed": (1.0,),
-            "failed": (0.0, 0.5),
-            "insufficient_evidence": (None,),
-        }
-        if self.score not in allowed[self.verdict]:
-            raise ValueError("评分档位与结论不一致")
-        return self
-
-
-class EvaluationGrade(BaseModel):
-    """一次独立评分的结构化输出，不包含执行或重试指令。"""
-
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
-    checks: list[CriterionGrade] = Field(min_length=1, max_length=12)
 
 
 class EvaluationSourceResp(Schema):

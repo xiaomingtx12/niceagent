@@ -1,7 +1,7 @@
 """对冻结的任务回答做独立测评，不介入生产 Agent 图。"""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from functools import partial
 from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
@@ -26,6 +26,7 @@ from internal.schema.agent_evaluation.agent_evaluation_schema import AgentEvalua
 from internal.schema.app.app_config_schema import AppModelConfigReq
 from internal.task.agent_evaluation_task import run_agent_evaluation
 from pkg.sqlalchemy import SQLAlchemy
+from .agent_evaluation_store import EVALUATION_DEADLINE_SECONDS, EvaluationTaskStore
 from .agent_evaluation_grader import EVALUATOR_VERSION, evaluate_answer
 from internal.service.common.base_service import BaseService
 from internal.service.language_model.language_model_service import LanguageModelService
@@ -35,13 +36,11 @@ from .agent_evaluation_runtime import (
     execute_with_rubric,
 )
 
-EVALUATION_DEADLINE_SECONDS = 900
 EVIDENCE_SCOPE = (
     "仅本轮任务描述与最终回答；不包含此前对话、附件内容、工具轨迹及外部系统核验。"
 )
 MAX_EVIDENCE_CHARS = 48000
-TERMINAL_STATUSES = ("completed", "failed", "cancelled")
-PENDING_STATUSES = ("queued", "running")
+SOURCE_TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 SCHEMA_UPGRADE_MESSAGE = "测评数据库结构尚未更新，请联系管理员完成数据库迁移后重试。"
 
 
@@ -52,6 +51,7 @@ class AgentEvaluationService(BaseService):
 
     db: SQLAlchemy
     language_model_service: LanguageModelService
+    task_store: EvaluationTaskStore
 
     def list_sources(
         self, app_id: UUID, account: Account, current_page: int, page_size: int
@@ -67,7 +67,7 @@ class AgentEvaluationService(BaseService):
             .all()
         )
         return {
-            "list": [self._source(run, message, preview=True) for run, message in rows],
+            "list": [self._source(run, turn, preview=True) for run, turn in rows],
             "total": total,
             "current_page": current_page,
             "page_size": page_size,
@@ -76,14 +76,7 @@ class AgentEvaluationService(BaseService):
     def get_source(self, app_id: UUID, run_id: UUID, account: Account) -> dict:
         """只读取服务端保存的已结束运行，不接受浏览器提供的答案。"""
         self._owned_app(app_id, account.id)
-        row = (
-            self._source_query(app_id, account)
-            .filter(AgentExecution.id == run_id)
-            .one_or_none()
-        )
-        if row is None:
-            raise NotFoundException("任务不存在、尚未结束或无权测评")
-        return self._source(*row)
+        return self._load_source(app_id, run_id, account)
 
     def submit(
         self, app_id: UUID, account: Account, req: AgentEvaluationReq
@@ -98,7 +91,7 @@ class AgentEvaluationService(BaseService):
         existing = self.db.session.get(AgentEvaluation, evaluation_id)
         if existing:
             return self._reuse_submission(existing, req)
-        source = self.get_source(app_id, req.run_id, account)
+        source = self._load_source(app_id, req.run_id, account)
         if len(source["query"]) + len(source["answer"]) > MAX_EVIDENCE_CHARS:
             raise ValidateErrorException(
                 "本轮文本超过 48000 字，暂不支持测评；不会截断后评分"
@@ -142,11 +135,11 @@ class AgentEvaluationService(BaseService):
     def process(self, evaluation_id: UUID) -> None:
         """数据库条件更新保证重复投递最多执行一次；只使用提交时冻结的材料。"""
         # 1.先收敛过期任务并争取执行权，重复投递不再调用模型。
-        evaluation = self._claim(evaluation_id)
+        evaluation = self.task_store.claim(evaluation_id)
         if evaluation is None:
             return
 
-        # 2.执行与保存分开：数据库异常交回基础设施，模型异常写为本次测评失败。
+        # 2.Worker 的失败边界负责收敛任务；数据库异常交回基础设施，不伪装成评分失败。
         try:
             result = self._evaluate_snapshot(evaluation)
         except SQLAlchemyError:
@@ -156,28 +149,25 @@ class AgentEvaluationService(BaseService):
         except Exception as exc:
             self.db.session.rollback()
             logger.warning(
-                "Evaluation judge failed for %s (%s)", evaluation_id, type(exc).__name__
-            )
-            self._finish(
+                "Evaluation execution failed for %s (%s)",
                 evaluation_id,
-                ("running",),
-                error="评分模型调用失败或返回无效评分，请检查模型后新建测评。",
+                type(exc).__name__,
+            )
+            self.task_store.fail(
+                evaluation_id,
+                expected_status="running",
+                error="测评执行失败，可能涉及模型调用、候选取证或评分格式，请检查后新建测评。",
             )
             return
-        # 3.模型返回后再次检查截止时间，迟到结果不能覆盖已经超时的记录。
-        self._expire_pending(
-            self.db.session.query(AgentEvaluation).filter(
-                AgentEvaluation.id == evaluation_id
-            )
-        )
-        self._finish(evaluation_id, ("running",), result=result)
+        # 3.结果写入时再次核对状态和截止时间，迟到报告不能覆盖终态。
+        self.task_store.complete(evaluation_id, result)
 
     def list_evaluations(
         self, app_id: UUID, account: Account, current_page: int, page_size: int
     ) -> dict:
         """每次评分独立追加，修改标准再评不会覆盖旧记录。"""
         self._owned_app(app_id, account.id)
-        self._expire_pending(self._evaluation_query(app_id, account.id))
+        self.task_store.expire_pending(self._evaluation_query(app_id, account.id))
         query = self._evaluation_query(app_id, account.id)
         total = query.count()
         rows = (
@@ -201,7 +191,7 @@ class AgentEvaluationService(BaseService):
         query = self._evaluation_query(app_id, account.id).filter(
             AgentEvaluation.id == evaluation_id
         )
-        self._expire_pending(query)
+        self.task_store.expire_pending(query)
         row = query.one_or_none()
         if row is None:
             raise NotFoundException("测评记录不存在")
@@ -223,44 +213,30 @@ class AgentEvaluationService(BaseService):
                 evaluation_id,
                 type(exc).__name__,
             )
-            self._finish(
-                evaluation_id, ("queued",), error="测评队列暂不可用，请稍后新建测评。"
+            self.task_store.fail(
+                evaluation_id,
+                expected_status="queued",
+                error="测评队列暂不可用，请稍后新建测评。",
             )
-
-    def _claim(self, evaluation_id: UUID) -> AgentEvaluation | None:
-        """先检查提交截止时间，再原子认领排队记录；未取得执行权时不加载冻结材料。"""
-        self._expire_pending(
-            self.db.session.query(AgentEvaluation).filter(AgentEvaluation.id == evaluation_id)
-        )
-        with self.db.auto_commit():
-            claimed = (
-                self.db.session.query(AgentEvaluation)
-                .filter(
-                    AgentEvaluation.id == evaluation_id,
-                    AgentEvaluation.status == "queued",
-                )
-                .update({"status": "running"}, synchronize_session=False)
-            )
-        if not claimed:
-            return None
-        evaluation = self.db.session.get(AgentEvaluation, evaluation_id)
-        self.db.session.refresh(evaluation)
-        return evaluation
 
     def _evaluate_snapshot(self, evaluation: AgentEvaluation) -> dict:
         """从冻结材料加载模型；提交读取事务后不再访问 ORM 对象，避免模型调用占用连接。"""
         evaluation_id = evaluation.id
-        config, source, criteria = (
-            evaluation.judge_config, evaluation.source_snapshot, evaluation.criteria,
-        )
-        account_id, app_id = evaluation.account_id, evaluation.app_id
+        config = evaluation.judge_config
+        source = evaluation.source_snapshot
+        criteria = evaluation.criteria
+        account_id = evaluation.account_id
+        app_id = evaluation.app_id
         self._owned_app(app_id, account_id)
-        judge_model = self.language_model_service.load_language_model(config, account_id)
+        judge_model = self.language_model_service.load_language_model(
+            config, account_id
+        )
         execution = source.get("execution")
         working_model = None
         if execution:
             working_model = self.language_model_service.load_language_model(
-                execution["definition"]["model_config"], account_id,
+                execution["definition"]["model_config"],
+                account_id,
             )
         self.db.session.commit()
         if not execution:
@@ -272,7 +248,7 @@ class AgentEvaluationService(BaseService):
             criteria=criteria,
             execution=execution,
             evaluation_id=str(evaluation_id),
-            on_progress=partial(self._save_runtime_progress, evaluation_id),
+            on_progress=partial(self.task_store.save_progress, evaluation_id),
         )
         return {"runtime": runtime}
 
@@ -318,20 +294,6 @@ class AgentEvaluationService(BaseService):
             },
         }
 
-    def _save_runtime_progress(self, evaluation_id: UUID, progress: dict) -> None:
-        """回调之外持久化每轮证据；保存失败会终止运行，不能继续自动修订。"""
-        with self.db.auto_commit():
-            changed = (
-                self.db.session.query(AgentEvaluation)
-                .filter(
-                    AgentEvaluation.id == evaluation_id,
-                    AgentEvaluation.status == "running",
-                )
-                .update({"result": {"runtime": progress}}, synchronize_session=False)
-            )
-        if not changed:
-            raise RuntimeError("测评记录已结束，停止后续评分")
-
     def _reuse_submission(
         self, evaluation: AgentEvaluation, req: AgentEvaluationReq
     ) -> AgentEvaluation:
@@ -352,56 +314,13 @@ class AgentEvaluationService(BaseService):
             or evaluation.judge_config != config
         ):
             raise ValidateErrorException("提交标识已用于不同的测评，请重新提交")
-        self._expire_pending(
+        self.task_store.expire_pending(
             self.db.session.query(AgentEvaluation).filter(
                 AgentEvaluation.id == evaluation.id
             )
         )
         self.db.session.refresh(evaluation)
         return evaluation
-
-    def _finish(
-        self,
-        evaluation_id: UUID,
-        statuses: tuple[str, ...],
-        *,
-        result: dict | None = None,
-        error: str = "",
-    ) -> None:
-        """迟到的模型返回不能覆盖已超时的记录。"""
-        values = {
-            "status": "completed" if result is not None else "error",
-            "error_message": error,
-            "finished_at": self._now(),
-        }
-        # 已完成轮次是独立证据；后续模型异常时仍可查看，不能抹掉进度。
-        if result is not None:
-            values["result"] = result
-        with self.db.auto_commit():
-            self.db.session.query(AgentEvaluation).filter(
-                AgentEvaluation.id == evaluation_id,
-                AgentEvaluation.status.in_(statuses),
-            ).update(
-                values,
-                synchronize_session=False,
-            )
-
-    def _expire_pending(self, query: Query) -> None:
-        """只收敛调用者指定范围内的过期记录，不在 Worker 或详情轮询中扫描全库。"""
-        now = self._now()
-        with self.db.auto_commit():
-            query.filter(
-                AgentEvaluation.status.in_(PENDING_STATUSES),
-                AgentEvaluation.created_at
-                < now - timedelta(seconds=EVALUATION_DEADLINE_SECONDS),
-            ).update(
-                {
-                    "status": "error",
-                    "error_message": "测评等待或执行超过 15 分钟，请检查后台队列后新建测评。",
-                    "finished_at": now,
-                },
-                synchronize_session="fetch",
-            )
 
     def _evaluation_query(self, app_id: UUID, account_id: UUID) -> Query:
         """历史列表和详情共用账号隔离条件。"""
@@ -425,6 +344,17 @@ class AgentEvaluationService(BaseService):
         ):
             raise NotFoundException("应用不存在或无权访问")
 
+    def _load_source(self, app_id: UUID, run_id: UUID, account: Account) -> dict:
+        """入口已验证应用归属，此处仍以会话归属条件读取材料。"""
+        row = (
+            self._source_query(app_id, account)
+            .filter(AgentExecution.id == run_id)
+            .one_or_none()
+        )
+        if row is None:
+            raise NotFoundException("任务不存在、尚未结束或无权测评")
+        return self._source(*row)
+
     def _source_query(self, app_id: UUID, account: Account):
         """仅纳入本人任务/调试会话，兼容尚未写 owner_account_id 的旧记录。"""
         return (
@@ -440,7 +370,7 @@ class AgentEvaluationService(BaseService):
             .join(Conversation, Conversation.id == AgentExecution.conversation_id)
             .filter(
                 AgentExecution.app_id == app_id,
-                AgentExecution.status.in_(TERMINAL_STATUSES),
+                AgentExecution.status.in_(SOURCE_TERMINAL_STATUSES),
                 AgentExecution.invoke_from.in_(("debugger", "creator_task")),
                 Conversation.app_id == app_id,
                 Conversation.is_deleted.is_(False),
@@ -456,12 +386,14 @@ class AgentEvaluationService(BaseService):
         )
 
     @staticmethod
-    def _source(run: AgentExecution, message: ConversationTurn, preview: bool = False) -> dict:
+    def _source(
+        run: AgentExecution, turn: ConversationTurn, preview: bool = False
+    ) -> dict:
         """明确评分材料范围，不把 Agent 自述当作外部执行证据。"""
         source = {
             "run_id": str(run.id),
             "conversation_id": str(run.conversation_id),
-            "query": (message.query or "")[:160] if preview else message.query or "",
+            "query": (turn.query or "")[:160] if preview else turn.query or "",
             "status": run.status,
             "invoke_from": run.invoke_from,
             "created_at": run.created_at.isoformat() if run.created_at else None,
@@ -469,5 +401,5 @@ class AgentEvaluationService(BaseService):
             "scope": EVIDENCE_SCOPE,
         }
         if not preview:
-            source["answer"] = message.answer or ""
+            source["answer"] = turn.answer or ""
         return source
