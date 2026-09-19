@@ -1,14 +1,15 @@
 """Read-only production readiness checks for DeepAgents V2."""
+
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import shutil
 import stat
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from alembic.script import ScriptDirectory
@@ -22,7 +23,7 @@ from config.config import Config
 from internal.repository import BuiltinSkillRepository
 from internal.service.skill.skill_service import SkillService
 
-EXPECTED_HEAD = "d_v2_008_agent_trace_fields"
+EXPECTED_HEAD = "ccec915b563b"
 
 
 @dataclass(frozen=True)
@@ -365,9 +366,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--require-sandbox", action="store_true")
     args = parser.parse_args(argv)
     database_url = (
-        os.getenv("SQLALCHEMY_DATABASE_URI")
-        if args.use_env_database
-        else None
+        os.getenv("SQLALCHEMY_DATABASE_URI") if args.use_env_database else None
     )
     results = run_checks(
         production=args.production,

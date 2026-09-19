@@ -3,6 +3,8 @@
 
 本文档按业务域拆分，统一描述业务需求、业务运转流程、数据库设计、代码实现和面试讲解重点。总目录见 [平台文档目录](00-平台总览.md)。
 
+具体实现见 [知识库](implementation/06-知识库索引与检索.md)、[能力集成](implementation/07-工具MCP工作流与Skill.md)、[文件交付](implementation/08-工作区文件交付与执行环境.md) 和 [按需记忆](implementation/05-提示词上下文压缩与记忆.md)。
+
 
 ## 5. 模块四：知识库与 RAG
 
@@ -67,15 +69,15 @@
 
 ### 7.1 业务流程
 
-1. 运行时根据 Account + App（必要时 Conversation）确定文件作用域。
-2. Agent 通过文件工具读写 Workspace，后端做路径规范化、越界检查、大小和 MIME 限制。
-3. 数据库存储文件元数据，对象存储保存内容；写入采用 revision 乐观锁。
-4. 长期记忆以文件形式持久化，应用关闭记忆时禁止运行时读写。
-5. WebApp 用户只能访问发布应用允许的共享范围，不能通过路径访问其他应用或账号文件。
+1. 持久化文件按 Account + App 生成稳定 scope，每轮创建独立工作副本。
+2. Agent 普通文件工具读写副本；通过 list_saved_files/load_saved_file 按需访问历史文件。
+3. deliver_file 显式交付选定结果，元数据入库、正文进对象存储，并通过 revision 防止并发覆盖。
+4. 长期记忆另由 LangGraph Store 保存，通过 /memories/ 按需读写；普通问答不自动读取或总结写入。
+5. 文件预览与下载重新校验作用域和访问权限，拿到路径不代表有权访问。
 
 ### 7.2 数据库设计和实现
 
-`workspace_files`：`account_id`、`app_id`、`conversation_id`（当前代码中是 scope 标识）、`path`、`object_key`、`mime_type`、`size_bytes`、`revision`、`created_by`、`is_deleted`。对象内容与元数据分离，删除采用软删除并异步清理对象。代码位于 `internal/model/workspace_file.py`、`internal/service/file`，前端位于 `WorkspaceFilesPanel.vue`。
+`workspace_files`：`account_id`、`app_id`、`conversation_id`（当前代码中是 scope 标识）、`path`、`object_key`、`mime_type`、`size_bytes`、`revision`、`created_by`、`is_deleted`。对象内容与元数据分离，删除先提交软删除状态，再尽力清理对象；当前不是独立异步垃圾回收队列。代码位于 `internal/model/workspace_file.py`、`internal/service/file`、`internal/repository`，前端位于 `WorkspaceFilesPanel.vue`。
 
 建议把 scope 类型显式化（app/shared/conversation），避免使用名为 `conversation_id` 的派生 scope 字段造成误解；所有下载接口先做应用、账号、WebApp Token 和会话校验。
 
