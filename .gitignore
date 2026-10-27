@@ -1,7 +1,13 @@
 .env
+.worktrees/
 tmp/*
 storage/log
 storage/memory
 .idea/*
 venv/*
 test/storage/*
+__pycache__/
+*.pyc
+/.codex-tasks
+/.claude
+/test

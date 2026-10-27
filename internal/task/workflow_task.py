@@ -3,6 +3,8 @@ from uuid import UUID
 
 from celery import shared_task
 
+from internal.extension.logging_extension import logger
+
 
 @shared_task
 def auto_generate_workflow(
@@ -15,9 +17,7 @@ def auto_generate_workflow(
     """根据需求自动生成工作流"""
     from app.http.module import injector
     from internal.model import Account
-    from internal.service.workflow_generator_service import WorkflowGeneratorService
-    import logging
-
+    from internal.service.workflow.workflow_generator_service import WorkflowGeneratorService
     try:
         # 1. 获取服务
         workflow_generator_service = injector.get(WorkflowGeneratorService)
@@ -30,7 +30,7 @@ def auto_generate_workflow(
         account = db.session.query(Account).get(UUID(account_id))
 
         if not account:
-            logging.error(f"账号不存在: {account_id}")
+            logger.error("账号不存在: %s", account_id)
             return
 
         # 3. 生成工作流（内部会调用LLM，耗时较长，期间数据库连接可能因空闲被远程服务器断开）
@@ -42,10 +42,10 @@ def auto_generate_workflow(
             node_types=node_types,
         )
 
-        logging.info(f"工作流生成成功: {name}")
+        logger.info("工作流生成成功: %s", name)
 
     except Exception as e:
-        logging.error(f"工作流生成失败: {str(e)}", exc_info=True)
+        logger.exception("工作流生成失败: %s", e)
     finally:
         # 确保session被关闭，归还连接到连接池
         from pkg.sqlalchemy import SQLAlchemy
@@ -66,12 +66,10 @@ def auto_generate_app_with_workflow(
     from app.http.module import injector
     from internal.model import Account, App, Workflow
     from internal.model.app import AppConfigVersion
-    from internal.service.workflow_generator_service import WorkflowGeneratorService
-    from internal.service.workflow_service import WorkflowService
+    from internal.service.workflow.workflow_generator_service import WorkflowGeneratorService
+    from internal.service.workflow.workflow_service import WorkflowService
     from internal.entity.app_entity import AppStatus, AppConfigType, DEFAULT_APP_CONFIG
     from internal.entity.workflow_entity import WorkflowStatus
-    import logging
-
     try:
         # 1. 获取服务
         workflow_generator_service = injector.get(WorkflowGeneratorService)
@@ -83,7 +81,7 @@ def auto_generate_app_with_workflow(
         # 2. 先获取账号对象验证存在性
         account = db.session.query(Account).get(UUID(account_id))
         if not account:
-            logging.error(f"账号不存在: {account_id}")
+            logger.error("账号不存在: %s", account_id)
             return
 
         # 3. 调用LLM生成工作流配置（耗时30-60秒，期间数据库连接可能因空闲被断开）
@@ -102,7 +100,7 @@ def auto_generate_app_with_workflow(
         # 5. 重新获取account（使用新鲜的数据库连接）
         account = db.session.query(Account).get(UUID(account_id))
         if not account:
-            logging.error(f"账号不存在: {account_id}")
+            logger.error("账号不存在: %s", account_id)
             return
 
         # 6. 校验并修复LLM生成的配置
@@ -168,14 +166,14 @@ def auto_generate_app_with_workflow(
         if auto_publish:
             workflow_service.update(workflow, is_debug_passed=True)
             workflow_service.publish_workflow(workflow.id, account)
-            from internal.service.app_service import AppService
+            from internal.service.app.app_service import AppService
             app_service = injector.get(AppService)
             app_service.publish_draft_app_config(app.id, account)
 
-        logging.info(f"应用和工作流生成成功: {app_name}")
+        logger.info("应用和工作流生成成功: %s", app_name)
 
     except Exception as e:
-        logging.error(f"应用和工作流生成失败: {str(e)}", exc_info=True)
+        logger.exception("应用和工作流生成失败: %s", e)
     finally:
         # 确保session被关闭，归还连接到连接池
         from pkg.sqlalchemy import SQLAlchemy

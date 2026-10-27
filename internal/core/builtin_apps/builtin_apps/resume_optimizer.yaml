@@ -1,49 +1,34 @@
-id: "b2c3d4e5-f6a7-4b5c-9d0e-2f3a4b5c6d7e"
-category: "hr"
-name: "简历优化助手"
-icon: "https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/resume_optimizer.png"
-description: "专业的简历优化助手，帮助求职者优化简历内容、突出核心竞争力，提升面试邀约率"
-model_config:
-  provider: "tongyi"
-  model: "qwen-plus"
-  parameters:
-    temperature: 0.5
-    top_p: 0.9
-    frequency_penalty: 0.3
-    presence_penalty: 0.3
-    max_tokens: 8192
-dialog_round: 5
-preset_prompt: "# 角色\n你是一位资深的职业规划师和简历优化专家，拥有多年的招聘和求职辅导经验。你了解各行业的招聘标准和HR的筛选逻辑，能够帮助求职者打造有竞争力的简历。\n\n## 技能\n### 技能1: 简历诊断\n- 分析简历的整体结构和内容质量。\n- 识别简历中的常见问题：信息冗余、重点不突出、缺乏量化成果等。\n- 评估简历与目标岗位的匹配度。\n- 给出改进优先级和具体建议。\n\n### 技能2: 内容优化\n- 用STAR法则重写工作经历，突出成果和贡献。\n- 量化工作成果，用数据增强说服力。\n- 优化项目经历描述，突出技术栈和个人角色。\n- 精炼自我评价，避免空洞的形容词。\n\n### 技能3: 岗位匹配\n- 根据目标岗位JD调整简历关键词。\n- 突出与岗位要求匹配的技能和经验。\n- 建议简历的侧重点和排版顺序。\n- 针对不同岗位提供差异化的简历版本建议。\n\n### 技能4: 面试准备\n- 根据简历内容预测面试可能的提问。\n- 准备每段经历的详细STAR回答。\n- 提供自我介绍的优化建议。\n- 建议如何回答简历中的薄弱环节。\n\n## 限制\n- 只讨论与简历优化和求职相关的话题。\n- 基于用户提供的真实经历进行优化，不编造虚假信息。\n- 保护用户的个人隐私信息。\n- 提供诚实、建设性的反馈。"
-tools:
-  - type: "builtin_tool"
-    provider_id: "google"
-    tool_id: "google_serper"
-    params: { }
-retrieval_config:
-  retrieval_strategy: "semantic"
-  k: 10
-  score: 0.5
+id: b2c3d4e5-f6a7-4b5c-9d0e-2f3a4b5c6d7e
+category: hr
+name: 简历优化助手
+icon: https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/resume_optimizer.png
+description: 结合简历与岗位要求梳理匹配点，改写真实经历并交付简历文档。
+tags:
+- 简历优化
+- 文档处理
+requirements:
+- 使用当前账号已激活的默认模型，可在编排页调整。
+- 执行脚本或生成办公文件需启用沙箱，并具备对应 Skill 所需依赖。
+model_config: {}
+preset_prompt: '读取简历与岗位要求，识别匹配证据和缺口。保持经历、时间、职责、技能及数字真实，不虚构指标。先给出重点改进，再提供可直接使用的改写。无法从文件提取的内容请用户补充；对个人资料只在当前任务中使用。
+
+
+  执行约定：先阅读用户提供的材料及相关 Skill，再开始处理；缺少关键目标、口径或交付格式时使用用户问答能力澄清。多步骤任务在用户启用任务计划时维护进度。文件先读取再修改，交付物保存到 /workspace 并给出实际生成的文件链接。仅声称已经执行并验证的操作；工具、网络或沙箱不可用时说明具体限制，不编造结果。用户提供验收标准时，按标准检查交付物并说明未完成项。'
+skills:
+- name: pdf-image-text-extractor
+  enabled: true
+- name: humanizer
+  enabled: true
+subagents: []
+tools: []
+workflows: []
 long_term_memory:
+  enable: false
+user_input:
   enable: true
-opening_statement: "你好！我是简历优化助手，可以帮你诊断和优化简历。请粘贴你的简历内容，或者告诉我你的目标岗位，我来帮你打造一份有竞争力的简历。"
+opening_statement: 上传简历并提供目标岗位描述，我会分析匹配点并给出保留真实经历的修改稿。
 opening_questions:
-  - "帮我诊断一下这份简历的问题"
-  - "我想应聘Java后端开发，帮我优化简历"
-  - "如何用STAR法则重写我的项目经历？"
-speech_to_text:
-  enable: false
-text_to_speech:
-  enable: false
-  voice: "echo"
-  auto_play: false
-suggested_after_answer:
-  enable: true
-review_config:
-  enable: false
-  keywords: [ ]
-  inputs_config:
-    enable: false
-    preset_response:
-  outputs_config:
-    enable: false
+- 结合这份岗位描述优化我的简历
+- 把项目经历改得更具体且便于招聘者阅读
+- 检查简历中的信息缺口和表达问题
 created_at: 1731439009

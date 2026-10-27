@@ -1,3 +1,5 @@
+import json as jsonlib
+from collections.abc import Iterable
 from dataclasses import field, dataclass
 from typing import Any, Union, Generator
 
@@ -18,6 +20,54 @@ class Response:
 def json(data: Response = None):
     """基础的响应接口"""
     return jsonify(data), 200
+
+
+def json_response(data: Any, status: int = 200) -> FlaskResponse:
+    """返回不额外包装数据的 JSON 响应。"""
+    response = jsonify(data)
+    response.status_code = status
+    return response
+
+
+def sse_response(events: Iterable[Any]) -> FlaskResponse:
+    """将事件迭代器编码为带连接和心跳注释的 SSE 响应。"""
+
+    @stream_with_context
+    def generate() -> Generator[str, None, None]:
+        """连接关闭或编码失败时及时释放底层订阅，不依赖垃圾回收。"""
+        iterator = iter(events)
+        try:
+            yield ": connected\n\n"
+            for event in iterator:
+                if event is None:
+                    yield ": heartbeat\n\n"
+                    continue
+                lines: list[str] = []
+                if isinstance(event, dict):
+                    event_id = str(event.get("event_id") or "").replace("\r", "").replace("\n", "")
+                    event_name = str(event.get("method") or "").replace("\r", "").replace("\n", "")
+                    if event_id:
+                        lines.append(f"id: {event_id}")
+                    if event_name:
+                        lines.append(f"event: {event_name}")
+                lines.append(f"data: {jsonlib.dumps(event, ensure_ascii=False, separators=(',', ':'))}")
+                yield "\n".join(lines) + "\n\n"
+            # 只有订阅正常结束才发完成注释；异常或连接提前关闭不会进入这里。
+            # 客户端可据此识别异常 EOF，无需重复解析整份业务 JSON。
+            yield ": stream-end\n\n"
+        finally:
+            close = getattr(iterator, "close", None)
+            if callable(close):
+                close()
+
+    return FlaskResponse(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def success_json(data: Any = None):
@@ -80,19 +130,16 @@ def too_many_requests_message(msg: str = "", retry_after: int = None):
 
 
 def compact_generate_response(response: Union[Response, Generator]) -> FlaskResponse:
-    """统一合并处理块输出以及流式事件输出"""
-    # 1.检测下是否为块输出(Response)
+    """兼容旧接口：生成器内容已由调用方编码时原样输出。"""
     if isinstance(response, Response):
         return json(response)
-    else:
-        # 2.response格式为生成器，代表本次响应需要执行流式事件输出
-        def generate() -> Generator:
-            """构建generate函数，流式从response中获取数据"""
-            yield from response
 
-        # 3.返回携带上下文的流式事件输出
-        return FlaskResponse(
-            stream_with_context(generate()),
-            status=200,
-            mimetype="text/event-stream",
-        )
+    @stream_with_context
+    def generate() -> Generator:
+        yield from response
+
+    return FlaskResponse(
+        generate(),
+        status=200,
+        mimetype="text/event-stream",
+    )

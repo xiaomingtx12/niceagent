@@ -1,4 +1,3 @@
-import logging
 import os
 
 from flask import Flask
@@ -6,12 +5,14 @@ from flask_cors import CORS
 from flask_login import LoginManager
 from flask_migrate import Migrate
 from flask_weaviate import FlaskWeaviate
+from psycopg import OperationalError as PsycopgOperationalError
 from psycopg2 import OperationalError as Psycopg2OperationalError
 from sqlalchemy.exc import OperationalError
 
 from config import Config
 from internal.exception import CustomException, TooManyRequestsException
 from internal.extension import redis_extension, celery_extension, logging_extension
+from internal.extension.logging_extension import logger
 from internal.middleware import Middleware
 from internal.middleware.rate_limit_middleware import init_rate_limit_middleware
 from internal.router import Router
@@ -50,6 +51,9 @@ class Http(Flask):
         self.register_error_handler(
             Psycopg2OperationalError, self._handle_database_operational_error
         )
+        self.register_error_handler(
+            PsycopgOperationalError, self._handle_database_operational_error
+        )
         self.register_error_handler(404, self._handle_not_found_error)
 
         # 4.初始化flask扩展
@@ -87,6 +91,18 @@ class Http(Flask):
         router.register_router(self)
 
     def _register_error_handler(self, error: Exception):
+        # Flask 在部分异常链路中会优先命中 Exception 处理器，不能只依赖
+        # 具体异常类注册，数据库连接错误必须始终返回可消费的业务响应。
+        if isinstance(
+            error,
+            (
+                OperationalError,
+                Psycopg2OperationalError,
+                PsycopgOperationalError,
+            ),
+        ):
+            return self._handle_database_operational_error(error)
+
         # 1.异常信息是不是我们的自定义异常，如果是可以提取message和code等信息
         if isinstance(error, CustomException):
             return json(
@@ -96,17 +112,20 @@ class Http(Flask):
                     data=error.data if error.data is not None else {},
                 )
             )
-        # 2.如果不是我们的自定义异常，则有可能是程序、数据库抛出的异常，也可以提取信息，设置为FAIL状态码
+        # 2.未知异常仅在服务端保留详情，避免向客户端泄露内部信息。
         if self.debug or os.getenv("FLASK_ENV") == "development":
             raise error
-        else:
-            return json(
-                Response(
-                    code=HttpCode.FAIL,
-                    message=str(error),
-                    data={},
-                )
+        logger.error(
+            "Unhandled application exception",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+        return json(
+            Response(
+                code=HttpCode.FAIL,
+                message="服务器内部错误，请稍后重试",
+                data={},
             )
+        )
 
     def _handle_not_found_error(self, error):
         """处理404 Not Found错误"""
@@ -120,7 +139,7 @@ class Http(Flask):
 
     def _handle_database_operational_error(self, error: Exception):
         """处理数据库操作异常"""
-        logging.error(f"Database operational error: {str(error)}")
+        logger.error("Database operational error: %s", error)
         return json(
             Response(
                 code=HttpCode.FAIL,
@@ -131,7 +150,7 @@ class Http(Flask):
 
     def _handle_rate_limit_error(self, error: TooManyRequestsException):
         """处理限流异常"""
-        logging.warning(f"Rate limit exceeded: {error.message}")
+        logger.warning("Rate limit exceeded: %s", error.message)
         return too_many_requests_message(
             msg=error.message,
             retry_after=error.retry_after

@@ -36,6 +36,19 @@ class Dataset(db.Model):
         String(255), nullable=False, server_default=text("''::character varying")
     )
     description = Column(Text, nullable=False, server_default=text("''::text"))
+    embedding_provider = Column(
+        String(255), nullable=False, server_default=text("''::character varying")
+    )
+    embedding_provider_connection_id = Column(
+        UUID, nullable=True
+    )  # ProviderApiKey.id；指定向量模型连接，不是提供商名称或模型 ID
+    embedding_model = Column(
+        String(255), nullable=False, server_default=text("''::character varying")
+    )
+    embedding_fingerprint = Column(
+        String(64), nullable=False, server_default=text("''::character varying")
+    )
+    embedding_dimension = Column(Integer, nullable=False, server_default=text("0"))
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -45,6 +58,19 @@ class Dataset(db.Model):
     created_at = Column(
         DateTime, nullable=False, server_default=text("CURRENT_TIMESTAMP(0)")
     )
+
+    @property
+    def embedding_model_config(self) -> dict[str, str]:
+        return {
+            "provider": self.embedding_provider,
+            "model": self.embedding_model,
+            "provider_connection_id": (
+                str(self.embedding_provider_connection_id)
+                if self.embedding_provider_connection_id
+                else ""
+            ),
+            "fingerprint": self.embedding_fingerprint,
+        }
 
     @property
     def document_count(self) -> int:
@@ -131,6 +157,10 @@ class Document(db.Model):
     )
 
     @property
+    def dataset(self) -> "Dataset":
+        return db.session.query(Dataset).get(self.dataset_id)
+
+    @property
     def upload_file(self) -> "UploadFile":
         return (
             db.session.query(UploadFile)
@@ -186,7 +216,7 @@ class Segment(db.Model):
     account_id = Column(UUID, nullable=False)
     dataset_id = Column(UUID, nullable=False)
     document_id = Column(UUID, nullable=False)
-    node_id = Column(UUID, nullable=False)
+    node_id = Column(UUID, nullable=False)  # 向量存储中的对象 ID；关系库片段主键是本表 id
     position = Column(Integer, nullable=False, server_default=text("1"))
     content = Column(Text, nullable=False, server_default=text("''::text"))
     character_count = Column(Integer, nullable=False, server_default=text("0"))
@@ -263,8 +293,8 @@ class DatasetQuery(db.Model):
         nullable=False,
         server_default=text("'HitTesting'::character varying"),
     )
-    source_app_id = Column(UUID, nullable=True)
-    created_by = Column(UUID, nullable=True)
+    source_app_id = Column(UUID, nullable=True)  # 发起检索的应用标识，非应用调用时可为空
+    created_by = Column(UUID, nullable=True)  # 当前检索服务传入的 Account.id，不是 EndUser.id
     updated_at = Column(
         DateTime,
         nullable=False,

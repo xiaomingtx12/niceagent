@@ -1,0 +1,468 @@
+"""Agent Protocol 的输入协议 Schema。
+
+协议字段由前端 SDK 发送，HTTP 层只负责读取 JSON；业务字段的结构和
+限制在这里集中定义，避免 Service 里散落大量 ``Mapping`` 取值代码。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from datetime import datetime
+from typing import Annotated, Any, Literal
+from uuid import UUID
+
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    StrictStr,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+
+from internal.entity import AgentExecutionInput
+from internal.entity.agent_execution_entity import AgentModelSelection
+from internal.exception import ValidateErrorException
+from internal.core.agent_v2.entity.stream_event import EventChannel
+
+# 公开协议方法词表：DTO 校验、历史回放过滤和持久化查询共用同一来源，新增通道只改这里。
+PUBLIC_EVENT_METHODS = tuple(channel.value for channel in EventChannel)
+
+
+class AgentProtocolUserMessageReq(BaseModel):
+    """用户消息的内容解析；内部 SDK 输入允许未分配消息 ID。"""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: StrictStr | None = Field(default=None, max_length=255)
+    type: Literal["human", "user"] | None = None
+    role: Literal["human", "user"] | None = None
+    content: Any = ""
+
+    @property
+    def text(self) -> str:
+        """将协议消息内容转换为纯文本查询。"""
+        if isinstance(self.content, str):
+            return self.content
+        if isinstance(self.content, list):
+            return "".join(
+                str(part.get("text", ""))
+                for part in self.content
+                if isinstance(part, Mapping) and part.get("type") in {"text", None}
+            )
+        return str(self.content or "")
+
+
+class AgentProtocolCommandMessageReq(AgentProtocolUserMessageReq):
+    """公开启动命令携带稳定消息 ID，重试不能由服务端重新分配。"""
+
+    id: StrictStr = Field(min_length=1, max_length=255, pattern=r"\S")
+
+
+class AgentProtocolInputOptionsReq(BaseModel):
+    """两个真实入口共用运行选项与字段校验，不决定各自的消息格式。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    planning_enabled: bool = Field(default=False, strict=True)
+    reasoning_effort: StrictStr | None = Field(default=None, min_length=1, max_length=64)
+    model_selection: AgentModelSelection | None = None
+    image_urls: list[StrictStr] = Field(default_factory=list, max_length=10)
+    file_ids: list[UUID] = Field(default_factory=list, max_length=5)
+    selected_skills: list[Annotated[StrictStr, Field(min_length=1, max_length=64)]] = (
+        Field(default_factory=list, max_length=20)
+    )
+
+    @field_validator("image_urls", "file_ids", "selected_skills", mode="before")
+    def normalize_list(value: Any) -> list[Any]:
+        """传入的集合必须为数组，省略字段才使用空数组默认值。"""
+        if not isinstance(value, list):
+            raise ValueError("必须是数组")
+        return value
+
+    @field_validator("selected_skills")
+    @classmethod
+    def validate_selected_skills(cls, value: list[str]) -> list[str]:
+        """规范化并拒绝重复的本轮 Skill 选择。"""
+        normalized = [item.strip() for item in value]
+        if any(not item for item in normalized):
+            raise ValueError("所选 Skill 名称不能为空")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("所选 Skill 不能重复")
+        return normalized
+
+    @field_validator("file_ids")
+    @classmethod
+    def reject_duplicate_file_ids(cls, value: list[UUID]) -> list[UUID]:
+        """同一附件在一次调用中只能出现一次。"""
+        if len(value) != len(set(value)):
+            raise ValueError("附件不能重复提交")
+        return value
+
+    def to_execution_input(self, *, query: str, message_id: str | None) -> AgentExecutionInput:
+        """输入格式由各入口解释，规范化后的选项在这里转换一次。"""
+        query = query.strip()
+        if not query:
+            raise ValidateErrorException("run.start 需要非空的用户输入")
+        return AgentExecutionInput(
+            query=query,
+            planning_enabled=self.planning_enabled,
+            image_urls=tuple(self.image_urls),
+            file_ids=tuple(self.file_ids),
+            selected_skills=tuple(self.selected_skills),
+            input_message_id=message_id,
+            reasoning_effort=self.reasoning_effort,
+            model_selection=self.model_selection,
+        )
+
+
+class AgentProtocolCommandInputReq(AgentProtocolInputOptionsReq):
+    """公开启动输入直接声明消息必填，不接受 query 或任意图状态字段。"""
+
+    messages: list[AgentProtocolCommandMessageReq] = Field(min_length=1)
+
+    def to_run_input(self) -> AgentExecutionInput:
+        """仅执行本次输入的最后一条用户消息，历史由服务端加载。"""
+        message = self.messages[-1]
+        return self.to_execution_input(query=message.text, message_id=message.id)
+
+
+class AgentProtocolInputResponseReq(BaseModel):
+    """只接受已知中断的答案，不开放图跳转或状态任意写入。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: list[StrictStr] = Field(default_factory=list, max_length=0)
+    interrupt_id: StrictStr = Field(min_length=1, max_length=255)
+    response: dict[str, Any]
+
+
+class AgentProtocolInputRespondReq(BaseModel):
+    """当前 SDK 支持单个与批量 input.respond，业务层统一按批次处理。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    responses: list[AgentProtocolInputResponseReq] = Field(min_length=1, max_length=40)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_single(cls, value: Any) -> Any:
+        """将官方单个中断响应转换为统一的批量表示。"""
+        if isinstance(value, Mapping) and "interrupt_id" in value and "responses" not in value:
+            return {"responses": [dict(value)]}
+        return value
+
+    @model_validator(mode="after")
+    def reject_duplicates(self) -> "AgentProtocolInputRespondReq":
+        """一条命令中的中断只能出现一次。"""
+        ids = [item.interrupt_id for item in self.responses]
+        if len(ids) != len(set(ids)):
+            raise ValueError("中断 ID 不能重复")
+        return self
+
+
+class AgentProtocolCommandReq(BaseModel):
+    """在请求解析时确定命令参数类型，分派阶段只消费已规范化的数据。"""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    type: StrictStr | None = None
+    id: StrictInt | None = None
+    method: Literal["run.start", "input.respond"]
+    params: AgentExecutionInput | AgentProtocolInputRespondReq = Field(
+        default_factory=dict, validate_default=True,
+    )
+
+    @classmethod
+    def from_mapping(cls, command: Any) -> "AgentProtocolCommandReq":
+        """HTTP 入口一次完成外壳与参数校验，失败使用统一项目异常。"""
+        if not isinstance(command, Mapping):
+            raise ValidateErrorException("工作台命令必须是 JSON 对象")
+        try:
+            return cls.model_validate(dict(command))
+        except ValidationError as exc:
+            raise ValidateErrorException(f"工作台命令格式错误: {exc}") from exc
+
+    @field_validator("params", mode="before")
+    @classmethod
+    def parse_params(
+        cls, value: Any, info: ValidationInfo,
+    ) -> AgentExecutionInput | AgentProtocolInputRespondReq:
+        """启动只读取 params.input.messages；消息 ID 是重试去重键。"""
+        if not isinstance(value, Mapping):
+            raise ValueError("命令 params 必须是对象")
+        method = info.data.get("method")
+        if method == "input.respond":
+            try:
+                return AgentProtocolInputRespondReq.model_validate(value)
+            except ValidationError as exc:
+                raise ValidateErrorException("表单提交格式错误") from exc
+        if method != "run.start":
+            raise ValueError("不支持的工作台命令")
+        raw = value.get("input")
+        if not isinstance(raw, Mapping):
+            raise ValidateErrorException("run.start 的 input 必须是对象")
+        try:
+            parsed = AgentProtocolCommandInputReq.model_validate(raw)
+            return parsed.to_run_input()
+        except ValidationError as exc:
+            raise ValidateErrorException(f"工作台输入格式错误: {exc}") from exc
+
+
+
+class AgentProtocolEventParams(BaseModel):
+    """一条工作台协议事件的公共参数。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    namespace: tuple[StrictStr, ...] = Field(default_factory=tuple)
+    timestamp: Any = None
+    data: Any = None
+    metadata: dict[StrictStr, Any] = Field(default_factory=dict)
+    node: StrictStr | None = None
+
+
+class AgentProtocolEvent(BaseModel):
+    """经过公开通道投影、可持久化和对外传输的工作台事件。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["event"]
+    event_id: StrictStr = Field(min_length=1)
+    seq: StrictInt = Field(ge=0)
+    method: Literal[*PUBLIC_EVENT_METHODS]
+    params: AgentProtocolEventParams
+
+
+class AgentProtocolEventStreamReq(BaseModel):
+    """SSE 订阅过滤条件。
+
+    ``input`` 和 ``checkpoints`` 是 LangGraph SDK 根订阅的控制 channel。
+    工作台当前不发布这两类事件，但必须接受它们，才能兼容官方
+    ``useStream`` 的默认订阅集合。
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    run_id: UUID
+    since: StrictInt = Field(default=0, ge=0)
+    recovery: Literal["snapshot"] | None = None
+    channels: list[
+        Literal[
+            "messages",
+            "values",
+            "tools",
+            "lifecycle",
+            "input",
+            "checkpoints",
+            "custom",
+        ]
+    ] = Field(default_factory=list)
+    namespaces: list[list[StrictStr]] = Field(default_factory=list)
+    depth: StrictInt | None = Field(default=None, ge=0)
+
+    @classmethod
+    def from_mapping(
+        cls,
+        body: Mapping[str, Any] | None,
+        *,
+        last_event_id: str | None = None,
+    ) -> "AgentProtocolEventStreamReq":
+        payload = dict(body) if isinstance(body, Mapping) else {}
+        if last_event_id:
+            sequence = _parse_last_event_sequence(last_event_id)
+            since = payload.get("since", 0)
+            if sequence is not None and type(since) is int and since >= 0:
+                payload["since"] = max(since, sequence)
+        try:
+            return cls.model_validate(payload)
+        except ValidationError as exc:
+            raise ValidateErrorException(f"工作台订阅参数错误: {exc}") from exc
+
+    def matches(self, event: AgentProtocolEvent) -> bool:
+        """判断协议事件是否符合订阅过滤条件。"""
+        channel = "input" if event.method == "input.requested" else event.method
+        if self.channels and channel not in self.channels:
+            return False
+        namespace = event.params.namespace
+        if self.namespaces and not any(
+            namespace[: len(prefix)] == tuple(prefix) for prefix in self.namespaces
+        ):
+            return False
+        return not (self.depth is not None and len(namespace) > self.depth)
+
+
+def _parse_last_event_sequence(value: str) -> int | None:
+    """解析 SSE 游标；cursor-reset 的事件 ID 使用重放起点而非事件序号。"""
+    parts = value.strip().split(":")
+    try:
+        if len(parts) >= 2 and parts[-2] == "cursor-reset":
+            return max(0, int(parts[-1]) - 1)
+        return max(0, int(parts[-1]))
+    except (ValueError, TypeError):
+        return None
+
+
+class AgentProtocolCommandSuccessResp(BaseModel):
+    """Agent Protocol 命令成功响应；result 保持官方协议的单键信封，SDK 从 result.run_id 读取。"""
+
+    type: Literal["success"] = "success"
+    id: int = 0
+    result: dict[str, UUID]
+    meta: dict[str, int] | None = None
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        command_id: int | None,
+        run_id: UUID,
+        applied_through_sequence: int | None = None,
+    ) -> "AgentProtocolCommandSuccessResp":
+        """创建命令成功响应。"""
+        meta = (
+            {"applied_through_seq": applied_through_sequence}
+            if applied_through_sequence is not None
+            else None
+        )
+        return cls(
+            id=command_id or 0,
+            result={"run_id": run_id},
+            meta=meta,
+        )
+
+
+class AgentProtocolCommandErrorResp(BaseModel):
+    """Agent Protocol 命令错误响应。"""
+
+    type: Literal["error"] = "error"
+    id: int | None = None
+    error: Literal["invalid_argument"] = "invalid_argument"
+    message: str
+    field_errors: dict[str, dict[str, str]] | None = None
+
+
+class AgentProtocolHistoryMessageResp(BaseModel):
+    """状态水合和消息分页中的一条对话消息。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: StrictStr
+    type: Literal["human", "ai"]
+    content: Any
+    additional_kwargs: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentProtocolMessagePageInfoResp(BaseModel):
+    """工作台历史消息分页信息。"""
+
+    has_more: bool = False
+    next_before: UUID | None = None
+
+
+class AgentProtocolRunMetadataResp(BaseModel):
+    """工作台状态中的当前 Run 摘要。"""
+
+    run_id: UUID | None = None
+    status: str = "idle"
+    last_event_sequence: int = Field(default=0, ge=0)
+
+
+class AgentProtocolRunSummaryResp(BaseModel):
+    """会话中的运行摘要；不包含执行事件，也不占用事件序号。"""
+
+    run_id: UUID
+    message_id: UUID
+    input_message_id: str | None = None
+    status: str
+    last_event_sequence: int = Field(default=0, ge=0)
+    created_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    error: str | None = None
+
+
+class AgentProtocolRunStatusesReq(BaseModel):
+    """批量状态读取限制单次规模，UUID 校验集中在请求边界。"""
+
+    model_config = ConfigDict(extra="forbid")
+    run_ids: list[UUID] = Field(min_length=1, max_length=50)
+
+
+class AgentProtocolRunStatusesResp(BaseModel):
+    """缺失与无权访问统一为不可用，避免暴露其他账号的运行信息。"""
+
+    runs: list[AgentProtocolRunSummaryResp]
+    unavailable_run_ids: list[UUID]
+
+
+class AgentProtocolRunResultResp(BaseModel):
+    """按需读取已保存回答，不扫描执行事件。"""
+
+    run: AgentProtocolRunSummaryResp
+    answer: str
+
+
+class AgentProtocolStateResp(BaseModel):
+    """兼容 LangGraph SDK 的工作台状态响应。"""
+
+    values: dict[str, Any] = Field(default_factory=dict)
+    next: list[str] = Field(default_factory=list)
+    tasks: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: AgentProtocolRunMetadataResp
+
+
+class AgentProtocolCancelResp(BaseModel):
+    """工作台取消指定 Run 的响应。"""
+
+    cancel_requested: bool
+    run_id: UUID | None = None
+    status: str
+
+
+class AgentProtocolRunEventsResp(BaseModel):
+    """单个 Run 的执行详情按稳定序号升序分页。"""
+
+    run_id: UUID
+    events: list[AgentProtocolEvent]
+    next_page: int | None = None
+
+
+class AgentProtocolRecoverySnapshotResp(BaseModel):
+    """连接级展示快照；sequence 对应同一已提交水位，不占用持久化事件序号。"""
+
+    type: Literal["workbench.snapshot"] = "workbench.snapshot"
+    run_id: UUID
+    sequence: int = Field(ge=0)
+    run: AgentProtocolRunSummaryResp
+    values: dict[str, Any]
+    events: list[AgentProtocolEvent]
+
+
+__all__ = [
+    "AgentProtocolRecoverySnapshotResp",
+    "PUBLIC_EVENT_METHODS",
+    "AgentProtocolRunEventsResp",
+    "AgentProtocolCommandReq",
+    "AgentProtocolCommandInputReq",
+    "AgentProtocolCommandMessageReq",
+    "AgentProtocolUserMessageReq",
+    "AgentProtocolInputOptionsReq",
+    "AgentProtocolEventStreamReq",
+    "AgentProtocolCommandSuccessResp",
+    "AgentProtocolCommandErrorResp",
+    "AgentProtocolEvent",
+    "AgentProtocolEventParams",
+    "AgentProtocolHistoryMessageResp",
+    "AgentProtocolMessagePageInfoResp",
+    "AgentProtocolRunMetadataResp",
+    "AgentProtocolRunSummaryResp",
+    "AgentProtocolRunStatusesReq",
+    "AgentProtocolRunStatusesResp",
+    "AgentProtocolRunResultResp",
+    "AgentProtocolStateResp",
+    "AgentProtocolCancelResp",
+]

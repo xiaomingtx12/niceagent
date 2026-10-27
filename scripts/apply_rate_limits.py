@@ -196,7 +196,7 @@ def main():
         return
     
     # 获取所有 handler 文件
-    handler_files = list(handler_dir.glob("*_handler.py"))
+    handler_files = list(handler_dir.rglob("*_handler.py"))
     
     print(f"找到 {len(handler_files)} 个 Handler 文件\n")
     

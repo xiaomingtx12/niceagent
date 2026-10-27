@@ -1,4 +1,4 @@
 name: current_time
 label: 获取当前时间
-description: 一个用于获取当前时间的工具。
-params: [ ]
+description: 查询 IANA 时区的当前时间，默认 Asia/Shanghai，结果包含 UTC 偏移。
+params: []

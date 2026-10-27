@@ -1,0 +1,4 @@
+name: pdf_read
+label: 在线 PDF 原文读取
+description: 按页读取公开报告和论文，保留页码与来源。
+params: []

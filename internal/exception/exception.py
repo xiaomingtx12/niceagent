@@ -12,8 +12,9 @@ class CustomException(Exception):
     data: Any = field(default_factory=dict)
 
     def __init__(self, message: str = None, data: Any = None):
-        super().__init__()
-        self.message = message
+        normalized_message = message or ""
+        super().__init__(normalized_message)
+        self.message = normalized_message
         self.data = data
 
 

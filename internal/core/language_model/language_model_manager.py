@@ -1,13 +1,14 @@
 import os.path
-from typing import Any, Optional, Type
+from typing import Any, Optional
 
 import yaml
 from injector import inject, singleton
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 from internal.exception import NotFoundException
-from .entities.model_entity import ModelType, BaseLanguageModel
+from .entities.model_entity import ModelEntity
 from .entities.provider_entity import Provider, ProviderEntity
+from .model_discovery import ModelDiscoveryClient
 
 
 @inject
@@ -15,6 +16,9 @@ from .entities.provider_entity import Provider, ProviderEntity
 class LanguageModelManager(BaseModel):
     """语言模型管理器"""
     provider_map: dict[str, Provider] = Field(default_factory=dict)  # 服务提供者映射
+    _discovery_client: ModelDiscoveryClient = PrivateAttr(
+        default_factory=ModelDiscoveryClient
+    )
 
     @model_validator(mode="before")
     def validate_language_model_manager(cls, values: dict[str, Any]) -> dict[str, Any]:
@@ -52,26 +56,18 @@ class LanguageModelManager(BaseModel):
         """获取所有提供者列表信息"""
         return list(self.provider_map.values())
 
-    def get_model_class_by_provider_and_type(
-            self,
-            provider_name: str,
-            model_type: ModelType,
-    ) -> Optional[Type[BaseLanguageModel]]:
-        """根据传递的提供者名字+模型类型，获取模型类"""
+    def discover_models(
+        self,
+        provider_name: str,
+        api_key: str,
+        *,
+        base_url: str | None = None,
+    ) -> list[ModelEntity]:
+        """仅在用户显式请求时访问第三方模型目录。"""
         provider = self.get_provider(provider_name)
-
-        return provider.get_model_class(model_type)
-
-    def get_model_class_by_provider_and_model(
-            self,
-            provider_name: str,
-            model_name: str,
-    ) -> Optional[Type[BaseLanguageModel]]:
-        """根据传递的提供者名字+模型名字获取模型类"""
-        # 1.根据名字获取提供者信息
-        provider = self.get_provider(provider_name)
-
-        # 2.在提供者下获取该模型实体
-        model_entity = provider.get_model_entity(model_name)
-
-        return provider.get_model_class(model_entity.model_type)
+        return self._discovery_client.discover(
+            provider.provider_entity,
+            api_key,
+            base_url=base_url,
+            force_refresh=True,
+        )

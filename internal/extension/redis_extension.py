@@ -24,6 +24,18 @@ def init_app(app: Flask):
             "encoding": "utf-8",
             "encoding_errors": "strict",
             "decode_responses": False,
+            "max_connections": app.config.get("REDIS_MAX_CONNECTIONS", 50),
+            "socket_timeout": app.config.get("REDIS_SOCKET_TIMEOUT", 5),
+            "socket_connect_timeout": app.config.get(
+                "REDIS_SOCKET_CONNECT_TIMEOUT",
+                2,
+            ),
+            "socket_keepalive": True,
+            "health_check_interval": app.config.get(
+                "REDIS_HEALTH_CHECK_INTERVAL",
+                30,
+            ),
+            "retry_on_timeout": True,
         },
         connection_class=connection_class
     )

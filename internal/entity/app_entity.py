@@ -27,19 +27,11 @@ class AppConfigType(str, Enum):
 
 # 应用默认配置信息
 DEFAULT_APP_CONFIG = {
-    "model_config": {
-        "provider": "openai",
-        "model": "gpt-4o-mini",
-        "parameters": {
-            "temperature": 0.5,
-            "top_p": 0.85,
-            "frequency_penalty": 0.2,
-            "presence_penalty": 0.2,
-            "max_tokens": 8192,
-        },
-    },
-    "dialog_round": 3,
+    # 模型配置由当前账号已激活的模型注入，不能使用全局固定模型。
+    "model_config": {},
     "preset_prompt": "",
+    "skills": [],
+    "subagents": [],
     "tools": [],
     "workflows": [],
     "datasets": [],
@@ -53,6 +45,7 @@ DEFAULT_APP_CONFIG = {
     },
     "opening_statement": "",
     "opening_questions": [],
+    "user_input": {"enable": True},
     "speech_to_text": {
         "enable": False,
     },
@@ -60,16 +53,5 @@ DEFAULT_APP_CONFIG = {
         "enable": False,
         "voice": "xiaoxiao",
         "auto_play": False,
-    },
-    "review_config": {
-        "enable": False,
-        "keywords": [],
-        "inputs_config": {
-            "enable": False,
-            "preset_response": "",
-        },
-        "outputs_config": {
-            "enable": False,
-        },
     },
 }

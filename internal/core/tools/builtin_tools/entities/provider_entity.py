@@ -19,6 +19,10 @@ class ProviderEntity(BaseModel):
     category: str  # 分类信息
     created_at: int = 0  # 提供商/工具的创建时间戳
     available: bool = True  # 是否在国内可用，默认为True
+    required_env: list[str] = Field(default_factory=list)
+    network_required: bool = True
+    setup_hint: str = ""
+    requires_app_configuration: bool = False
 
 
 class Provider(BaseModel):

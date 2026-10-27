@@ -48,7 +48,7 @@ class BuiltinAppManager(BaseModel):
         builtin_apps_yaml_path = os.path.join(parent_path, "builtin_apps")
 
         # 3.循环遍历builtin_apps_yaml_path读取底下的所有yaml文件
-        for filename in os.listdir(builtin_apps_yaml_path):
+        for filename in sorted(os.listdir(builtin_apps_yaml_path)):
             if filename.endswith(".yaml") or filename.endswith(".yml"):
                 file_path = os.path.join(builtin_apps_yaml_path, filename)
 
@@ -57,7 +57,7 @@ class BuiltinAppManager(BaseModel):
                     builtin_app = yaml.safe_load(f)
 
                 # 5.初始化内置应用数据并添加到字典中
-                builtin_app["language_model_config"] = builtin_app.pop("model_config")
+                builtin_app["language_model_config"] = builtin_app.pop("model_config", {})
                 self.builtin_app_map[builtin_app.get("id")] = BuiltinAppEntity(
                     **builtin_app
                 )

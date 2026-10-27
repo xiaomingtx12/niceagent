@@ -10,7 +10,7 @@ def _get_provider_api_key_service():
     try:
         from flask import current_app
         from app.http.module import injector
-        from internal.service.provider_api_key_service import ProviderApiKeyService
+        from internal.service.language_model.provider_api_key_service import ProviderApiKeyService
 
         return injector.get(ProviderApiKeyService)
     except Exception as e:

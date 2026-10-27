@@ -1,67 +1,73 @@
+"""高德天气查询。"""
+
 import json
 import os
-from typing import Any, Type
-
 import requests
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
-
 from internal.lib.helper import add_attribute
 
 
 class GaodeWeatherArgsSchema(BaseModel):
-    city: str = Field(description="需要查询天气预报的目标城市，例如：广州")
+    """允许具体城市或行政区编码，避免同名地区歧义。"""
+
+    city: str = Field(
+        min_length=1, description="城市名称（如广州市）或六位行政区编码。"
+    )
 
 
 class GaodeWeatherTool(BaseTool):
-    """根据传入的城市名查询天气"""
+    """按需访问高德 API，每次工具调用结束后释放连接。"""
 
     name: str = "gaode_weather"
-    description: str = "当你想查询天气或者与天气相关的问题时可以使用的工具"
-    args_schema: Type[BaseModel] = GaodeWeatherArgsSchema
-    api_key: str = None  # 高德 API Key
+    description: str = "查询中国城市的天气预报，包含日期和预报发布时间。"
+    args_schema: type[BaseModel] = GaodeWeatherArgsSchema
+    api_key: str | None = Field(default=None, exclude=True, repr=False)
 
-    def _run(self, *args: Any, **kwargs: Any) -> str:
-        """根据传入的城市名称运行调用api获取城市对应的天气预报信息"""
+    def _run(self, city: str) -> str:
+        """处理空地区、服务失败和超时，不暴露请求 URL 中的凭据。"""
+        key = (self.api_key or os.getenv("GAODE_API_KEY") or "").strip()
+        if not key:
+            return "配置错误：请配置 GAODE_API_KEY 后查询天气。"
+        if not city.strip():
+            return "城市不能为空。"
         try:
-            # 1.获取高德API秘钥（优先使用传入的 api_key，否则从环境变量获取）
-            gaode_api_key = self.api_key or os.getenv("GAODE_API_KEY")
-            if not gaode_api_key:
-                return f"高德开放平台API未配置，请先在设置中添加或配置环境变量"
-
-            # 2.从参数中获取city城市名字
-            city = kwargs.get("city", "")
-            api_domain = "https://restapi.amap.com/v3"
-            session = requests.session()
-
-            # 3.发起行政区域编码查询，根据city获取ad_code
-            city_response = session.request(
-                method="GET",
-                url=f"{api_domain}/config/district?key={gaode_api_key}&keywords={city}&subdistrict=0",
-                headers={"Content-Type": "application/json; charset=utf-8"},
-            )
-            city_response.raise_for_status()
-            city_data = city_response.json()
-            if city_data.get("info") == "OK":
-                ad_code = city_data["districts"][0]["adcode"]
-
-                # 4.根据得到的ad_code调用天气预报API接口，获取天气信息
-                weather_response = session.request(
-                    method="GET",
-                    url=f"{api_domain}/weather/weatherInfo?key={gaode_api_key}&city={ad_code}&extensions=all",
-                    headers={"Content-Type": "application/json; charset=utf-8"},
+            with requests.Session() as session:
+                response = session.get(
+                    "https://restapi.amap.com/v3/config/district",
+                    params={"key": key, "keywords": city.strip(), "subdistrict": 0},
+                    timeout=20,
                 )
-                weather_response.raise_for_status()
-                weather_data = weather_response.json()
-                if weather_data.get("info") == "OK":
-                    # 5.返回最后的结果字符串
-                    return json.dumps(weather_data)
-            return f"获取{city}天气预报信息失败"
-        except Exception as e:
-            return f"获取{kwargs.get('city', '')}天气预报信息失败"
+                response.raise_for_status()
+                data = response.json()
+                if not isinstance(data, dict) or data.get("status") != "1":
+                    return "城市查询失败，请检查高德凭据和配额。"
+                districts = data.get("districts") or []
+                if not districts:
+                    return "未找到城市，请提供完整城市名或行政区编码。"
+                if len(districts) != 1:
+                    return "存在同名地区，请提供具体省市或行政区编码。"
+                response = session.get(
+                    "https://restapi.amap.com/v3/weather/weatherInfo",
+                    params={
+                        "key": key,
+                        "city": districts[0]["adcode"],
+                        "extensions": "all",
+                    },
+                    timeout=20,
+                )
+                response.raise_for_status()
+                weather = response.json()
+                if not isinstance(weather, dict) or weather.get("status") != "1":
+                    return "天气查询失败，请稍后重试。"
+                return json.dumps(weather, ensure_ascii=False)
+        except requests.Timeout:
+            return "天气查询超时，请稍后重试。"
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            return "天气查询失败，请检查服务配置与网络。"
 
 
 @add_attribute("args_schema", GaodeWeatherArgsSchema)
 def gaode_weather(**kwargs) -> BaseTool:
-    """获取高德天气预报查询工具"""
-    return GaodeWeatherTool()
+    """保留显式传入的凭据，兼容现有工厂调用。"""
+    return GaodeWeatherTool(**kwargs)

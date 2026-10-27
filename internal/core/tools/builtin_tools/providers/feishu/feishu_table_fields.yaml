@@ -1,0 +1,28 @@
+name: feishu_table_fields
+label: 查看表格字段
+description: 读取字段名、类型与选项，写入业务数据前核查表结构。
+params:
+- name: app_id
+  label: 自建应用 App ID
+  type: string
+  required: true
+  default: ''
+  secret: false
+- name: app_secret
+  label: 自建应用 App Secret
+  type: string
+  required: true
+  default: ''
+  secret: true
+- name: app_token
+  label: 多维表格 app_token
+  type: string
+  required: true
+  default: ''
+  secret: false
+- name: table_id
+  label: 数据表 table_id
+  type: string
+  required: true
+  default: ''
+  secret: false

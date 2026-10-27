@@ -1,4 +1,3 @@
-import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -8,6 +7,7 @@ from psycopg2 import OperationalError as Psycopg2OperationalError
 from sqlalchemy.exc import OperationalError
 
 from internal.exception import UnauthorizedException, FailException
+from internal.extension.logging_extension import logger
 from internal.model import Account
 from internal.service import JwtService, AccountService, ApiKeyService
 
@@ -37,8 +37,10 @@ class Middleware:
                     raise UnauthorizedException("当前账户不存在，请重新登录")
                 return account
             except (OperationalError, Psycopg2OperationalError) as e:
-                logging.error(
-                    f"Database connection error when loading account {account_id}: {str(e)}"
+                logger.exception(
+                    "Database connection error when loading account %s: %s",
+                    account_id,
+                    e,
                 )
                 raise FailException("数据库连接异常，请稍后重试")
         elif request.blueprint == "openapi":

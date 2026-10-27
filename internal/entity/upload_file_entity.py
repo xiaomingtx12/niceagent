@@ -16,3 +16,5 @@ ALLOWED_DOCUMENT_EXTENSION = [
     "xml",
     "csv",
 ]
+ALLOWED_AUDIO_EXTENSION = ["mp3", "wav", "m4a", "ogg", "flac"]
+ALLOWED_VIDEO_EXTENSION = ["mp4", "mov", "webm", "avi", "mkv"]

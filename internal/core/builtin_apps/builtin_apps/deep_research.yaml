@@ -1,0 +1,75 @@
+id: a25878f9-5564-54c8-b165-0557e70d8fc0
+category: research
+name: 专题研究团队
+icon: https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/daily_report_assistant.png
+description: 由研究员检索来源、核查员检查论据，输出带引用和不确定性说明的研究报告。
+tags:
+- 联网调研
+- 多 Agent 协作
+- 研究报告
+requirements:
+- 使用当前账号已激活的默认模型，可在编排页调整。
+- 执行脚本或生成办公文件需启用沙箱，并具备对应 Skill 所需依赖。
+- 联网检索需配置 Searx 搜索服务；正文与 PDF 读取需部署网络能够访问公开来源。
+model_config: {}
+preset_prompt: '先明确研究问题、时间范围和预期深度。把资料收集交给 researcher，把来源一致性及论证缺口检查交给 fact-checker，向子 Agent 提供清晰任务与必要文件路径。综合结果，保留可访问的引用、检索日期和证据局限。矛盾来源并列说明，不用搜索摘要冒充完整原文。
+
+
+  执行约定：先阅读用户提供的材料及相关 Skill，再开始处理；缺少关键目标、口径或交付格式时使用用户问答能力澄清。多步骤任务在用户启用任务计划时维护进度。文件先读取再修改，交付物保存到 /workspace 并给出实际生成的文件链接。仅声称已经执行并验证的操作；工具、网络或沙箱不可用时说明具体限制，不编造结果。用户提供验收标准时，按标准检查交付物并说明未完成项。'
+skills:
+- name: web-research
+  enabled: true
+- name: deep-research-pro
+  enabled: true
+- name: text-summarizer
+  enabled: true
+subagents:
+- name: researcher
+  description: 收集与研究问题相关的来源、日期与事实摘录。
+  system_prompt: 围绕明确的研究子问题检索，返回来源链接、时间、事实摘要与限制。保存详细材料到任务指定文件。
+  tools:
+  - searx_search
+  - current_time
+  - webpage_read
+  - pdf_read
+  skills:
+  - web-research
+- name: fact-checker
+  description: 复核来源、检查相互矛盾和无依据的研究结论。
+  system_prompt: 核查主 Agent 提供的材料和结论；必要时独立检索。逐项返回证据支持程度、反例与待核实问题。
+  tools:
+  - searx_search
+  - webpage_read
+  - pdf_read
+  skills:
+  - web-research
+  - text-summarizer
+tools:
+- type: builtin_tool
+  provider_id: web
+  tool_id: webpage_read
+  params: {}
+- type: builtin_tool
+  provider_id: web
+  tool_id: pdf_read
+  params: {}
+- type: builtin_tool
+  provider_id: searx
+  tool_id: searx_search
+  params:
+    max_results: 5
+- type: builtin_tool
+  provider_id: time
+  tool_id: current_time
+  params: {}
+workflows: []
+long_term_memory:
+  enable: false
+user_input:
+  enable: true
+opening_statement: 提供研究主题、时间范围与用途，我会组织检索和事实核查并交付带来源的报告。
+opening_questions:
+- 研究一个行业的近期变化并列出证据
+- 比较三款产品的能力和使用限制
+- 核查这份资料并指出缺少依据的结论
+created_at: 1788998400

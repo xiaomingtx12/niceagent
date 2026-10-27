@@ -10,7 +10,7 @@ Agent、语音转换等能力。
 - 工作流编排：支持工作流草稿、调试、发布与模板创建
 - 知识库：支持数据集、文档、分段管理与检索
 - 工具扩展：支持内置工具、自定义 API 工具、MCP Server 工具
-- 模型接入：支持多供应商语言模型配置
+- 模型接入：支持多供应商语言模型配置，在填写 API Key 时显式发现并激活第三方模型
 - 辅助能力：提示词优化、推荐问题、语音转文字、文字转语音
 - 账号与鉴权：登录/登出、OAuth 授权、API Key 管理
 - 文件能力：文件/图片上传、文档解析与分段
@@ -28,6 +28,7 @@ Agent、语音转换等能力。
 - FAISS
 - LangChain / LangGraph
 - MCP
+- 沙箱执行：Bubblewrap（Linux 单机隔离）或可选 LangSmith / Daytona Sandbox
 
 ## 项目结构
 
@@ -95,8 +96,10 @@ python run.py
 示例：
 
 ```bash
-gunicorn -w 4 -b 0.0.0.0:5000 wsgi:application
+gunicorn -w 1 --threads 2 -b 0.0.0.0:5000 wsgi:application
 ```
+
+工作台实时事件保存在 API 进程内，生产环境必须保持单 Worker；可通过线程数提高并发能力。
 
 ### 5. Docker 启动（可选）
 
@@ -108,6 +111,85 @@ docker run --rm -p 5001:5001 my-dify
 ```
 
 容器内默认端口为 `5001`（可通过 `LLMOPS_PORT` 调整）。
+
+### 6. Agent 沙箱配置
+
+生产环境推荐使用已随镜像安装的 Bubblewrap，不需要 LangSmith 账号或按量付费：
+
+```env
+AGENT_SANDBOX_PROVIDER=bubblewrap
+AGENT_SANDBOX_ALLOW_NETWORK=False
+AGENT_SANDBOX_EXECUTE_TIMEOUT_SECONDS=1800
+AGENT_SANDBOX_MAX_OUTPUT_BYTES=512000
+```
+
+Bubblewrap 会为每次 Agent Run 创建临时目录，并隔离 mount/PID/IPC/UTS/network
+namespace；`/workspace` 可写，`/skills` 和 `/subagent_skills` 以只读挂载提供，宿主
+环境变量不会传入。关闭网络是默认值，需要安装依赖或访问外部服务时才显式设置为
+`True`，并应配合工具审批和最小权限。
+
+`AGENT_SANDBOX_PROVIDER=langsmith` 仍可选用托管沙箱，但需要
+`LANGSMITH_API_KEY`，并会产生 Provider 费用；`disabled` 表示不提供 `execute` 工具。
+也可以使用 Daytona 托管沙箱：
+
+```env
+AGENT_SANDBOX_PROVIDER=daytona
+DAYTONA_API_KEY=your_daytona_api_key
+DAYTONA_API_URL=https://app.daytona.io/api
+```
+
+Daytona 按 Run 创建临时 Sandbox，结束时先把 `/workspace` 增量同步回项目 Workspace，
+再调用 `sandbox.stop()`；它不会跨对话复用。Daytona 依赖 `langchain-daytona==0.0.7`
+以匹配当前 `deepagents==0.6.12`，切换 Provider 只需修改 `.env` 并重启服务。
+
+Daytona 和 LangSmith 均按需初始化：普通问答、Skill 阅读以及 `/workspace` 内的文件
+读写不创建远程 Sandbox，也不上传 Skill。首次调用 `execute` 或访问需要沙箱的其他
+文件路径时，才创建或连接 Sandbox，并同步当前 Workspace 和本次授权的完整 Skill 包。
+启动前的附件和文件写入直接保存到 Workspace；启动后的修改沿用运行结束时增量回写的流程。
+这可以减少首次输出前的等待；需要执行命令时，首次初始化和上传的耗时仍然存在。
+
+远程 Skill 包达到 64 KiB 且 ZIP 压缩能节省至少 10% 时，使用单个压缩包上传并在
+沙箱内解包；小包或压缩收益不足时直接上传。解包仅使用 Python 标准库，完成后删除临时包，
+并沿用 Skill 目录只读保护。Workspace 附件保持原有的字节和版本同步方式。
+
+Daytona 现在按「凭据作用域 + 会话 Sandbox 名称」短时复用：同一会话上一轮成功结束后，
+Sandbox 在 `AGENT_SANDBOX_IDLE_TTL_SECONDS` 内保留，下一轮独占租约并重新清空、播种当前
+Workspace；同一会话的并发 Run 会被拒绝，其他会话互不阻塞。同步失败、初始化失败或会话
+删除会立即淘汰实例；Daytona 的自动停止和删除参数仍作为进程异常退出时的远端兜底。
+池默认最多保留 3 个空闲会话实例，超出时按最近使用顺序淘汰；即使清理定时器延迟执行，
+获取租约时仍会检查 TTL，过期实例不会被再次使用。
+
+Docker 镜像中的 `bubblewrap` 安装是本机方案的运行前提，生产入口脚本会在启用沙箱时
+检查该可执行文件并执行一次最小 namespace 烟雾检查。
+
+### 7. Agent 可观测性
+
+平台通过 LangChain Callback 自动累计主 Agent 和同步 SubAgent 的模型、工具调用数及
+Token 用量。每个执行片段的用量在 Run 锁内直接累计到 Message 统计字段，
+并在同一事务更新 `agent_run.last_settled_executor_id`，防止重复结算。
+按模型的 Token 明细保存在 `Message.token_usage`，由 `/analysis/<app_id>` 聚合展示。
+AgentRun 不再重复保存用量 JSON，也不提供独立的观测查询接口。
+
+远程沙箱首次启动的耗时输出到 `agent_sandbox_timing` 日志；
+`agent_sandbox_skill_upload` 日志记录 Skill 文件数量、原始字节数、实际上传字节数、
+上传方式和耗时。装配与首字交付的耗时也保留日志，不再同步到 Run JSON。
+
+该链路不依赖 LangSmith，默认 `LANGSMITH_TRACING=false`。需要额外使用 LangSmith
+外部追踪时可自行开启；这不会改变平台观测数据的采集和持久化。
+
+Bubblewrap 是 Linux 内核 namespace 的开源命令行工具，不能在 Windows 原生进程中运行。
+Windows 开发环境可将 Provider 设为 `disabled`，或在 WSL2 / Docker Linux 容器中启用
+`bubblewrap` 做沙箱验证；如果宿主机禁用了 unprivileged user namespace，需调整容器或
+内核策略后才能启动。只做本机功能联调时，也可以使用开发专用的 `local_shell`：
+
+```env
+FLASK_ENV=development
+AGENT_SANDBOX_PROVIDER=local_shell
+```
+
+`local_shell` 使用 DeepAgents 的 `LocalShellBackend`，命令直接运行在当前 Windows
+用户权限下，没有安全隔离；每次运行使用临时目录，结束时仍会把 `/workspace` 增量同步回
+权威 Workspace。该模式被配置校验明确禁止用于生产环境。
 
 ## 常用接口概览
 

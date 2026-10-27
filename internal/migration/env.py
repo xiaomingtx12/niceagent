@@ -5,6 +5,8 @@ from flask import current_app
 
 from alembic import context
 
+from internal.migration.ownership import langgraph_aware_include_name
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
@@ -16,12 +18,8 @@ logger = logging.getLogger('alembic.env')
 
 
 def get_engine():
-    try:
-        # this works with Flask-SQLAlchemy<3 and Alchemical
-        return current_app.extensions['migrate'].db.get_engine()
-    except (TypeError, AttributeError):
-        # this works with Flask-SQLAlchemy>=3
-        return current_app.extensions['migrate'].db.engine
+    """返回 Flask-Migrate 当前绑定的默认数据库引擎。"""
+    return current_app.extensions["migrate"].db.engine
 
 
 def get_engine_url():
@@ -93,6 +91,9 @@ def run_migrations_online():
     conf_args = current_app.extensions['migrate'].configure_args
     if conf_args.get("process_revision_directives") is None:
         conf_args["process_revision_directives"] = process_revision_directives
+    conf_args["include_name"] = langgraph_aware_include_name(
+        conf_args.get("include_name")
+    )
 
     connectable = get_engine()
 

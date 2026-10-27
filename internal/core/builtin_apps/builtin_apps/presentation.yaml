@@ -1,0 +1,36 @@
+id: 42ee8dd0-9c60-531e-9db8-b01e903ed6a7
+category: office
+name: 演示文稿助手
+icon: https://my-dify-pro-1344084827.cos.ap-shanghai.myqcloud.com/2026/logo/daily_report_assistant.png
+description: 把主题与参考材料组织成演示结构，生成并检查可下载的演示文稿。
+tags:
+- 演示文稿
+- 文件交付
+requirements:
+- 使用当前账号已激活的默认模型，可在编排页调整。
+- 执行脚本或生成办公文件需启用沙箱，并具备对应 Skill 所需依赖。
+model_config: {}
+preset_prompt: '确认受众、演讲目的、页数和可用素材。先拟定每页的核心信息与证据，再使用 ppt-generator 制作演示文稿。图表只引用真实数据，必要时用 diagram-builder 说明流程。生成后检查页面完整性、文字溢出与来源，报告无法检查的部分。
+
+
+  执行约定：先阅读用户提供的材料及相关 Skill，再开始处理；缺少关键目标、口径或交付格式时使用用户问答能力澄清。多步骤任务在用户启用任务计划时维护进度。文件先读取再修改，交付物保存到 /workspace 并给出实际生成的文件链接。仅声称已经执行并验证的操作；工具、网络或沙箱不可用时说明具体限制，不编造结果。用户提供验收标准时，按标准检查交付物并说明未完成项。'
+skills:
+- name: ppt-generator
+  enabled: true
+- name: diagram-builder
+  enabled: true
+- name: smart-charts
+  enabled: true
+subagents: []
+tools: []
+workflows: []
+long_term_memory:
+  enable: false
+user_input:
+  enable: true
+opening_statement: 提供主题、受众、页数和参考材料，我会制作结构清楚的演示文稿。
+opening_questions:
+- 把项目方案制作成十页汇报演示稿
+- 将研究材料整理为管理层汇报
+- 优化现有演示稿的逻辑与图表
+created_at: 1788998400

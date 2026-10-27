@@ -1,29 +1,39 @@
-from .account_handler import AccountHandler
-from .ai_handler import AIHandler
-from .analysis_handler import AnalysisHandler
-from .api_key_handler import ApiKeyHandler
-from .api_tool_handler import ApiToolHandler
-from .app_handler import AppHandler
-from .assistant_agent_handler import AssistantAgentHandler
-from .audio_handler import AudioHandler
-from .auth_handler import AuthHandler
-from .builtin_app_handler import BuiltinAppHandler
-from .builtin_tool_handler import BuiltinToolHandler
-from .builtin_workflow_handler import BuiltinWorkflowHandler
-from .conversation_handler import ConversationHandler
-from .dataset_handler import DatasetHandler
-from .document_handler import DocumentHandler
-from .language_model_handler import LanguageModelHandler
-from .mcp_handler import MCPHandler
-from .oauth_handler import OAuthHandler
-from .openapi_handler import OpenAPIHandler
-from .platform_handler import PlatformHandler
-from .provider_api_key_handler import ProviderApiKeyHandler
-from .segment_handler import SegmentHandler
-from .upload_file_handler import UploadFileHandler
-from .web_app_handler import WebAppHandler
-from .wechat_handler import WechatHandler
-from .workflow_handler import WorkflowHandler
+from .account.account_handler import AccountHandler
+from .ai.ai_handler import AIHandler
+from .app.analysis_handler import AnalysisHandler
+from .account.api_key_handler import ApiKeyHandler
+from .tool.api_tool_handler import ApiToolHandler
+from .app.app_handler import AppHandler
+from .audio.audio_handler import AudioHandler
+from .account.auth_handler import AuthHandler
+from .app.builtin_app_handler import BuiltinAppHandler
+from .tool.builtin_tool_handler import BuiltinToolHandler
+from .workflow.builtin_workflow_handler import BuiltinWorkflowHandler
+from .conversation.conversation_handler import ConversationHandler
+from .dataset.dataset_handler import DatasetHandler
+from .dataset.document_handler import DocumentHandler
+from .language_model.language_model_handler import LanguageModelHandler
+from .tool.mcp_handler import MCPHandler
+from .account.oauth_handler import OAuthHandler
+from .platform.platform_handler import PlatformHandler
+from .language_model.provider_api_key_handler import ProviderApiKeyHandler
+from .dataset.segment_handler import SegmentHandler
+from .skill.skill_handler import SkillHandler
+from .file.upload_file_handler import UploadFileHandler
+from .app.web_app_handler import WebAppHandler
+from .platform.wechat_handler import WechatHandler
+from .workflow.workflow_handler import WorkflowHandler
+from .file.workspace_file_handler import WorkspaceFileHandler
+from .memory.memory_file_handler import MemoryFileHandler
+from .agent.debug_agent_handler import DebugAgentHandler
+from .agent.web_app_agent_handler import WebAppAgentHandler
+from .agent.creator_task_agent_handler import CreatorTaskAgentHandler
+from .agent.agent_execution_handler import AgentExecutionHandler
+from .agent_protocol.assistant_agent_protocol_handler import AssistantAgentProtocolHandler
+from .agent_protocol.internal_agent_protocol_handler import InternalAgentProtocolHandler
+from .agent_protocol.openapi_agent_protocol_handler import OpenAPIAgentProtocolHandler
+from .agent.creator_task_handler import CreatorTaskHandler
+from .agent_evaluation.agent_evaluation_handler import AgentEvaluationHandler
 
 __all__ = [
     "AppHandler",
@@ -40,10 +50,7 @@ __all__ = [
     "AuthHandler",
     "AIHandler",
     "ApiKeyHandler",
-    "OpenAPIHandler",
     "WorkflowHandler",
-    "AssistantAgentHandler",
-    "AssistantAgentHandler",
     "LanguageModelHandler",
     "MCPHandler",
     "AnalysisHandler",
@@ -53,4 +60,16 @@ __all__ = [
     "WechatHandler",
     "PlatformHandler",
     "ProviderApiKeyHandler",
+    "SkillHandler",
+    "WorkspaceFileHandler",
+    "MemoryFileHandler",
+    "DebugAgentHandler",
+    "WebAppAgentHandler",
+    "CreatorTaskAgentHandler",
+    "AgentExecutionHandler",
+    "AssistantAgentProtocolHandler",
+    "InternalAgentProtocolHandler",
+    "OpenAPIAgentProtocolHandler",
+    "CreatorTaskHandler",
+    "AgentEvaluationHandler",
 ]

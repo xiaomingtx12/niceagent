@@ -16,7 +16,7 @@ from internal.core.workflow.entities.workflow_entity import WorkflowState
 from internal.core.workflow.nodes import BaseNode
 from internal.core.workflow.utils.helper import extract_variables_from_state
 from internal.exception import FailException
-from internal.service.tencent_scf_service import get_scf_service
+from internal.service.workflow.tencent_scf_service import get_scf_service
 
 from .code_entity import CodeNodeData
 

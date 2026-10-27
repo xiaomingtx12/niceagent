@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -8,10 +10,10 @@ from typing import Any
 from injector import inject, singleton
 from langchain_core.tools import BaseTool
 
-from internal.core.mcp.adapters import build_langchain_tool
 from internal.core.mcp.entities import MCPServerConfig, MCPToolCatalog, MCPTransport
 from internal.core.mcp.security import MCPSecretCipher
 from internal.exception import NotFoundException, ValidateErrorException
+from internal.extension.logging_extension import logger
 from internal.model import MCPServer
 
 
@@ -32,6 +34,30 @@ class MCPRuntimeManager:
     """
 
     _tool_cache: dict[str, list[BaseTool]] = field(default_factory=dict, init=False)  # 工具缓存
+
+    @staticmethod
+    def _run_async(coro):
+        """在同步调用边界执行协程，兼容当前线程已有事件循环的场景。"""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(coro)
+
+        result: list[Any] = []
+        error: list[BaseException] = []
+
+        def runner() -> None:
+            try:
+                result.append(asyncio.run(coro))
+            except BaseException as exc:
+                error.append(exc)
+
+        thread = threading.Thread(target=runner)
+        thread.start()
+        thread.join()
+        if error:
+            raise error[0]
+        return result[0]
 
     @classmethod
     def build_server_config(
@@ -70,47 +96,6 @@ class MCPRuntimeManager:
         )
 
     @classmethod
-    def _build_client_config(
-        cls, server_config: MCPServerConfig
-    ) -> dict[str, dict[str, Any]]:
-        """
-        构建客户端配置
-        
-        将服务配置转换为 langchain-mcp-adapters 需要的结构
-        根据传输协议类型构建不同的配置格式
-        
-        Args:
-            server_config: 服务器配置
-            
-        Returns:
-            客户端配置字典
-        """
-        if server_config.transport == MCPTransport.STDIO:
-            # STDIO 传输配置
-            return {
-                server_config.name: {
-                    "transport": "stdio",
-                    "command": server_config.command,
-                    "args": server_config.args,
-                    "env": server_config.env or {},
-                }
-            }
-
-        # HTTP 传输配置
-        headers = {
-            header.get("key"): header.get("value")
-            for header in server_config.headers
-            if header.get("key")
-        }
-        http_config = {
-            "transport": "http",
-            "url": server_config.url,
-        }
-        if headers:
-            http_config["headers"] = headers
-        return {server_config.name: http_config}
-
-    @classmethod
     def _cache_key(cls, server_config: MCPServerConfig) -> str:
         """
         生成缓存键
@@ -127,33 +112,36 @@ class MCPRuntimeManager:
         updated_at = server_config.updated_at or datetime.min
         return f"{server_config.id}:{updated_at.isoformat()}"
 
-    async def _load_remote_tools_async(
-        self, server_config: MCPServerConfig
-    ) -> list[BaseTool]:
-        """
-        异步加载远程工具
-        
-        连接 MCP 服务器并发现可用的工具
-        
-        Args:
-            server_config: 服务器配置
-            
-        Returns:
-            远程工具列表
-            
-        Raises:
-            ValidateErrorException: 如果未安装 langchain-mcp-adapters
-        """
+    @classmethod
+    def _build_client_config(cls, server_config: MCPServerConfig) -> dict[str, dict[str, Any]]:
+        """构造 langchain-mcp-adapters 所需的单 Server 配置。"""
+        if server_config.transport == MCPTransport.STDIO:
+            return {
+                server_config.name: {
+                    "transport": "stdio",
+                    "command": server_config.command,
+                    "args": server_config.args,
+                    "env": server_config.env or {},
+                }
+            }
+        headers = {
+            header["key"]: header["value"]
+            for header in server_config.headers
+            if header.get("key")
+        }
+        config = {"transport": "http", "url": server_config.url}
+        if headers:
+            config["headers"] = headers
+        return {server_config.name: config}
+
+    async def _load_remote_tools_async(self, server_config: MCPServerConfig) -> list[BaseTool]:
+        """通过 LangChain MCP Adapter 发现远程工具。"""
         try:
             from langchain_mcp_adapters.client import MultiServerMCPClient
         except ImportError as exc:
-            raise ValidateErrorException(
-                "未安装 langchain-mcp-adapters，无法使用 MCP 功能"
-            ) from exc
-
-        # 创建 MCP 客户端并获取工具列表
+            raise ValidateErrorException("未安装 langchain-mcp-adapters，无法使用 MCP 功能") from exc
         client = MultiServerMCPClient(self._build_client_config(server_config))
-        return await client.get_tools()
+        return await asyncio.wait_for(client.get_tools(), timeout=max(1, server_config.timeout))
 
     async def _execute_remote_tool_async(
         self,
@@ -164,15 +152,18 @@ class MCPRuntimeManager:
         tools = await self._load_remote_tools_async(server_config)
         for tool in tools:
             if tool.name == tool_name:
-                return await tool.ainvoke(parameters)
+                return await asyncio.wait_for(
+                    tool.ainvoke(parameters), timeout=max(1, server_config.timeout)
+                )
         raise NotFoundException("该 MCP 工具不存在")
 
     @classmethod
-    def _build_catalog_from_tool(cls, tool: BaseTool) -> MCPToolCatalog:
+    def _build_catalog_from_tool(cls, tool: Any) -> MCPToolCatalog:
         input_schema = {}
-        if getattr(tool, "args_schema", None) is not None:
+        args_schema = getattr(tool, "args_schema", None)
+        if args_schema is not None:
             try:
-                input_schema = tool.args_schema.model_json_schema()
+                input_schema = args_schema.model_json_schema()
             except Exception:
                 input_schema = {}
         return MCPToolCatalog(
@@ -207,12 +198,13 @@ class MCPRuntimeManager:
         if force_refresh and server_config.id:
             self.invalidate(str(server_config.id))
 
-        tools = asyncio.run(self._load_remote_tools_async(server_config))
+        tools = self._run_async(self._load_remote_tools_async(server_config))
         return [self._build_catalog_from_tool(tool) for tool in tools]
 
     def list_langchain_tools(
         self, server: MCPServer | MCPServerConfig, force_refresh: bool = False
     ) -> list[BaseTool]:
+        """按服务配置版本复用目录，仅缓存未命中时记录远程加载耗时。"""
         server_config = self.build_server_config(server)
         cache_key = self._cache_key(server_config)
 
@@ -222,11 +214,12 @@ class MCPRuntimeManager:
         if cache_key in self._tool_cache:
             return self._tool_cache[cache_key]
 
-        tool_catalogs = self.discover_tools(server_config)
-        tools = [
-            build_langchain_tool(self, server_config, tool_catalog)
-            for tool_catalog in tool_catalogs
-        ]
+        started_at = time.monotonic()
+        tools = self._run_async(self._load_remote_tools_async(server_config))
+        logger.info(
+            "mcp_tool_catalog_load server_id=%s tool_count=%s duration_ms=%.2f",
+            server_config.id, len(tools), (time.monotonic() - started_at) * 1000,
+        )
         self._tool_cache[cache_key] = tools
         return tools
 
@@ -249,6 +242,6 @@ class MCPRuntimeManager:
         tool_name: str,
         parameters: dict[str, Any],
     ) -> Any:
-        return asyncio.run(
+        return self._run_async(
             self._execute_remote_tool_async(server_config, tool_name, parameters)
         )

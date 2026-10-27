@@ -3,6 +3,15 @@
 # 1.启用错误检查
 set -e
 
+# Validate the selected Sandbox provider before starting a production process.
+if [[ "${FLASK_ENV}" == "production" ]]; then
+  VALIDATION_ARGS=(--production)
+  if [[ "${BUILTIN_SCRIPT_EXECUTION_ENABLED,,}" == "true" ]]; then
+    VALIDATION_ARGS+=(--require-sandbox)
+  fi
+  python scripts/validate_deepagents_v2.py "${VALIDATION_ARGS[@]}"
+fi
+
 # 2.判断是否启用的迁移数据同步，如果是则将数据库迁移同步到数据库中
 if [[ "${MIGRATION_ENABLED}" == "true" ]]; then
   echo "Runnable migrations"
@@ -24,7 +33,7 @@ else
       --bind "${LLMOPS_BIND_ADDRESS:-0.0.0.0}:${LLMOPS_PORT:-5001}" \
       --workers ${SERVER_WORKER_AMOUNT:-1} \
       --worker-class ${SERVER_WORKER_CLASS:-gthread} \
-      --threads ${SERVER_THREAD_AMOUNT:-2} \
+      --threads ${SERVER_THREAD_AMOUNT:-8} \
       --timeout ${GUNICORN_TIMEOUT:-600} \
       --preload \
       app.http.app:app

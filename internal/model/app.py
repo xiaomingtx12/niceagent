@@ -14,11 +14,9 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 
 from internal.entity.app_entity import AppConfigType, DEFAULT_APP_CONFIG, AppStatus
-from internal.entity.conversation_entity import InvokeFrom
 from internal.entity.platform_entity import WechatConfigStatus
 from internal.extension.database_extension import db
 from internal.lib.helper import generate_random_string
-from .conversation import Conversation
 from .platform import WechatConfig
 
 
@@ -33,12 +31,9 @@ class App(db.Model):
     )
 
     id = Column(UUID, server_default=text("uuid_generate_v4()"), nullable=False)
-    account_id = Column(UUID, nullable=False)
+    account_id = Column(UUID, nullable=False)  # 应用所有者的 Account.id；不代表应用使用者
     app_config_id = Column(UUID, nullable=True)  # 发布配置id，当值为空时代表没有发布
     draft_app_config_id = Column(UUID, nullable=True)  # 关联的草稿配置id
-    debug_conversation_id = Column(
-        UUID, nullable=True
-    )  # 应用调试会话id，为None则代表没有会话信息
     name = Column(String(255), default="", nullable=False)
     icon = Column(String(255), default="", nullable=False)
     description = Column(Text, default="", nullable=False)
@@ -83,40 +78,6 @@ class App(db.Model):
             db.session.commit()
 
         return app_config_version
-
-    @property
-    def debug_conversation(self) -> "Conversation":
-        """获取应用的调试会话记录"""
-        # 1.根据debug_conversation_id获取调试会话记录
-        debug_conversation = None
-        if self.debug_conversation_id is not None:
-            debug_conversation = (
-                db.session.query(Conversation)
-                .filter(
-                    Conversation.id == self.debug_conversation_id,
-                    Conversation.invoke_from == InvokeFrom.DEBUGGER,
-                )
-                .one_or_none()
-            )
-
-        # 2.检测数据是否存在，如果不存在则创建
-        if not self.debug_conversation_id or not debug_conversation:
-            # 3.开启数据库自动提交上下文
-            with db.auto_commit():
-                # 4.创建应用调试会话记录并刷新获取会话id
-                debug_conversation = Conversation(
-                    app_id=self.id,
-                    name="New Conversation",
-                    invoke_from=InvokeFrom.DEBUGGER,
-                    created_by=self.account_id,
-                )
-                db.session.add(debug_conversation)
-                db.session.flush()
-
-                # 5.更新当前记录的debug_conversation_id
-                self.debug_conversation_id = debug_conversation.id
-
-        return debug_conversation
 
     @property
     def token_with_default(self) -> str:
@@ -186,12 +147,15 @@ class AppConfig(db.Model):
     model_config = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 模型配置
-    dialog_round = Column(
-        Integer, nullable=False, server_default=text("0")
-    )  # 鞋带上下文轮数
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 预设prompt
+    skills = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 平台内置 Skill 绑定引用
+    subagents = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # DeepAgents 同步 sub-agent 团队配置
     tools = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 应用关联工具列表
@@ -211,6 +175,9 @@ class AppConfig(db.Model):
     opening_questions = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 开场白建议问题列表
+    user_input = Column(
+        JSONB, nullable=False, server_default=text("'{\"enable\": true}'::jsonb")
+    )  # 主 Agent 向用户提问的交互配置
     speech_to_text = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 语音转文本配置
@@ -222,9 +189,6 @@ class AppConfig(db.Model):
         nullable=False,
         server_default=text("'{\"enable\": true}'::jsonb"),
     )  # 回答后生成建议问题
-    review_config = Column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )  # 审核配置
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -261,12 +225,15 @@ class AppConfigVersion(db.Model):
     model_config = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 模型配置
-    dialog_round = Column(
-        Integer, nullable=False, server_default=text("0")
-    )  # 鞋带上下文轮数
     preset_prompt = Column(
         Text, nullable=False, server_default=text("''::text")
     )  # 人设与回复逻辑
+    skills = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # 平台内置 Skill 绑定引用
+    subagents = Column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )  # DeepAgents 同步 sub-agent 团队配置
     tools = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 应用关联的工具列表
@@ -288,6 +255,9 @@ class AppConfigVersion(db.Model):
     opening_questions = Column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )  # 开场白建议问题列表
+    user_input = Column(
+        JSONB, nullable=False, server_default=text("'{\"enable\": true}'::jsonb")
+    )  # 主 Agent 向用户提问的交互配置
     speech_to_text = Column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )  # 语音转文本配置
@@ -299,9 +269,6 @@ class AppConfigVersion(db.Model):
         nullable=False,
         server_default=text("'{\"enable\": true}'::jsonb"),
     )  # 回答后生成建议问题
-    review_config = Column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
-    )  # 审核配置
     version = Column(Integer, nullable=False, server_default=text("0"))  # 发布版本号
     config_type = Column(
         String(255), nullable=False, server_default=text("''::character varying")

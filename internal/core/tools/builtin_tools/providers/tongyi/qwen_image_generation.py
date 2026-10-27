@@ -2,7 +2,7 @@
 import os
 from typing import Optional, Type
 
-import dashscope
+import requests
 from dashscope import MultiModalConversation
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.tools import BaseTool
@@ -27,7 +27,7 @@ class QwenImageGenerationTool(BaseTool):
     
     model: str = "qwen-image-max"
     size: str = "1664*928"
-    api_key: Optional[str] = None
+    api_key: Optional[str] = Field(default=None, exclude=True, repr=False)
 
     def _run(
         self,
@@ -43,10 +43,10 @@ class QwenImageGenerationTool(BaseTool):
         Returns:
             生成的图像URL
         """
-        # 设置API密钥（必须通过参数传递，不再从环境变量获取）
-        api_key = self.api_key
+        # 显式注入优先，部署凭据与其他内置插件保持一致。
+        api_key = self.api_key or os.getenv("DASHSCOPE_API_KEY")
         if not api_key:
-            return "错误: 未配置 DashScope API 密钥，请先在设置中添加"
+            return "配置错误：请配置 DASHSCOPE_API_KEY 后使用图像生成。"
         
         try:
             # 构建消息
@@ -68,14 +68,15 @@ class QwenImageGenerationTool(BaseTool):
                 stream=False,
                 watermark=False,
                 prompt_extend=True,
-                size=self.size
+                size=self.size,
+                request_timeout=60,
             )
             
             # 检查响应状态
             if response.status_code != 200:
                 return (
                     f"图像生成失败: status_code={response.status_code}, "
-                    f"code={response.code}, message={response.message}"
+                    "请检查服务凭据、模型可用性和配额。"
                 )
             
             # 提取图像URL
@@ -91,8 +92,8 @@ class QwenImageGenerationTool(BaseTool):
             
             return "错误: 图像生成响应中未找到结果"
                 
-        except Exception as e:
-            return f"调用DashScope图像生成API失败: {str(e)}"
+        except (requests.RequestException, ValueError):
+            return "图像生成失败，请检查服务配置和网络后重试。"
 
 
 @add_attribute("args_schema", QwenImageGenerationArgsSchema)
